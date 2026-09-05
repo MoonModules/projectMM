@@ -583,7 +583,7 @@ A noise field decides where light is born, a curl flow decides where it goes, an
 
 The cloud is held at 16 bits and narrowed once on the way out, dithered temporally, which is what keeps a slow fade smooth rather than stepped.
 
-Origin: projectMM original, composing the noise-field and curl-flow kernels
+Origin: projectMM original, composing the noise-field and curl-flow kernels: the contrast window is Aurora's, in the shader vocabulary Stefan Petrick made recognizable in the LED world, and the flow is Bridson's curl noise (SIGGRAPH 2007)
 
 <a id="trails"></a>
 

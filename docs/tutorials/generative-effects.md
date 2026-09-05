@@ -6,9 +6,10 @@ to "I want to keep watching it".
 
 This page is about the other way. projectMM ships a set of **power functions**:
 the handful of algorithms that computer graphics has used for forty years to make
-things look alive. You do not implement them, you compose them. And because every
-one of them is available to **MoonLive** scripts as well as to compiled C++, a
-few dozen lines of script gets you an effect that would otherwise be a project.
+things look alive. You do not implement them, you compose them. And because most of
+that vocabulary is reachable from **MoonLive** scripts as well as from compiled
+C++, a few dozen lines of script gets you an effect that would otherwise be a
+project.
 
 > Never opened the interface? Start with **[Install & first light](../gettingstarted.md)**
 > and **[How projectMM works](how-projectmm-works.md)**, then come back.
@@ -120,6 +121,14 @@ That is **Aurora**: a few layers of warped noise, each drifting on its own clock
 read around the center instead of across the grid, with a contrast window that
 pushes most of the field to black so distinct curtains survive.
 
+Every technique on this page is a published one, credited to the people named
+throughout. **Stefan Petrick** is the person who brought that shader vocabulary to
+LED panels and showed what it does there, through
+[Animartrix](https://github.com/StefanPetrick/animartrix), FunkyNoise and
+ColorTrails: noise read in polar coordinates, layers on independent oscillators, a
+contrast window that turns a soft field into distinct curtains, emitters carried by
+a flow field. That is the tradition this page's effects sit in.
+
 ---
 
 ## 5. From lines to fields: the ladder
@@ -184,10 +193,17 @@ allocates it, and the blit happens for you.
 
 ## 7. Compiled or scripted
 
-Most of the vocabulary above exists twice: as a C++ kernel, and as a MoonLive builtin. Same
-algorithm, same numbers. Not all of it, though: `line`, `circle`, the noise family and the whole
-transport set are scriptable, while `disc`, `sphere`, `text`, `sprite`, the SDF catalog and the
-fluid solver are compiled-only for now.
+Much of the vocabulary above exists twice: as a C++ kernel, and as a MoonLive builtin. Same
+algorithm, same numbers. The shapes are worth knowing, though, because they are not identical.
+
+The noise family (`noise`, `fbm`, `warp`), `line`, `circle` and the palette calls are the same
+function under both names. The **transport** kernels are reached differently: `advect16`, `decay16`,
+`quantize`, `blit16`, `upscale16` and `halfLifeKeep` are compiled-only, and a script uses them
+through six builtins that wrap them, `trail(1)`, `flowNoise`, `flowCurl`, `trailDecay`, `emitTrail`
+and `fieldRate`. That is deliberate: a script names a wind and a persistence, and the binding owns
+the planes, the ping-pong and the narrowing, which is what keeps a whole-plane operation one host
+call rather than one per light. Compiled-only for now: `disc`, `sphere`, `text`, `sprite`, the SDF
+catalog and the fluid solver.
 
 **MoonLive** is projectMM's scripting language. Scripts are compiled to native
 code on the device, so a script is not interpreted per pixel: it runs at machine
@@ -233,11 +249,16 @@ void tick() {
 
 Three kernel calls and a loop. That is a fluid-looking effect.
 
-**Which to use.** Script first, always: you can iterate in seconds and you cannot
-crash the device. Move to C++ when you need something the vocabulary does not
-have, or when you are writing a per-light loop on a very large fixture and the
-script boundary starts to cost (a script call per light is thousands of crossings
-per frame; `fieldRate(n)` exists precisely to make that affordable).
+**Which to use.** Script first, always: you iterate in seconds instead of minutes,
+and a script that fails to compile leaves the previous one running rather than
+taking the device down. It is bounded rather than sandboxed, though. A script gets
+a fixed member budget and a fixed number of live variables, and the compiler
+refuses a script that exceeds them; what it cannot refuse is a per-light loop too
+expensive for the fixture, which shows up as a slow frame rate and, on a large
+grid, can starve the network stack enough that the web UI stops answering while
+the lights keep running. Move to C++ when you need something the vocabulary does
+not have, or when the per-light cost is the problem (`fieldRate(n)` exists
+precisely to make a per-light loop affordable on a big fixture).
 
 ---
 

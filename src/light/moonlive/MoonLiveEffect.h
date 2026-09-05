@@ -185,6 +185,10 @@ public:
         script_.engine().free();   // release the exec block: the destructor role
         script_.invalidate();     // and forget what was compiled, so re-enabling rebuilds it
         script_.releaseReporting(*this);
+        // Forget the trail's shape as well as its memory: EffectBase frees the buffers, but a
+        // stale trailW_/H_/D_ would make the next prepare() compare the new geometry against a
+        // shape whose planes no longer exist, and skip the clear it should have done.
+        releaseTrail();
         EffectBase::release();
     }
 
@@ -253,6 +257,7 @@ private:
         if (n == had && (w != trailW_ || h != trailH_ || d != trailD_)) {
             std::memset(trailA_.data(), 0, trailA_.bytes());
             std::memset(trailB_.data(), 0, trailB_.bytes());
+            std::memset(trailCarry_.data(), 0, trailCarry_.bytes());   // per light, so it reshapes too
         }
         trailW_ = w; trailH_ = h; trailD_ = d;
         return true;

@@ -67,6 +67,10 @@ public:
         if (n > 0 && n == had && (w != planeW_ || h != planeH_ || d != planeD_)) {
             std::memset(dyeA_.data(), 0, dyeA_.bytes());
             std::memset(dyeB_.data(), 0, dyeB_.bytes());
+            // The dither's error is per LIGHT, so it is laid out for the old geometry as much as
+            // the dye is: carrying it into the new shape seeds the first frames with another
+            // picture's rounding.
+            if (carry_) std::memset(carry_.data(), 0, carry_.bytes());
         }
         planeW_ = w; planeH_ = h; planeD_ = d;
         started_ = false;

@@ -531,18 +531,27 @@ inline void scroll(const Canvas& cv, uint8_t axis, int delta, bool wrap = false)
     const size_t cpl = cv.cpl;
     const size_t rowBytes = static_cast<size_t>(cv.dims.x) * cpl;
     const size_t sliceBytes = static_cast<size_t>(cv.dims.y) * rowBytes;
-    size_t step = 0, lineCount = 0, lineStride = 0;
+    //
+    // A line's base is `outer * outerStride + inner * innerStride`, two nested counts rather than
+    // one: along Y the lines are the (z, x) columns, and those are NOT evenly spaced by a single
+    // stride (x steps by cpl within a slice, z steps by a whole slice). Collapsing them to one
+    // counter scrolled the first column of each slice and left every other column standing.
+    size_t step = 0, outer = 0, outerStride = 0, inner = 1, innerStride = 0;
     switch (axis) {
-        case 0: step = cpl;        lineCount = static_cast<size_t>(cv.dims.y) * cv.dims.z; lineStride = rowBytes;   break;
-        case 1: step = rowBytes;   lineCount = cv.dims.z;                                  lineStride = sliceBytes; break;
-        default: step = sliceBytes; lineCount = 1;                                         lineStride = 0;          break;
+        case 0:  step = cpl;        outer = static_cast<size_t>(cv.dims.y) * cv.dims.z; outerStride = rowBytes;
+                 inner = 1;         innerStride = 0;                                                            break;
+        case 1:  step = rowBytes;   outer = cv.dims.z;                                  outerStride = sliceBytes;
+                 inner = cv.dims.x; innerStride = cpl;                                                          break;
+        default: step = sliceBytes; outer = cv.dims.y;                                  outerStride = rowBytes;
+                 inner = cv.dims.x; innerStride = cpl;                                                          break;
     }
+    const size_t lineCount = outer * inner;
 
     // One cell of scratch is enough for the wrapping case if we rotate in place, but a rotation by
     // an arbitrary amount needs somewhere to hold the part that wraps around. The largest run we
     // ever hold is one line, and a line is at most the grid's longest axis.
     for (size_t line = 0; line < lineCount; line++) {
-        uint8_t* base = cv.data + line * lineStride;
+        uint8_t* base = cv.data + (line / inner) * outerStride + (line % inner) * innerStride;
         // Skip a line that would read past the buffer rather than abandoning the whole scroll: a
         // dims/buffer mismatch should cost that line, not leave every later line unscrolled.
         if (base + static_cast<size_t>(extent - 1) * step + cpl > cv.data + cv.bytes) continue;

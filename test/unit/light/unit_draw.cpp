@@ -728,3 +728,36 @@ TEST_CASE("blit16 narrows a wide plane to the canvas, and dithering carries the 
     CHECK(higher > 0);                            // the carry reaches the step above
     CHECK(higher < 8);                            // but not on every frame: it is a ratio, not a bias
 }
+
+TEST_CASE("scrolling along y moves every column, and along z every cell of the volume") {
+    // The lines of a y-scroll are the (z, x) COLUMNS, and those are not evenly spaced by one
+    // stride: x steps by a light within a slice, z steps by a whole slice. Treating them as one
+    // evenly-spaced sequence scrolled the first column of each slice and left the rest standing,
+    // which reads as a partial scroll nobody would call a scroll.
+    Buffer buf; REQUIRE(buf.allocate(9, 3)); buf.clear();
+    const draw::Canvas cv = draw::Canvas::of(buf, 3, 3, 1);
+    for (lengthType y = 0; y < 3; y++)
+        for (lengthType x = 0; x < 3; x++)
+            draw::pixel(cv, {x, y, 0}, RGB{static_cast<uint8_t>(10 * (y + 1)), static_cast<uint8_t>(x + 1), 0});
+    draw::scroll(cv, 1, 1, true);                     // rotate down by one row
+    for (lengthType x = 0; x < 3; x++) {              // EVERY column rotated, and kept its own tag
+        CHECK(buf.data()[(size_t(0) * 3 + x) * 3] == 30);
+        CHECK(buf.data()[(size_t(1) * 3 + x) * 3] == 10);
+        CHECK(buf.data()[(size_t(2) * 3 + x) * 3] == 20);
+        CHECK(buf.data()[(size_t(0) * 3 + x) * 3 + 1] == x + 1);
+    }
+
+    // The z axis has the same shape: its lines are the (y, x) cells, one per column of the volume.
+    Buffer vol; REQUIRE(vol.allocate(8, 3)); vol.clear();
+    const draw::Canvas cube = draw::Canvas::of(vol, 2, 2, 2);
+    for (lengthType z = 0; z < 2; z++)
+        for (lengthType y = 0; y < 2; y++)
+            for (lengthType x = 0; x < 2; x++)
+                draw::pixel(cube, {x, y, z}, RGB{static_cast<uint8_t>(z + 1), 0, 0});
+    draw::scroll(cube, 2, 1, true);                   // swap the two slices
+    for (lengthType y = 0; y < 2; y++)
+        for (lengthType x = 0; x < 2; x++) {
+            CHECK(vol.data()[((size_t(0) * 2 + y) * 2 + x) * 3] == 2);   // the far slice came near
+            CHECK(vol.data()[((size_t(1) * 2 + y) * 2 + x) * 3] == 1);
+        }
+}

@@ -726,9 +726,15 @@ def main() -> int:
         # effect/modifier with no list entry is silently never captured (how
         # GameOfLife/MultiplyModifier/CheckerboardModifier went imageless).
         listed = {t for t, *_ in MODULES}
+        # Filtered against what the RUNNING server offers, not just what main.cpp registers: a type
+        # the server does not have (a capability-gated driver, a different firmware) would be handed
+        # to add_module and fail. That is what the three add_module failures in the first full sweep
+        # were.
+        offered = set(server_types) if server_types else None
         uncaptured = sorted(
             t for t in source_registered_types()
-            if ("Effect" in t or "Modifier" in t) and t not in listed)
+            if ("Effect" in t or "Modifier" in t) and t not in listed
+            and (offered is None or t in offered))
         if uncaptured and args.all_registered:
             # Capture them anyway: an effect goes on a Layer, a modifier on a Layer, both want a
             # GIF. The hand-kept list stays for the ones that need special props or a parent that
