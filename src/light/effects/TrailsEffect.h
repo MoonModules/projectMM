@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/oscillators.h"        // OscillatorBank: the emitters' motion and the breathing
 #include "light/effects/EffectBase.h"
 
 namespace mm {
@@ -25,19 +24,30 @@ namespace mm {
 // ACCUMULATOR, not in the frame buffer.
 //
 // Cost: one advect (a bilinear sample per light) plus one noise sample per light for the flow, so
-// the flow rule dominates. Volumetric: on a cube every slice is carried, and the flow's third
-// component moves the trail through the volume rather than repeating a plane.
+// the flow rule dominates. Volumetric: on a cube every slice gets its OWN flow, sampled at that
+// slice's depth, so the slices differ rather than one plane repeating. Light is carried WITHIN a
+// slice and not yet between them: `advect16`'s rule yields vx and vy only, so a trail does not
+// travel through the volume. 3D transport needs a trilinear sampler and a vz, which is its own
+// change.
 // @card TrailsEffect.png
 /// Effect: bright dots thrown into a flowing medium, leaving tails the flow carries and bends.
 class TrailsEffect : public EffectBase {
 public:
     const char* tags() const override { return "💫🖌️"; }   // power-function showcase
-    Dim dimensions() const override { return Dim::D3; }   // volumetric: the flow moves through z
+    Dim dimensions() const override { return Dim::D3; }   // per-slice: each slice gets its own flow
 
     static constexpr uint8_t kMaxDots = 8;
+    static constexpr uint32_t kMaxEmitters = 64;   ///< the ceiling once `dots` is scaled by the grid
+
+    /// The head's radius for a fixture: one light on a panel, larger as the grid grows, capped so a
+    /// wall does not spend the frame drawing one head.
+    static lengthType spanRadius(lengthType span) {
+        const lengthType r = static_cast<lengthType>(span / 256 + 1);
+        return r > 4 ? 4 : r;
+    }
 
     uint8_t speed      = 40;   // how fast the medium moves, and with it every tail
-    uint8_t dots       = 3;    // how many emitters are throwing light in
+    uint8_t dots       = 3;    // emitter DENSITY: the count scales with the grid (see emitDots)
     uint8_t scale      = 30;   // the flow field's cell size: low = broad sweeps, high = eddies
     uint8_t persistence = 90;  // how long a tail survives, as a half-life (see halfLifeMs)
     uint8_t breathe    = 40;   // how much the flow's strength rises and falls
@@ -151,8 +161,11 @@ private:
         const int32_t ny = static_cast<int32_t>(inoise16(fx + 0x9E37u, fy + 0x7C15u, fz)) - 32768;
         // strength is the breathing multiplier in 1/256ths; step is the frame's travel budget.
         const int32_t amp = static_cast<int32_t>(step) * strength / 256;
-        vx = static_cast<draw::pos_t>((nx * amp) >> 15);
-        vy = static_cast<draw::pos_t>((ny * amp) >> 15);
+        // 64-bit for the product, as curl16 carries for the same reason: `amp` grows with a
+        // stalled dt, and a signed 32-bit multiply wraps rather than saturating, which reverses the
+        // flow instead of merely overdriving it.
+        vx = static_cast<draw::pos_t>((static_cast<int64_t>(nx) * amp) >> 15);
+        vy = static_cast<draw::pos_t>((static_cast<int64_t>(ny) * amp) >> 15);
     }
 
     /// The heads: a few bright points walking their own paths, each on the palette.
@@ -167,12 +180,24 @@ private:
     /// value and fires on a budget, with the remainder carried, which is the pattern
     /// ParticlesEffect already uses for its fade.
     void emitDots(uint16_t* plane, lengthType w, lengthType h, lengthType d, uint32_t dt) {
-        const uint8_t n = dots < 1 ? 1 : (dots > kMaxDots ? kMaxDots : dots);
+        // `dots` is a DENSITY, not a count: the emitters scale with the fixture, because a handful
+        // of heads that fill a 64x64 panel are lost on a wall. Measured against the script, which
+        // already did this: three fixed dots put 1/567th of the light on a 768x348 panel.
+        const lengthType span = w > h ? w : h;
+        const lengthType rad = spanRadius(span);
+        const uint32_t area = static_cast<uint32_t>(rad * 2 + 1) * (rad * 2 + 1);
+        const uint8_t want = dots < 1 ? 1 : (dots > kMaxDots ? kMaxDots : dots);
+        uint32_t scaled = static_cast<uint32_t>(want) * w * h / (4096u * (area > 8u ? area / 9u : 1u));
+        if (scaled < 1) scaled = 1;
+        if (scaled > kMaxEmitters) scaled = kMaxEmitters;
+        const uint8_t n = static_cast<uint8_t>(scaled);
         constexpr uint32_t kReferenceMs = 20;
         emitCarry_ += dt;
         if (emitCarry_ < kReferenceMs) return;      // not enough time has passed for a head yet
-        // Consume whole ticks and keep the remainder, so no time is lost to truncation and a slow
-        // frame does not emit a burst.
+        // One head per frame at most, and the remainder carries: a slow frame must not emit the
+        // burst it owes, because every head is a full disc and a stall would flood the plane. Below
+        // 50 fps this does cost heads (30/s at 30 fps against 50/s above 50), which is the trade
+        // taken deliberately; Fluid's jets cap the same debt rather than dropping it.
         emitCarry_ %= kReferenceMs;
         const uint32_t walk = bank_.unitValue(0);
         for (uint8_t i = 0; i < n; i++) {
@@ -187,7 +212,7 @@ private:
                                            static_cast<uint8_t>(i * (255u / n) + (walk >> 9)));
             // Written at the plane's width, so a head starts at full precision and the decay has
             // somewhere to go: writing a byte would put the whole tail in the top 8 bits.
-            writeWide(plane, w, h, d, px, py, pz, c);
+            writeWide(plane, w, h, d, px, py, pz, c, rad);
         }
     }
 
@@ -201,12 +226,24 @@ private:
     /// One light at the plane's full width: an 8-bit color widened by repeating the byte, so 255
     /// becomes 65535 rather than 65280 and a full-brightness head is genuinely full.
     static void writeWide(uint16_t* plane, lengthType w, lengthType h, lengthType d,
-                          lengthType x, lengthType y, lengthType z, RGB c) {
-        if (x < 0 || y < 0 || z < 0 || x >= w || y >= h || z >= d) return;
-        const size_t off = (static_cast<size_t>(z) * h * w + static_cast<size_t>(y) * w + x) * 3;
-        plane[off + 0] = static_cast<uint16_t>((c.r << 8) | c.r);
-        plane[off + 1] = static_cast<uint16_t>((c.g << 8) | c.g);
-        plane[off + 2] = static_cast<uint16_t>((c.b << 8) | c.b);
+                          lengthType x, lengthType y, lengthType z, RGB c, lengthType rad) {
+        // A DISC, not a pixel. Advection spreads a head bilinearly, so after N frames one light's
+        // worth of brightness covers roughly N pixels: a single-pixel head on a multi-second tail
+        // arrives at about 1 part in 255 and the panel reads as a faint smear. The radius grows
+        // with the fixture, because the area a tail is spread over does too.
+        const lengthType rz = d > 1 ? rad : 0;
+        for (lengthType dz = -rz; dz <= rz; dz++)
+            for (lengthType dy = -rad; dy <= rad; dy++)
+                for (lengthType dx = -rad; dx <= rad; dx++) {
+                    if (dx * dx + dy * dy + dz * dz > rad * rad) continue;
+                    const lengthType px = x + dx, py = y + dy, pz = z + dz;
+                    if (px < 0 || py < 0 || pz < 0 || px >= w || py >= h || pz >= d) continue;
+                    const size_t off = (static_cast<size_t>(pz) * h * w
+                                      + static_cast<size_t>(py) * w + px) * 3;
+                    plane[off + 0] = static_cast<uint16_t>((c.r << 8) | c.r);
+                    plane[off + 1] = static_cast<uint16_t>((c.g << 8) | c.g);
+                    plane[off + 2] = static_cast<uint16_t>((c.b << 8) | c.b);
+                }
     }
 
 

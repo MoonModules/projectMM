@@ -194,3 +194,31 @@ TEST_CASE("Fluid ticks dark rather than crashing on the frame between a release 
     CHECK(lit);
 }
 
+
+TEST_CASE("Fluid reshaped to the same light count starts from black rather than the old layout's dye") {
+    // 8x16 to 16x8: the sample count is identical, so resize() keeps the buffer and its contents,
+    // which are laid out for the OLD geometry. Both planes must be cleared, because the ping-pong
+    // swaps the spare one in on the very next frame. Trails and Nebula carry the same guard.
+    //
+    // The check reads the planes through prepare() alone, with no tick in between: a rendered frame
+    // pours fresh dye on top and would hide a stale plane behind it.
+    golden::ScopedTestClock clock(1000);
+    Layouts layouts; GridLayout grid; Layer layer; FluidEffect effect;
+    grid.width = 8; grid.height = 16; grid.depth = 1;
+    layouts.addChild(&grid);
+    layer.setLayouts(&layouts);
+    layer.setChannelsPerLight(3);
+    layer.addChild(&effect);
+    layer.applyState();
+    for (uint16_t i = 0; i < 40; i++) { platform::setTestNowMs(1000 + i * 20u); layer.tick(); }
+
+    uint64_t before = 0;
+    for (size_t k = 0; k < effect.dyeSamples(); k++) before += effect.dyeAt(k);
+    REQUIRE(before > 0);                           // there is dye that could carry over
+
+    grid.width = 16; grid.height = 8;              // the same count, transposed
+    layer.applyState();
+    uint64_t after = 0;
+    for (size_t k = 0; k < effect.dyeSamples(); k++) after += effect.dyeAt(k);
+    CHECK(after == 0);                             // both planes cleared for the new geometry
+}

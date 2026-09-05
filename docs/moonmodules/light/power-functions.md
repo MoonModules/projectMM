@@ -124,13 +124,38 @@ One sample is a soft blur; the character comes from composing them. Summing octa
 
 | Power function | What it does | Effects | Modifiers |
 |---|---|---|---|
-| `inoise8` | Perlin gradient noise in 1D, 2D or 3D: a smooth, deterministic pseudo-random field | Noise, Noise2D, NoiseMeter, Wave | `noise` |
-| `fbm8` | Sums noise octaves at doubling frequency and halving amplitude, turning a blur into cloud and terrain structure. Re-widened per octave count, so the field keeps its full range however many are summed | PolarNoise, Tunnel, Aurora | `fbm` |
+| `inoise8` | Perlin gradient noise in 1D, 2D or 3D: a smooth, deterministic pseudo-random field | Noise, NoiseMeter, Wave | `noise` |
+| `fbm8` | Sums noise octaves at doubling frequency and halving amplitude, turning a blur into cloud and terrain structure. Re-widened per octave count, so the field keeps its full range however many are summed | PolarNoise, Tunnel, Aurora, Nebula | `fbm` |
 | `warp8` | Samples noise at a coordinate that noise itself displaced — the flowing, marbled look | PolarNoise, Aurora | `warp` |
 | `turbulence8` | Sums the folded absolute value of noise, whose creases read as billowing smoke and flame | *(no caller yet)* | — |
 | `blobCentres` + `blobField` | Orbits N sources on sine paths and sums their inverse-square falloff — the metaball field behind anything fluid or molten | LavaLamp, Metaballs | — |
+| `curl16` | The perpendicular gradient of a noise potential: a flow field that is divergence-free by construction, so what it carries neither piles up nor drains away | Nebula, Trails | — |
+| `Fluid` | A stable-fluid solver (Stam 1999) in Q16.16: the medium works out its own motion rather than reading it from a function, one independent medium per depth slice | Fluid | — |
 
 </div>
+
+## Transport
+
+A field says where things go; these carry light along one, frame after frame. The state they move is
+the effect's own plane rather than the layer buffer, held at 16 bits because a value multiplied by
+slightly less than one many times a second has nowhere to go at 8.
+
+Each takes a depth, so a cube is the same call as a panel and a panel pays nothing for it (`d = 1`
+reduces to the 2D loop exactly). What that buys on a cube differs by kernel: the noise fields sample
+a genuine third axis, so slices differ rather than one plane repeating, while the transport kernels
+carry light WITHIN each slice and not yet between them. Moving light through a volume needs a
+trilinear sampler and a third velocity component, which is open work.
+
+<div class="mm-pf" markdown="1">
+
+| Power function | What it does | Effects | Modifiers |
+|---|---|---|---|
+| `draw::advect`, `advect16` | Moves a whole plane along a velocity rule by sampling BACKWARD, so every destination is written exactly once and nothing tears or duplicates | Trails, Nebula, Fluid | — |
+| `draw::decay`, `decay16` | Fades a plane by a HALF-LIFE in milliseconds, so a tail's length is stated in seconds and holds at any framerate | Trails, Nebula, Fluid | — |
+| `draw::quantize` | Narrows 16 bits to 8, carrying the error into the next frame (temporal) or offsetting by a Bayer cell (ordered), so a slow fade stays smooth rather than stepping | through `blit16` | — |
+| `draw::blit16` | A 16-bit plane onto the canvas, dithered: the one narrowing step every wide-plane effect shares | Trails, Nebula, Fluid, MoonLive scripts | — |
+| `draw::upscale16` | Bilinearly stretches a small plane over a large one, so a smooth field can be computed at a fraction of the resolution (measured 3.0x at half, 6.6x at quarter) | Nebula | — |
+| `halfLifeKeep` | What fraction of a value survives a given elapsed time at a given half-life: the framerate-independent decay both `decay` forms are built on | through `decay` | — |
 
 ## Polar and geometry math
 
@@ -166,7 +191,7 @@ The framerate rule lives here too: everything in this group is driven by elapsed
 | Power function | What it does | Effects | Modifiers |
 |---|---|---|---|
 | `sin16` / `cos16` | 16-bit oscillators, smooth where the 8-bit forms visibly step on a large fixture | Echo, SdfShapes | — |
-| `OscillatorBank` | N independent low-frequency oscillators advanced once per frame and read per pixel, each with its own rate, shape, range and phase offset. Their phases are held together, so oscillators sharing a rate keep their relationship for as long as the device runs | Aurora, PolarNoise | — |
+| `OscillatorBank` | N independent low-frequency oscillators advanced once per frame and read per pixel, each with its own rate, shape, range and phase offset. Their phases are held together, so oscillators sharing a rate keep their relationship for as long as the device runs | Aurora, PolarNoise, Trails, Nebula, Fluid | — |
 | `map32` | Maps a value between ranges, clamped, with the fencepost handled once so the last column is never lost | FreqMatrix, FreqSaws, GEQ, GEQ3D, Spectrum, StarField | — |
 | `hashInt` | Hashes position and time to a random-looking but reproducible value, so devices agree without exchanging anything | Dissolve, WaterRipple | — |
 | `peakHold` | Rises instantly to a new high then decays slowly — the falling peak dot every VU meter has | Spectrum | — |

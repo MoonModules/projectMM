@@ -32,12 +32,12 @@ Five hard limits, all found by hitting them:
 
 | limit | value | where |
 |---|---|---|
-| script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:132` |
+| script state | **64 bytes** shared by all members | `kCtrlBytes`, `MoonLiveBuiltins.h:188` |
 | distinct members | **8** | `kMaxCtrls`, same file |
-| branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:201` |
+| branch labels | **16** (an `if` or `for` takes up to 2) | `kIrLabels`, `MoonLiveIr.h:228` |
 | frame slots | **32**, shared by live variables, loop counters and staged call arguments ✅ | `kMaxLocals`, `MoonLiveIr.h` |
 | ~~numeric types~~ | ~~`uint8_t`, `uint16_t`, `int16_t`~~ → **`int`, `byte`, `bool`, `fixed`, `string`** ✅ | still no float: `fixed` is Q16.16 |
-| ~~builtin table~~ | ~~16, and 16 used~~ → **64** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
+| ~~builtin table~~ | ~~16, and 16 used~~ → **96** ✅ | `BuiltinTable::kMax` — raised, with an overflow assert |
 
 The branch budget was binary-searched with generated scripts: **6 `if`/`else` + 2 `for` compiles,
 7 does not.** The state budget is what caps the balls effect at 4 balls rather than 25 — six fields
@@ -97,8 +97,7 @@ than "add a language feature":
 3. **Typed multi-argument host calls** (≤ 6 args, optional return). Today a builtin takes one
    `uint32_t` and returns one, which is why `line()` had to be given a bespoke seven-argument
    staging path and why most of the library is inexpressible.
-4. **Script symbols** `x/y/z/w/h/d/time` — already threaded to the runtime entry point, needing
-   only grammar exposure.
+4. ✅ **Script symbols** — SHIPPED as `t`, `width`, `height`, `depth`, `xPos`, `yPos`, `zPos`.
 5. **Two entry shapes:** `frame()` for composing kernels (the scalable path) and `pixel(x,y,z)`
    for per-pixel ergonomics (honest ceiling around 32×32).
 6. **Stateful handles** — a `Pool`, a `BeatPhase` — script-declared, arena-allocated at compile
@@ -217,13 +216,17 @@ Ordered by **what removing it buys**, not by implementation cost.
 and it failed SILENTLY: `add()` returned false, no caller checked it, and the next builtin would
 have surfaced as "unknown function" in a script with nothing pointing at the cause.
 
-Now 64 (what the power-functions spec asks for), with `MM_ASSERT_NO_BUILTIN_OVERFLOW` so a dropped
+Now 96 (what the power-functions spec asks for), with `MM_ASSERT_NO_BUILTIN_OVERFLOW` so a dropped
 registration is loud at startup rather than silent. This gated every other builtin; the palette
 work below went in immediately behind it.
 
-### 2. Typed multi-argument host calls — *the library's blocker*
+### 2. Typed multi-argument host calls — ✅ SHIPPED
 
-A builtin takes one `uint32_t` and returns one. `line()` needed a bespoke seven-argument staging
+SHIPPED: a builtin takes `const uintptr_t* args` with arities up to seven, plus typed flags
+(`fixedArgs`, `fixedReturn`, `byRef`, `byStr`), and `emit` uses all seven. The paragraph below is the
+problem as it stood before that.
+
+A builtin took one `uint32_t` and returned one. `line()` needed a bespoke seven-argument staging
 path to exist at all, and most of the power-functions surface cannot be expressed without this.
 The spec asks for ≤ 6 arguments plus an optional return.
 
@@ -252,7 +255,7 @@ Not purely a constants bump, and the blockers are known:
 - `kCtrlBytes` / `kMaxCtrls` are both `uint8_t`, so the arena caps at 255 bytes before any type
   change. 150 bytes of particle state fits under that; much more does not.
 - `static_assert(kCtrlBytes <= 64, "seeded_ is a 64-bit mask, one bit per script arena byte")`
-  (`MoonLive.h:285`) is the real gate. Past 64 bytes the seeded-member mask needs re-indexing —
+  (`MoonLive.h:355`) is the real gate. Past 64 bytes the seeded-member mask needs re-indexing —
   and there is a worked example, because it was widened 16 → 64 once already. The assert exists
   because the earlier `uint32_t` version silently aliased members mod 32.
 - Watch `sizeof(MoonLive)`. It is held BY VALUE in every scripted module and constructed on the
@@ -358,8 +361,10 @@ back as the easy default. HSV stays where it earns its place, in `setPalEntryHSV
 authoring a palette rather than bypassing one.
 
 **The color one waits, and does not take FastLED's `CRGB` name.** The
-[generative-fields plan](generative-fields-analysis-top-down.md) makes the Layer 16-bit with the
-channel width decided at run time and `draw.h` templated over both widths, so a script-visible color
+[generative-fields plan](generative-fields-analysis-top-down.md) PROPOSED making the Layer 16-bit
+with the channel width decided at run time and `draw.h` templated over both widths, then reversed it
+on the measurement (that plan's § 11), so this reason is void and the color struct is its own
+question. As written: a script-visible color
 fixed at three `uint8_t` would be the one place the width stops being runtime data. Specify it after
 that phase lands, under our own name (CLAUDE.md: our own code, our own names). `Coord3D` has no such
 dependency and goes first.
@@ -380,7 +385,7 @@ a local, a function argument and a return value, exactly as `int`, `byte`, `bool
 which makes § 6 (arguments and returns) a prerequisite rather than a nicety. Two costs to settle
 when it is added: whether a member is one member record or three of the eight, and hence 6 of the 64
 arena bytes; and that a local occupies one frame slot per field under today's flat allocator, so a
-script holding a few coordinates reaches the 16-slot ceiling sooner (§ 8b).
+script holding a few coordinates reaches the 32-slot ceiling sooner (§ 8b).
 
 One call, one brightness evaluation, and the index arithmetic stops being open-coded at every call
 site. It also removes the `mod(...) + mod(...) * width` flattening a script writes today, which is
@@ -475,7 +480,7 @@ picking a number — the balls port wanted ~12 and had to be folded down.
 
 ### 8b. More frame slots — *the encoding is NOT the limit; measure the stack*
 
-**16 live variables**, shared by a script's named variables, its loop counters, and the arguments it
+**32 live variables**, shared by a script's named variables, its loop counters, and the arguments it
 stages for a call. The budget is what is live AT ONCE rather than a total: a call hands its staging
 slots back, and an `if`, `else` or `for` block hands its locals back at the closing brace
 ([MoonLiveEffect.md](../moonmodules/light/MoonLiveEffect.md) documents both). A script that exceeds

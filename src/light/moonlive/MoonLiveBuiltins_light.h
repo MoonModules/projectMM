@@ -862,8 +862,11 @@ extern "C" inline uint32_t mm_light_flowNoise(const uintptr_t* args, uint32_t, c
                        const uint32_t fz = uint32_t(z) * cells + t / 4u;
                        const int32_t nx = int32_t(inoise16(fx, fy, fz)) - 32768;
                        const int32_t ny = int32_t(inoise16(fx + 0x9E37u, fy + 0x7C15u, fz)) - 32768;
-                       vx = draw::pos_t((nx * strength) >> 15);
-                       vy = draw::pos_t((ny * strength) >> 15);
+                       // 64-bit: `strength` is a SCRIPT value and so unbounded, and a 32-bit
+                       // product wraps rather than saturating. curl16 was widened for this; its
+                       // noise sibling needs it more, not less.
+                       vx = draw::pos_t((static_cast<int64_t>(nx) * strength) >> 15);
+                       vy = draw::pos_t((static_cast<int64_t>(ny) * strength) >> 15);
                    }, draw::Edge::Clamp);
     *f.front = !*f.front;                 // the destination now holds the trail
     return 0;
@@ -916,7 +919,7 @@ extern "C" inline uint32_t mm_light_emitTrail(const uintptr_t* args, uint32_t, c
     if (!plane) return 0;
     const int32_t cx = signedArg(args[0]), cy = signedArg(args[1]), cz = signedArg(args[2]);
     const RGB c = colorFromPalette(*Palettes::active(), byteArg(args[3]), byteArg(args[4]));
-    const int32_t r = args ? signedArg(args[5]) : 0;
+    const int32_t r = signedArg(args[5]);
     const int32_t rad = r < 0 ? 0 : (r > 32 ? 32 : r);          // a runaway radius is a full-frame loop
     const uint16_t wr = uint16_t((c.r << 8) | c.r);             // widened by repeating the byte, so a
     const uint16_t wg = uint16_t((c.g << 8) | c.g);             // full head is 65535 rather than 65280

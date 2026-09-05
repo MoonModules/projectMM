@@ -14,6 +14,8 @@ Effects are built from the shared [power functions](power-functions.md): the dra
 
 ### DistortionWaves 💫 · 2D
 
+<img src="../../assets/light/effects/DistortionWavesEffect.gif" width="300" alt="DistortionWaves effect preview">
+
 Two interfering sine waves beat against each other into a moiré color field.
 
 - `freq_x` / `freq_y`: horizontal/vertical wave frequency (1–8).
@@ -28,6 +30,8 @@ Detail: [technical](moxygen/DistortionWavesEffect.md)
 <a id="fixedrectangle"></a>
 
 ### FixedRectangle 💫 · 3D
+
+<img src="../../assets/light/effects/FixedRectangleEffect.gif" width="300" alt="FixedRectangle effect preview">
 
 A solid color filling a positioned box within the grid, with an optional alternating-white checker on the box's pixels.
 
@@ -44,7 +48,9 @@ Detail: [technical](moxygen/FixedRectangleEffect.md)
 
 <a id="freqsaws"></a>
 
-### FreqSaws 💫📊 · 2D
+### FreqSaws 💫🎶 · 2D
+
+<img src="../../assets/light/effects/FreqSawsEffect.gif" width="300" alt="FreqSaws effect preview">
 
 Audio-reactive sawtooth waves: each column maps to a frequency band whose magnitude drives a per-band oscillator speed, so louder bands sweep their sawtooth up the column faster, with three phase methods.
 
@@ -116,7 +122,7 @@ Detail: [technical](moxygen/MetaballsEffect.md)
 
 <a id="particles"></a>
 
-### Particles 💫🦅 · 2D
+### Particles 💫🦅✨ · 2D
 
 <img src="../../assets/light/effects/ParticlesEffect.gif" width="300" alt="Particles effect preview">
 
@@ -155,6 +161,8 @@ Detail: [technical](moxygen/PlasmaEffect.md)
 
 ### Praxis 💫 · 2D
 
+<img src="../../assets/light/effects/PraxisEffect.gif" width="300" alt="Praxis effect preview">
+
 An algorithmic palette pattern driven by two beat oscillators (a macro and a micro mutator) whose frequencies and ranges reshape the hue field over time.
 
 - `macroMutatorFreq` / `macroMutatorMin` / `macroMutatorMax`: the coarse mutator's beat frequency and its oscillation range.
@@ -184,7 +192,9 @@ Detail: [technical](moxygen/RainbowEffect.md)
 
 <a id="random"></a>
 
-### Random 💫 · 3D
+### Random 💫✨ · 3D
+
+<img src="../../assets/light/effects/RandomEffect.gif" width="300" alt="Random effect preview">
 
 Lights one random light per frame in a random palette color over a fading background: a sparse, palette-tinted sparkle.
 
@@ -198,7 +208,7 @@ Detail: [technical](moxygen/RandomEffect.md)
 
 <a id="rings"></a>
 
-### Rings 💫🦅 · 2D
+### Rings 💫🦅🖌️ · 2D
 
 <img src="../../assets/light/effects/RingsEffect.gif" width="300" alt="Rings effect preview">
 
@@ -217,7 +227,7 @@ Detail: [technical](moxygen/RingsEffect.md)
 
 <a id="ripples"></a>
 
-### Ripples 💫🟦🦅 · 3D
+### Ripples 💫🦅 · 3D
 
 <img src="../../assets/light/effects/RipplesEffect.gif" width="300" alt="Ripples effect preview">
 
@@ -234,7 +244,9 @@ Detail: [technical](moxygen/RipplesEffect.md)
 
 <a id="rubikscube"></a>
 
-### RubiksCube 💫🧊 · 3D
+### RubiksCube 💫 · 3D
+
+<img src="../../assets/light/effects/RubiksCubeEffect.gif" width="300" alt="RubiksCube effect preview">
 
 A 3D Rubik's Cube projected onto the volume: it scrambles, then plays its solution back one turn at a time, the six faces in their standard colors.
 
@@ -251,7 +263,9 @@ Detail: [technical](moxygen/RubiksCubeEffect.md)
 
 <a id="fireworks"></a>
 
-### Fireworks 🔬 · 2D
+### Fireworks 💫✨ · 2D
+
+<img src="../../assets/light/effects/FireworksEffect.gif" width="300" alt="Fireworks effect preview">
 
 Shells rise, stall, and burst into sparks that arc over and fall. Every stage is a particle-kernel call: spawn, gravity, angleEmit, drag, age. Nothing schedules the apex: the shell decelerates under gravity and bursts when its vertical velocity crosses zero, so a faster launch bursts higher without a second control.
 
@@ -269,7 +283,9 @@ Origin: projectMM original, on the WLED Particle System's firework family by Dam
 
 <a id="fishtank"></a>
 
-### Fish Tank 📊 · 2D
+### Fish Tank 💫🎶✨👾 · 2D
+
+<img src="../../assets/light/effects/FishTankEffect.gif" width="300" alt="Fish Tank effect preview">
 
 An aquarium on a light wall: fish of three shapes swim across a dark tank, each in its own color from the active palette, tails beating. Movement is a particle-pool entry per fish with constant velocity, respawning at the far edge when it swims off; the shape is drawn through the `draw::sprite` power function. Unlike the other sprite effects, the art carries shade ROLES (body, outline, highlight, fin, eye, band) rather than fixed colors, and each fish fills them from its own place on the palette, so one drawing yields as many colorways as there are fish.
 
@@ -286,7 +302,9 @@ Origin: projectMM original; inspired by the aquarium screensavers of the After D
 
 <a id="flyingtoasters"></a>
 
-### Flying Toasters 🔬📊 · 2D
+### Flying Toasters 💫🎶✨👾 · 2D
+
+<img src="../../assets/light/effects/FlyingToastersEffect.gif" width="300" alt="Flying Toasters effect preview">
 
 The classic screensaver on a light wall: chrome toasters with flapping wings and slices of toast drift diagonally across the dark, forever. Each flier is a particle-pool entry with constant velocity (respawning off the upper-right when it leaves the lower-left), rendered through the `draw::sprite` power function; the wing flap runs on a shared BeatPhase with a per-toaster offset so the flock never syncs.
 
@@ -302,7 +320,9 @@ Origin: projectMM original; inspired by After Dark's Flying Toasters (Berkeley S
 
 <a id="movinghead"></a>
 
-### MovingHead 🔬📊 · 1D
+### MovingHead 💫🎶🎯 · 1D
+
+<img src="../../assets/light/effects/MovingHeadEffect.gif" width="300" alt="MovingHead effect preview">
 
 Aims a rig of moving heads as one instrument. Pan and tilt sweep on two sine waves at different
 rates, so a beam traces a path rather than a line, and `formation` decides how the heads relate to
@@ -337,7 +357,9 @@ Uses the global palette. Origin: projectMM original
 
 <a id="pacman"></a>
 
-### Pacman 🔬📊 · 2D
+### Pacman 💫🎶✨👾 · 2D
+
+<img src="../../assets/light/effects/PacmanEffect.gif" width="300" alt="Pacman effect preview">
 
 The arcade cast crossing a light wall: Pacman chomps his way along while the four ghosts drift past, each in its own color, wrapping around the edges forever. Movement is a particle-pool entry per character and the shapes go through the `draw::sprite` power function; one ghost drawing serves all four colors because the art carries palette slots rather than fixed colors, and a single drawing serves both travel directions because `draw::sprite` can mirror it.
 
@@ -355,7 +377,9 @@ Origin: projectMM original; inspired by Namco's Pac-Man (1980), the pixel art dr
 
 <a id="spaceinvaders"></a>
 
-### Space Invaders 🔬📊 · 2D
+### Space Invaders 💫🎵👾 · 2D
+
+<img src="../../assets/light/effects/SpaceInvadersEffect.gif" width="300" alt="Space Invaders effect preview">
 
 The 1978 formation marching down the wall: five ranks of squid, crab and octopus stepping sideways in the two-frame wiggle, dropping a row and reversing at each wall, and speeding up as the ranks thin. That acceleration is the defining mechanic rather than a flourish, because the arcade original sped up for a mechanical reason (fewer invaders meant a shorter loop for the hardware to draw) and the tension it produced is the reason anyone remembers the game. Invaders fire down, the cannon tracks the lowest one and fires back, and when the formation lands the board resets so the attract loop runs forever.
 
@@ -371,7 +395,9 @@ The invaders take their body color from the active palette. Origin: projectMM or
 
 <a id="spritefountain"></a>
 
-### Sprite Fountain 🔬📊 · 2D
+### Sprite Fountain 💫🎶✨👾 · 2D
+
+<img src="../../assets/light/effects/SpriteFountainEffect.gif" width="300" alt="Sprite Fountain effect preview">
 
 A fountain that throws the project's whole sprite cast: fish, Pacman and his ghosts, toasters and toast, and the three invaders, launched from the floor on a sweeping nozzle and falling back under gravity. The pixel art is SHARED with the effects that introduced it rather than copied, so a fix to a fish fixes it in both places. The particle pool's one spare byte per particle carries which character a slot is, which is what makes a mixed cast free: widening the pool for a sprite id would cost every particle system in the project memory for a field only this effect reads.
 
@@ -388,7 +414,9 @@ Colors come from the active palette, one entry per sprite, held for its whole fl
 
 <a id="pong"></a>
 
-### Pong 🔬📊 · 2D
+### Pong 💫🎵👾 · 2D
+
+<img src="../../assets/light/effects/PongEffect.gif" width="300" alt="Pong effect preview">
 
 Two paddles rallying a ball across the grid, the attract-mode reading of the 1972 original where both players are the machine. A perfect tracker would rally forever and never look like a game, so each paddle has a reaction delay and a small aiming error, re-rolled every exchange: it starts moving a moment after the ball turns and meets it slightly off center. That is what produces near-misses, edge hits and the occasional point. Where on the paddle the ball lands sets the angle it leaves at, which was the one piece of skill the original had.
 
@@ -405,7 +433,9 @@ Uses the global palette. Origin: projectMM original; inspired by Atari's Pong (1
 
 <a id="aurora"></a>
 
-### Aurora 🔬 · 3D
+### Aurora 💫🖌️ · 3D
+
+<img src="../../assets/light/effects/AuroraEffect.gif" width="300" alt="Aurora effect preview">
 
 Several noise fields, each drifting on its own clock, read in polar coordinates and composited into curtains of light. Nothing is simulated: layers of the same field at different scales, moved by independent oscillators, interfere with each other, and the interference is what reads as curtains folding through one another. The strongest layer at each pixel wins, so the layers stay distinct instead of averaging into haze, and which layer won picks the region of the palette. Every palette gives a different aurora.
 
@@ -425,7 +455,9 @@ Origin: projectMM original, in the shader vocabulary Stefan Petrick made recogni
 
 <a id="ballpit"></a>
 
-### Ballpit 🔬 · 2D
+### Ballpit 💫✨ · 2D
+
+<img src="../../assets/light/effects/BallpitEffect.gif" width="300" alt="Ballpit effect preview">
 
 Falling balls that pile up and shove each other aside. The heap is emergent: gravity pulls, the floor stops, and contact between neighbors produces the shape. `tilt` turns the pit into a slope and the whole pile slides and re-settles.
 
@@ -442,7 +474,9 @@ Origin: projectMM original, on the WLED Particle System's ballpit family by Dami
 
 <a id="dissolve"></a>
 
-### Dissolve 🔬 · 2D
+### Dissolve 💫 · 2D
+
+<img src="../../assets/light/effects/DissolveEffect.gif" width="300" alt="Dissolve effect preview">
 
 Two color fields trade places pixel by pixel in an order that looks random but is computed, so the transition needs no per-pixel state and no shuffled index list. Two devices rendering the same frame dissolve identically without exchanging anything.
 
@@ -455,7 +489,9 @@ Origin: projectMM original, on the classic dissolve transition in its position-a
 
 <a id="echo"></a>
 
-### Echo 🔬 · 2D
+### Echo 💫✨ · 2D
+
+<img src="../../assets/light/effects/EchoEffect.gif" width="300" alt="Echo effect preview">
 
 The previous frame fed back through a zoom and rotation, dimmed, with a bright source drawn on top: trails that spiral away from themselves, like a camera pointed at its own monitor.
 
@@ -471,7 +507,9 @@ Origin: projectMM original, on video feedback and the standard texture-feedback 
 
 <a id="spectrum"></a>
 
-### Spectrum 🔬📊 · 2D
+### Spectrum 💫🎶 · 2D
+
+<img src="../../assets/light/effects/SpectrumEffect.gif" width="300" alt="Spectrum effect preview">
 
 An audio analyser with real meter ballistics: bars rise fast enough to catch a transient and fall slowly enough to read, and a peak dot marks the recent maximum and drifts down.
 
@@ -487,7 +525,9 @@ Origin: projectMM original, on standard VU/PPM meter ballistics and WLED's GEQ b
 
 <a id="truchet"></a>
 
-### Truchet 🔬 · 2D
+### Truchet 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/TruchetEffect.gif" width="300" alt="Truchet effect preview">
 
 A maze of interlocking arcs that never repeats, drawn without storing a single tile. Randomly-turned tiles with arcs at their edges join into continuous winding paths across the whole surface: the pattern looks designed, and nothing designed it.
 
@@ -505,6 +545,8 @@ Origin: projectMM original, on Sébastien Truchet's 1704 tiling and the standard
 <a id="fluid"></a>
 
 ### Fluid 💫🖌️ · 3D
+
+<img src="../../assets/light/effects/FluidEffect.gif" width="300" alt="Fluid effect preview">
 
 Light poured into a simulated medium and carried by it. Every other flow in this library is a function of position and time; this one is state, so a jet fired now changes where everything downstream goes for seconds afterwards and the same settings never quite repeat a minute. The solver is Stam's stable fluid (diffuse, project, advect, project), which is unconditionally stable at any timestep, and the projection is what keeps the flow divergence-free so dye neither piles up nor drains away.
 
@@ -527,6 +569,8 @@ Origin: projectMM original, after Stam 1999 "Stable Fluids"
 
 ### Nebula 💫🖌️ · 3D
 
+<img src="../../assets/light/effects/NebulaEffect.gif" width="300" alt="Nebula effect preview">
+
 A noise field decides where light is born, a curl flow decides where it goes, and between them the cloud keeps folding into itself. The field is thresholded hard, so only its top survives and the rest is black; the flow is divergence-free, so nothing piles up or thins out. Neither half is new: what is, is that the emitter is a FIELD rather than a handful of dots, so light enters everywhere at once and the flow shapes a whole cloud instead of drawing trails.
 
 - `speed`: how fast the medium moves, and with it the whole cloud.
@@ -545,6 +589,8 @@ Origin: projectMM original, composing the noise-field and curl-flow kernels
 
 ### Trails 💫🖌️ · 3D
 
+<img src="../../assets/light/effects/TrailsEffect.gif" width="300" alt="Trails effect preview">
+
 Dots thrown into a moving medium, leaving tails the flow carries and bends. Nothing draws a tail: the tail is the previous frames' dots, transported along a velocity field and dimmed, which is why the shape of the flow is visible in it. On a cube each depth slice gets its own flow, so the slices differ rather than one plane repeating, though light is carried within a slice and not yet between them: the transport is 2D per slice until 3D advection ships.
 
 - `speed`: how fast the medium moves, and with it every tail.
@@ -559,7 +605,9 @@ Origin: projectMM original, in the flow-field idiom (4wheeljive's FlowFields, fr
 
 <a id="tunnel"></a>
 
-### Tunnel 🔬 · 2D
+### Tunnel 💫🖌️ · 3D
+
+<img src="../../assets/light/effects/TunnelEffect.gif" width="300" alt="Tunnel effect preview">
 
 A texture mapped onto the inside of an infinite tube, so the viewer appears to fly down it forever. Nothing is 3D: the angle around the center is one texture coordinate and the reciprocal of the distance is the other, which is perspective for the price of a divide.
 
@@ -574,7 +622,9 @@ Origin: projectMM original, on the standard demoscene tunnel
 
 <a id="vectorballs"></a>
 
-### VectorBalls 🔬 · 2D
+### VectorBalls 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/VectorBallsEffect.gif" width="300" alt="VectorBalls effect preview">
 
 A rotating 3D object drawn as shaded spheres: the demoscene classic that named the technique. The smallest complete demonstration of putting 3D on a panel: rotate, project, sort back-to-front, shade by distance, draw.
 
@@ -590,7 +640,9 @@ Origin: projectMM original, on the Amiga-era demoscene vector-ball effect
 
 <a id="waterripple"></a>
 
-### WaterRipple 🔬 · 2D
+### WaterRipple 💫🧬 · 2D
+
+<img src="../../assets/light/effects/WaterRippleEffect.gif" width="300" alt="WaterRipple effect preview">
 
 A propagating wave simulation: drops land, their rings spread outward, reflect off the edges and interfere where they cross. The crossing is what a closed-form ripple cannot fake, because two rings meeting have to add and cancel.
 
@@ -607,7 +659,9 @@ Origin: projectMM original, on Hugo Elias's water surface algorithm
 
 <a id="raymarch"></a>
 
-### Raymarch 🔬 · 2D
+### Raymarch 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/RaymarchEffect.gif" width="300" alt="Raymarch effect preview">
 
 A lit 3D scene rendered by marching a ray through a distance field, one ray per pixel. Nothing draws a sphere: the scene is a function returning the distance to the nearest surface, and the spheres emerge because each ray stops where that function says a surface is. The lighting is derived too: the surface normal is the gradient of the distance field.
 
@@ -623,7 +677,9 @@ Origin: projectMM original, on Iñigo Quilez's raymarching and distance-function
 
 <a id="polarnoise"></a>
 
-### PolarNoise 🔬 · 2D
+### PolarNoise 💫🖌️ · 3D
+
+<img src="../../assets/light/effects/PolarNoiseEffect.gif" width="300" alt="PolarNoise effect preview">
 
 A warped noise field addressed by angle and radius, folded into a kaleidoscope. The field turns and breathes around the center rather than scrolling past it.
 
@@ -642,7 +698,9 @@ Origin: projectMM original, after Stefan Petrick's polar/noise vocabulary and I�
 
 <a id="sdfshapes"></a>
 
-### SdfShapes 🔬 · 2D
+### SdfShapes 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/SdfShapesEffect.gif" width="300" alt="SdfShapes effect preview">
 
 A circle and a box orbit and melt into each other, drawn as signed distance fields rather than rasterized outlines. One distance per pixel yields three looks at once: an anti-aliased fill, an outline (`|d| - width`), and a glow that falls off into the surrounding field.
 
@@ -661,6 +719,8 @@ Origin: projectMM original, after Iñigo Quilez's distance-function catalogue an
 
 ### Solid 💫 · 3D
 
+<img src="../../assets/light/effects/SolidEffect.gif" width="300" alt="Solid effect preview">
+
 A flat fill with five color modes: a plain RGB(W) color, the active palette spread across the lights, an RMS-averaged single palette color, or the palette banded along the grid's rows or columns.
 
 - `red` / `green` / `blue` / `white`: the flat color in `RGB(W)` mode (ignored in the palette modes).
@@ -677,7 +737,9 @@ Detail: [technical](moxygen/SolidEffect.md)
 
 <a id="spheremove"></a>
 
-### SphereMove 💫🧊 · 3D
+### SphereMove 💫 · 3D
+
+<img src="../../assets/light/effects/SphereMoveEffect.gif" width="300" alt="SphereMove effect preview">
 
 A hollow spherical shell that bounces through the 3D volume, its surface colored from the palette, leaving no trail.
 
@@ -691,7 +753,7 @@ Detail: [technical](moxygen/SphereMoveEffect.md)
 
 <a id="spiral"></a>
 
-### Spiral 💫🦅 · 2D
+### Spiral 💫🦅🖌️ · 2D
 
 <img src="../../assets/light/effects/SpiralEffect.gif" width="300" alt="Spiral effect preview">
 
@@ -709,7 +771,9 @@ Detail: [technical](moxygen/SpiralEffect.md)
 
 <a id="starfield"></a>
 
-### StarField 💫 · 2D
+### StarField 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/StarFieldEffect.gif" width="300" alt="StarField effect preview">
 
 A perspective starfield: stars approach the viewer from a vanishing point, brightening as they near, then respawn at depth.
 
@@ -746,6 +810,8 @@ Detail: [technical](moxygen/StarSkyEffect.md)
 
 ### Text 💫 · 2D
 
+<img src="../../assets/light/effects/TextEffect.gif" width="300" alt="Text effect preview">
+
 Renders a multi-line string in a bitmap font. Static by default (laid out top-left, each newline dropping one font-height, clipped where it runs off the grid); turn on `scroll` to march the whole block leftwards as a wrapping marquee. Text color comes from the active palette.
 
 - `text`: the string to show; a **multi-line text area** (each line renders on its own row).
@@ -764,7 +830,9 @@ Detail: [technical](moxygen/TextEffect.md)
 
 <a id="gameoflife"></a>
 
-### GameOfLife 💫🌙 · 2D/3D
+### GameOfLife 💫🌙🧬 · 2D/3D
+
+<img src="../../assets/light/effects/GameOfLifeEffect.gif" width="300" alt="GameOfLife effect preview">
 
 Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), cells that inherit a neighbor's palette color on birth, optional green→red age coloring, a dead-cell blur fading toward the background color, toroidal `wrap`, a 1.5 s settle pause, and 3-CRC stasis self-respawn (R-pentomino/glider) when the board goes static.
 
@@ -788,7 +856,9 @@ Detail: [technical](moxygen/GameOfLifeEffect.md)
 
 <a id="geq"></a>
 
-### GEQ 💫🐙📊 · 2D
+### GEQ 💫🐙🎶 · 2D
+
+<img src="../../assets/light/effects/GEQEffect.gif" width="300" alt="GEQ effect preview">
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_139.gif" width="300" alt="GEQ effect preview" title="WLED effect preview: WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 139; replace with our own capture once bench-verified -->
 
@@ -807,7 +877,9 @@ Detail: [technical](moxygen/GEQEffect.md)
 
 <a id="geq3d"></a>
 
-### GEQ3D 💫🌙📊 · 2D
+### GEQ3D 💫🌙🎶 · 2D
+
+<img src="../../assets/light/effects/GEQ3DEffect.gif" width="300" alt="GEQ3D effect preview">
 
 A 3D-perspective graphic equaliser: audio bands rise as bars with faked depth, their side/top lines drawn toward a "projector" vanishing point (sweeping left↔right) and shortened by `depth`. Bands left of the projector are painted right-to-left, bands right of it left-to-right; per-face darkening (side/top/front) and optional `borders`.
 
@@ -826,7 +898,9 @@ Detail: [technical](moxygen/GEQ3DEffect.md)
 
 <a id="paintbrush"></a>
 
-### PaintBrush 💫🌙📊 · 3D
+### PaintBrush 💫🌙🎶 · 3D
+
+<img src="../../assets/light/effects/PaintBrushEffect.gif" width="300" alt="PaintBrush effect preview">
 
 Audio-reactive brush strokes: lines whose 3D endpoints oscillate on the beat (`beatsin8`, audio-band timebase), each stroke shortened to a band-magnitude length so the moving tip sweeps a curve over the fading field.
 
@@ -845,7 +919,9 @@ Detail: [technical](moxygen/PaintBrushEffect.md)
 
 <a id="tetrix"></a>
 
-### Tetrix 💫🌙 · 2D
+### Tetrix 💫🌙✨ · 2D
+
+<img src="../../assets/light/effects/TetrixEffect.gif" width="300" alt="Tetrix effect preview">
 
 Falling Tetris-style blocks: each column drops a brick that lands on the growing stack, fills the column, then clears and restarts.
 
@@ -863,7 +939,9 @@ Detail: [technical](moxygen/TetrixEffect.md)
 
 <a id="blurz"></a>
 
-### Blurz 🐙📊 · 2D
+### Blurz 🐙🎶 · 2D
+
+<img src="../../assets/light/effects/BlurzEffect.gif" width="300" alt="Blurz effect preview">
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_163.gif" width="300" alt="Blurz effect preview" title="WLED effect preview: WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 163; replace with our own capture once bench-verified -->
 
@@ -882,7 +960,9 @@ Detail: [technical](moxygen/BlurzEffect.md)
 
 <a id="bouncingballs"></a>
 
-### BouncingBalls 🐙 · 2D
+### BouncingBalls 💫🐙 · 2D
+
+<img src="../../assets/light/effects/BouncingBallsEffect.gif" width="300" alt="BouncingBalls effect preview">
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_091.gif" width="300" alt="BouncingBalls effect preview" title="WLED effect preview: WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 91; replace with our own capture once bench-verified -->
 
@@ -899,7 +979,9 @@ Detail: [technical](moxygen/BouncingBallsEffect.md)
 
 <a id="freqmatrix"></a>
 
-### FreqMatrix 🐙📊 · 1D
+### FreqMatrix 🐙🎶 · 1D
+
+<img src="../../assets/light/effects/FreqMatrixEffect.gif" width="300" alt="FreqMatrix effect preview">
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_138.gif" width="300" alt="FreqMatrix effect preview" title="WLED effect preview: WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 138; replace with our own capture once bench-verified -->
 
@@ -921,6 +1003,8 @@ Detail: [technical](moxygen/FreqMatrixEffect.md)
 
 ### Lissajous 🐙 · 2D
 
+<img src="../../assets/light/effects/LissajousEffect.gif" width="300" alt="Lissajous effect preview">
+
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_176.gif" width="300" alt="Lissajous effect preview" title="WLED effect preview: WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 176; replace with our own capture once bench-verified -->
 
 A Lissajous curve traced across the grid from two phase-shifted `sin8`/`cos8` sweeps, palette-colored along its length, with a fading trail.
@@ -937,7 +1021,9 @@ Detail: [technical](moxygen/LissajousEffect.md)
 
 <a id="noisemeter"></a>
 
-### NoiseMeter 🐙📊 · 3D
+### NoiseMeter 🐙🎵 · 3D
+
+<img src="../../assets/light/effects/NoiseMeterEffect.gif" width="300" alt="NoiseMeter effect preview">
 
 <img src="https://raw.githubusercontent.com/scottrbailey/WLED-Utils/master/gifs/FX_136.gif" width="300" alt="NoiseMeter effect preview" title="WLED effect preview: WLED-Utils by scottrbailey"> <!-- preview: WLED-Utils (scottrbailey), WLED FX 136; replace with our own capture once bench-verified -->
 
@@ -954,7 +1040,9 @@ Detail: [technical](moxygen/NoiseMeterEffect.md)
 
 <a id="wave"></a>
 
-### Wave 🌊 · 2D
+### Wave 💫 · 2D
+
+<img src="../../assets/light/effects/WaveEffect.gif" width="300" alt="Wave effect preview">
 
 An oscilloscope waveform scrolls across the grid with a fading trail; six selectable shapes.
 
@@ -972,7 +1060,7 @@ Detail: [technical](moxygen/WaveEffect.md)
 
 <a id="fire"></a>
 
-### Fire ⚡️🦅 · 2D
+### Fire ⚡️🦅🧬 · 2D
 
 <img src="../../assets/light/effects/FireEffect.gif" width="300" alt="Fire effect preview">
 
@@ -1011,7 +1099,9 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 <a id="audiospectrum"></a>
 
-### AudioSpectrum 📊
+### AudioSpectrum 💫🎶
+
+<img src="../../assets/light/effects/AudioSpectrumEffect.gif" width="300" alt="AudioSpectrum effect preview">
 
 The 16 mic frequency bands spread across X, each column lit bottom-up by its magnitude.
 
@@ -1025,7 +1115,9 @@ Detail: [technical](moxygen/AudioSpectrumEffect.md)
 
 <a id="audiovolume"></a>
 
-### AudioVolume 🔊
+### AudioVolume 💫🎵
+
+<img src="../../assets/light/effects/AudioVolumeEffect.gif" width="300" alt="AudioVolume effect preview">
 
 A whole-grid VU meter: every light pulses with the mic level, color indexing the palette by loudness.
 
@@ -1039,7 +1131,9 @@ Detail: [technical](moxygen/AudioVolumeEffect.md)
 
 <a id="demoreel"></a>
 
-### DemoReel 🎬 · 3D
+### DemoReel 💫 · 3D
+
+<img src="../../assets/light/effects/DemoReelEffect.gif" width="300" alt="DemoReel effect preview">
 
 A demo reel: plays every other registered effect in turn, auto-advancing on a timer, so one Layer cycles the whole library hands-free: the showcase/test tool for everything. It hosts a single live effect at a time (created from the effect registry, rendered into this Layer) and swaps to the next when the interval elapses: new effects are picked up automatically. It can also pick a fresh palette each cycle and overlay the playing effect's name. The `status` line shows which effect is playing (e.g. `playing: Plasma (3/20)`). It never hosts itself, and it plays effects in sequence rather than compositing them (layering is the [Layer](moxygen/Layer.md) stack's job).
 
@@ -1058,6 +1152,8 @@ Detail: [technical](moxygen/DemoReelEffect.md)
 
 ### NetworkReceive 📡🌙
 
+<img src="../../assets/light/effects/NetworkReceiveEffect.gif" width="300" alt="NetworkReceive effect preview">
+
 Receives lights-over-UDP (Art-Net, E1.31/sACN, DDP) and writes it into the layer: the receive side for Resolume/Madrix/xLights/LedFx.
 
 - `universe_start`: the first incoming universe to map onto the layer (mirrors the sender).
@@ -1073,7 +1169,9 @@ Detail: [technical](moxygen/NetworkReceiveEffect.md)
 
 <a id="sine"></a>
 
-### Sine 🌀 · 3D
+### Sine 💫 · 3D
+
+<img src="../../assets/light/effects/SineEffect.gif" width="300" alt="Sine effect preview">
 
 R/G/B each follow a sine along one axis at 120° phase offset: a glowing, scrolling color box.
 

@@ -1,9 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // atan16, dist16, kaleido, BeatPhase
-#include "core/noise.h"               // fbm8: the tunnel wall texture
 #include "light/effects/EffectBase.h"
-#include "light/polar.h"              // PolarLut: the per-pixel angle and radius, precomputed
 
 namespace mm {
 

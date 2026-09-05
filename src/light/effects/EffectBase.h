@@ -148,9 +148,12 @@ public:
 #include "core/color.h"           // RGB
 #include "core/crc.h"             // crc16 — grid/state fingerprints (stasis detection)
 #include "core/ScratchBuffer.h"   // ScratchBuffer<T> — self-sizing scratch memory for stateful effects
+#include "core/oscillators.h"     // OscillatorBank / Wave: the motion kernel five effects share
+#include "core/math16.h"          // angle16, kaleido, halfLifeKeep: the fixed-point trig and decay
+#include "light/polar.h"          // PolarLut: the per-pixel angle and radius four radial effects read
 #include "core/AudioService.h"    // AudioService::latestFrame() — the shared audio source
 #include "core/AudioFrame.h"      // AudioFrame — level + 16-band spectrum an audio-reactive effect reads
 
 #include <cstring>                // memset / memcpy / strcmp — buffer + control-name handling
-#include <cmath>                  // sqrtf / sinf / log10f — per-frame float maths (never per-light)
+#include <cmath>                  // sqrtf / sinf / log10f: per-frame float math (never per-light)
 #include <array>                  // std::array — fixed-size effect state tables (cube faces, LUTs)

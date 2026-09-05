@@ -1,6 +1,6 @@
 # Effects × power functions — inventory
 
-> **Forward-looking backlog document — exception to CLAUDE.md present-tense rule.** One row per effect in the tree on 2026-09-03 (58), recording what each uses today and which power functions it could run on: the ones that exist ([power-functions.md](../moonmodules/light/power-functions.md)) and the ones the [generative-fields top-down](generative-fields-analysis-top-down.md) builds (gradient noise, `PolarLut`, `Oscillators`, `advect` and the velocity rules, `decay`, `lineAA`/`disc`, the 16-bit Layer). It is the input for the catalog sweep that top-down names as a follow-on plan, under the product owner's rule: **every effect runs on the power functions for whatever they cover; an effect that does not is rewritten on them; algorithmic effects keep their logic; a rewrite lands only if at least as beautiful as the effect ran before.** Rows shrink as effects are rewritten; a rewritten effect's row is deleted, not ticked.
+> **Forward-looking backlog document — exception to CLAUDE.md present-tense rule.** One row per effect in the tree on 2026-09-03 (58), recording what each uses today and which power functions it could run on: the ones that exist ([power-functions.md](../moonmodules/light/power-functions.md)) and the ones the [generative-fields top-down](generative-fields-analysis-top-down.md) builds (gradient noise, `PolarLut`, `Oscillators`, `advect` and the velocity rules, `decay`, `lineAA`/`disc`; the 16-bit Layer was proposed and then reversed, top-down § 11). It is the input for the catalog sweep that top-down names as a follow-on plan, under the product owner's rule: **every effect runs on the power functions for whatever they cover; an effect that does not is rewritten on them; algorithmic effects keep their logic; a rewrite lands only if at least as beautiful as the effect ran before.** Rows shrink as effects are rewritten; a rewritten effect's row is deleted, not ticked.
 
 **Kind.** N = natural motion (physics, fields, noise, trails, rotation, oscillation): rewritten on the kernels. A = algorithmic (a rule set or a game is the effect): keeps its logic, draws through the library. M = audio meter (bars, levels, spectra): the geometry and ballistics rows apply. U = utility or test: no rewrite owed. Anything in doubt is N.
 
@@ -33,14 +33,11 @@
 | Metaballs | N | beat pal | `blobField`, `smin` | 16-bit field, `Oscillators` | |
 | MovingHead | N | beat sin pal audio | `BeatPhase` | `Oscillators` for formations | fixture roles, not pixels |
 | NetworkReceive | U | scratch | | widens into the 16-bit Layer | writes raw bytes by design |
-| Noise2D | N | noise pal | | gradient noise (phase 0), `fbm`, `Oscillators`, 16-bit output | |
-| Noise | N | noise beat pal | | gradient noise (phase 0), `Oscillators`, 16-bit output | writes raw bytes |
 | NoiseMeter | M | noise beat sin fade pal audio | `smoothFollow` | gradient noise, `Oscillators` | |
 | Pacman | **A** | beat particles scratch rnd pal audio | on `particles` for motion | | game logic is the effect |
 | PaintBrush | N | polar beat sin fade geom rnd pal audio **float** | `lineAA` via `splat` | `lineAA`, `decay`, `PolarLut`, `Oscillators`; float to fixed | |
 | Particles | N | particles scratch rnd pal | on `particles` already | 16-bit `splat` | |
 | Plasma | N | beat sin pal | `sin16` | `PolarLut`, `fbm`/`warp` as a shader, `Oscillators`, 16-bit | |
-| PolarNoise | N | noise polar beat pal | `warp8`, `kaleido` | `PolarLut`, `Oscillators`, gradient noise (phase 1 of the plan) | the Petrick idiom already |
 | Pong | **A** | beat rnd pal audio | | | game |
 | Praxis | **A** | beat sin pal | | `Oscillators` | algorithmic palette pattern |
 | Rainbow | N | pal | | 16-bit gradient (no banding), `Oscillators` | writes raw bytes; the default effect |
@@ -55,18 +52,16 @@
 | SpaceInvaders | **A** | beat rnd pal audio | | | game |
 | Spectrum | M | geom scratch pal audio | `bar`, `smoothFollow`, `peakHold` already | 16-bit bars | |
 | SphereMove | N | fade rnd pal **float** | `sdSphere` via `raymarch.h`/`shader.h` | 16-bit; float to fixed | |
-| Spiral | N | polar beat pal | | `PolarLut`, `Oscillators` | |
 | SpriteFountain | N | beat sin particles scratch rnd audio | on `particles` already | `decay` | |
 | StarField | N | fade shader scratch rnd pal **float** | `shader::project` already | `splat`, `decay`; float to fixed | |
 | StarSky | N | fade scratch rnd pal | `hashInt` | `Oscillators` for the twinkle, `decay` | the earlier verdict "not a particle" stands; oscillation is its mechanism |
 | Tetrix | **A** | particles scratch rnd pal **float** | `FrameTime` | | state machine is the effect |
 | Text | U | pal | `scroll` | 16-bit anti-aliased glyphs later | |
 | Truchet | N | beat shader rnd pal | on `shader.h` already | `Oscillators` | |
-| Tunnel | N | noise polar beat pal | `fbm8` | `PolarLut`, gradient noise, `Oscillators`, `warp` | |
 | VectorBalls | N | beat sin shader pal | on `shader.h` already | 16-bit | |
 | WaterRipple | N | scratch rnd pal | already a wide-state kernel | renders into the 16-bit Layer without narrowing; `disc` for drops; `decay` | |
 | Wave | N | noise beat sin scratch pal | `sin16` | gradient noise, `Oscillators` | |
 
-**Counts.** 58 effects: 36 natural motion, 8 algorithmic (GameOfLife, FlyingToasters, Pacman, Pong, Praxis, RubiksCube, SpaceInvaders, Tetrix), 8 audio meters, 6 utility. 12 still compute per light in float outside the FPU-gated raymarch (BouncingBalls, Blurz, DistortionWaves, PaintBrush, Ripples, RubiksCube, Sine, SphereMove, StarField, Tetrix, Raymarch by design, and one in Wave's history); 7 write raw Layer bytes (the 16-bit phase migrates them to `draw::`).
+**Counts.** 54 rows remain of the 58 the table opened with, the difference being effects since rewritten on the kernels and deleted per the rule above. 11 still compute per light in float outside the FPU-gated raymarch (BouncingBalls, Blurz, DistortionWaves, PaintBrush, Ripples, RubiksCube, Sine, SphereMove, StarField, Tetrix, Raymarch by design). 17 effect headers write `buffer()` bytes directly rather than going through `draw::`; that is a measured OPTIMIZATION on the hot path rather than debt (a row pointer costs 0.26 ns/light where `draw::pixel` with known coordinates costs +170%), so it is not a migration target. The 16-bit phase that was to migrate them was reversed (top-down § 11).
 
 **What the sweep would look like when it becomes a plan.** Batches by kernel, as each lands: the noise effects with phase 0; the polar and oscillation effects with phase 1; the raw-byte writers with the 16-bit Layer; Echo, Lissajous, PaintBrush and the trail effects with `advect`/`decay`/`lineAA`; BouncingBalls onto `particles` on its own, since it is a rework with a bench judgment. Each batch under ~100 files, each effect compared against how it ran, the golden re-baselined with the reason. Effects a showcase supersedes (Lissajous by Trails, possibly Echo) are deleted rather than kept beside it.

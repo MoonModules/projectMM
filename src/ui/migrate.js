@@ -27,6 +27,11 @@ export const FILE_RENAMES = {
 // merge made explicit when its value is deterministic; `review` flags what a map cannot decide.
 export const TYPE_RENAMES = {
     "Layers": { type: "Effects", date: "2026-08-08" },
+    // Noise2D folded into Noise, which is Dim::D3 and renders the same field on a panel. `scale`
+    // carries; Noise2D's `speed` (a 0..15 divisor) has no equivalent, because Noise takes its rate
+    // from `bpm` on the shared beat clock rather than a per-effect divisor.
+    "Noise2DEffect": { type: "NoiseEffect", date: "2026-09-05",
+                       review: "set bpm: Noise2D's speed (0..15) has no equivalent on the beat clock" },
     // Infrared was rebuilt around learned-code ROWS, so the single-target controls it used to
     // carry (`code on/off`, `code brightness up`, ...) have no equivalent: the codes themselves
     // are gone and the remote has to be re-learned. The module carries over, which is what stops

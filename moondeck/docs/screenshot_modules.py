@@ -101,6 +101,11 @@ MODULES = [
     # Effects
     ("RainbowEffect",       "Layer",    {}, True),
     ("NoiseEffect",         "Layer",    {}, True),
+    # The generative-fields showcases: each is Dim::D3, so the preview shows a volume.
+    ("AuroraEffect",        "Layer",    {}, True),
+    ("TrailsEffect",        "Layer",    {}, True),
+    ("NebulaEffect",        "Layer",    {}, True),
+    ("FluidEffect",         "Layer",    {}, True),
     ("FireEffect",          "Layer",    {}, True),
     ("PlasmaEffect",        "Layer",    {}, True),
     ("PlasmaPaletteEffect", "Layer",    {}, True),
@@ -684,6 +689,10 @@ def main() -> int:
     parser.add_argument("--grid", type=int, default=0, metavar="N",
                         help="Resize the GridLayout to NxN before capturing (e.g. 128) for "
                              "higher-resolution previews. Default: leave the boot grid (16).")
+    parser.add_argument("--all-registered", action="store_true",
+                        help="Also capture every registered effect/modifier that has no MODULES "
+                             "entry, on a Layer with default controls. Fixes the list going stale "
+                             "the moment a module is added.")
     parser.add_argument("--extras-only", action="store_true",
                         help="Skip projectMM module captures; only run the extra shots "
                              "(MoonDeck tabs, installer). Useful for recapturing the "
@@ -720,10 +729,18 @@ def main() -> int:
         uncaptured = sorted(
             t for t in source_registered_types()
             if ("Effect" in t or "Modifier" in t) and t not in listed)
-        if uncaptured:
+        if uncaptured and args.all_registered:
+            # Capture them anyway: an effect goes on a Layer, a modifier on a Layer, both want a
+            # GIF. The hand-kept list stays for the ones that need special props or a parent that
+            # is not a Layer; everything else needs no entry at all.
+            MODULES.extend((t, "Layer", {}, True) for t in uncaptured)
+            print(f"  + {len(uncaptured)} registered effect/modifier(s) added from the types "
+                  f"registered in src/main.cpp (--all-registered)")
+        elif uncaptured:
             print(f"  ⚠️  {len(uncaptured)} registered effect/modifier(s) are NOT in this "
                   f"script's MODULES list, so they get no screenshot: {', '.join(uncaptured)}")
-            print("      Add them to MODULES (near the top of this file) to capture them.")
+            print("      Run with --all-registered to capture them, or add an entry to MODULES "
+                  "if one needs special props.")
 
         # Optional pipeline tweaks for nicer effect previews (raw, higher-res).
         if args.no_modifier or args.grid:

@@ -256,7 +256,7 @@ inline void blurAxis(uint8_t* d, size_t cpl, size_t len, size_t stride,
     }
 }
 
-// Blur the whole buffer by `amt`, separably along every axis with extent >1 (x, then y, then z , 
+// Blur the whole buffer by `amt`, separably along every axis with extent >1 (x, then y, then z):
 // MoonLight's blur2d order, extended to z). One call covers 1D/2D/3D. Off the per-pixel-effect path.
 inline void blur(Buffer& buf, Coord3D dims, uint8_t amt) {
     if (amt == 0) return;
@@ -452,7 +452,7 @@ inline void line(const Canvas& cv, Coord3D a, Coord3D b, RGB c, uint8_t shorten 
 // from two private copies of the loop) and differ ONLY in the coloring they apply, which is the
 // evidence for the seam: the field is shared, the coloring is the effect's own.
 //
-// The oscillator tables stay with the CALLER, so a caller is free to drive sources from anything , 
+// The oscillator tables stay with the CALLER, so a caller is free to drive sources from anything:
 // a control, audio, a particle position: rather than from the sine paths the current callers use.
 // A kernel that hard-coded one set of constants would have made every future effect look the same.
 //

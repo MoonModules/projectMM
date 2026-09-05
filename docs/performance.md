@@ -64,6 +64,10 @@ Binary sizes:
 | Tunnel (fbm8) | 16,385 | 21,304 | 16,649 | 1.02 |
 | PolarNoise (warp8) | 20,356 | 29,199 | 20,490 | 1.01 |
 
+The two noise effects have since merged: `Noise` is `Dim::D3` and renders what `Noise2D` did, so the
+two rows above are one effect's 2D and 3D paths under the names they carried when the swap was
+measured.
+
 The 3D path is the closest to the bound and the reason: 3D gradient noise does eight dot products the value form never did, and the S3 instruction count for a 3D sample is 1.3x the old one. Method worth keeping: compile the kernel with the target's own compiler (`xtensa-esp32s3-elf-g++ -O2 -S`) and count instructions, branches and stack spills BEFORE flashing; three restructurings were compared that way in seconds, and the one flash went to the winner. The P4 and S31 numbers are open until those boards are back on the bench.
 
 **All rows, ns per sample, best of 5.** Re-measured 2026-09-04 after the benchmark stopped dispatching through `std::function`: a type-erased call cannot be inlined, so it added an indirect call to every sample and the old figures were part kernel and part harness. Every row roughly halved, which is the size of what was being attributed to the kernels:
@@ -298,7 +302,7 @@ A render-only per-effect sweep on the S3 (`observed.esp32s3-n16r8`, build `Jun 1
 | LavaLamp | 309 | 974 | 3,612 | 21,243 |
 | GameOfLife | 138 | 413 | 1,870 | 16,127 |
 
-The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is **Noise** (51 ms = ~19 FPS at 16K — simplex noise per pixel), then Rings and GlowParticles. Effect-compute differences stay visible across the whole range because nothing is output-bound here.
+The cheapest (Lines, Checkerboard, PlasmaPalette) clear ~100 FPS even at 16K; the heaviest is **Noise** (51 ms = ~19 FPS at 16K, a noise sample per pixel), then Rings and GlowParticles. Effect-compute differences stay visible across the whole range because nothing is output-bound here.
 
 **Free internal heap** holds ~8.54 MB at small grids and ~8.46–8.49 MB at 16K — the ~50–100 KB delta is just the grid-sized render buffer (the `model` array), and it returns to ~8.54 MB whenever the grid shrinks: **no leak, no fragmentation creep** across the sweep. Largest free internal block stays ~90–110 KB throughout. (Internal RAM is not the constraint on this PSRAM board; the Layer buffer is in PSRAM.)
 

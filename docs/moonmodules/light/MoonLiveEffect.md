@@ -163,7 +163,7 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `scale(value, n)` | a `0..65535` value onto `0..n-1` — lands a wave on an axis |
 | `sin(angle)`, `cos(angle)` | the circle; one turn is `0..65535`, result biased to `1..65535` centered at 32768 |
 | `turn(n)` | one revolution split `n` ways — the angle step for placing `n` points on a circle |
-| `print(v)` | log a value and return it ([what it costs](writing-scripts.md#debugging-print)) |
+| `print(v)` | log a value and return it. A host call per invocation, so it belongs in a cold path rather than a per-pixel loop |
 | `a / b`, `a % b` | divide and remainder. Both are host calls: cheap on a cold path, deliberate per light. Dividing by zero **saturates** toward the numerator's sign rather than faulting, so no script needs a zero-check of its own; the remainder is 0 |
 | `toFixed(v)`, `toInt(v)` | convert between a whole number and a `fixed` one, each a single instruction |
 | `smoothstep(e0, e1, v)` | a soft `0..65535` ramp between two edges, the anti-aliasing primitive |
@@ -179,6 +179,11 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | `setPaletteColor(x, y, index, bri)` | one light from the ACTIVE palette, in one call |
 | `setPaletteColorZ(x, y, z, index, bri)` | the same, addressing a light in a volume |
 | `paletteR(i, bri)`, `paletteG`, `paletteB` | one palette channel, when a script needs the value rather than a pixel |
+| `trail(1)` | ask for a trail plane, from `defineControls()`. A 16-bit plane the flow builtins carry and the binding blits, so a script gets tails without owning a buffer. Returns whether it got one |
+| `flowNoise(zoom, strength)`, `flowCurl(zoom, strength)` | carry the whole trail plane one frame along a flow: noise for a wandering field, curl for a divergence-free one where nothing clumps. One call, because a per-pixel rule would cross the script boundary 8000 times on a cube |
+| `trailDecay(halfLifeMs)` | fade the trail by a half-life in milliseconds, so a tail's length is in seconds and holds at any framerate. Named `trailDecay` because `decay` is an ordinary word a script may want for its own member |
+| `emitTrail(x, y, z, index, bri, radius)` | throw light into the trail as a disc of the given radius. A single-pixel head arrives at a fraction of a count after a long tail, which is why the radius is a parameter |
+| `fieldRate(n)` | true once every n frames: the lever that makes a per-pixel loop affordable on a large fixture. The flow and the decay still run every frame, so what it costs is detail rather than smoothness |
 | `pool(n)` | size this script's particle pool, from `defineControls()`. Returns what it got |
 | `emit(x, y, angle, speed, n, life, hue)` | throw `n` particles from a point |
 | `gravity(g)`, `drag(k)` | the two forces |

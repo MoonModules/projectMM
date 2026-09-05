@@ -31,9 +31,10 @@
 // uses the first call as the time base only. Verified as the SOLE cause by reproducing the old
 // first-tick behaviour on top of BeatPhase and watching the original hash return.
 //
-// The control cases prove it: WaveEffect and NoiseEffect ALREADY carried that guard, and their
-// hashes did NOT move across the same migration. So a moved hash here means "this effect gained the
-// guard", not "the migration drifted".
+// The control case proves it: WaveEffect ALREADY carried that guard, and its hash did NOT move
+// across the same migration. So a moved hash here means "this effect gained the guard", not "the
+// migration drifted". (NoiseEffect was a second control case until the gradient-noise swap and the
+// two-noise merge moved its hash for reasons of their own, recorded below.)
 //
 // Every other hash below was captured from the code BEFORE the migration and must not move. If one does,
 // either the migration changed the arithmetic (a bug — the accumulators are meant to be identical)
@@ -129,7 +130,7 @@ TEST_CASE("time-driven effects render byte-identical frames (migration guard)") 
     SUBCASE("heat rises, cools and colors through the palette")      { FireEffect e;            golden::checkGolden("FireEffect", golden::renderHash(e, 16, 16, 1), 0x1cadbabb59bc489bull); }
     SUBCASE("dye poured into a simulated medium, carried by the flow it works out") { FluidEffect e; golden::checkGolden("FluidEffect", golden::renderHash(e, 16, 16, 1), 0xdef67ab1f131e137ull); }
     SUBCASE("a field births light and a curl flow carries it into a cloud")          { NebulaEffect e; golden::checkGolden("NebulaEffect", golden::renderHash(e, 16, 16, 1), 0xc42116cc9f9cc33full); }
-    SUBCASE("dots thrown into a flow, leaving tails it carries and bends") { TrailsEffect e; golden::checkGolden("TrailsEffect", golden::renderHash(e, 16, 16, 1), 0x30489b453830f597ull); }
+    SUBCASE("dots thrown into a flow, leaving tails it carries and bends") { TrailsEffect e; golden::checkGolden("TrailsEffect", golden::renderHash(e, 16, 16, 1), 0x77993423ebe2f58cull); }
     SUBCASE("layered noise curtains, each drifting on its own clock")      { AuroraEffect e;          golden::checkGolden("AuroraEffect", golden::renderHash(e, 16, 16, 1), 0xfb4329a20959443dull); }
     SUBCASE("drops ripple, reflect off the edges and interfere")     { WaterRippleEffect e;     golden::checkGolden("WaterRippleEffect", golden::renderHash(e, 16, 16, 1), 0xa11f9c4f27cba8d5ull); }
     SUBCASE("a texture-mapped tunnel flying toward a vanishing point")          { TunnelEffect e;          golden::checkGolden("TunnelEffect", golden::renderHash(e, 16, 16, 1), 0x7b4d4451a3de3887ull); }

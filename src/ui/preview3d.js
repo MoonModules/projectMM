@@ -906,6 +906,7 @@ function drawVerts() {
     // Two passes so lit LEDs always sit ABOVE the grey placeholders. On a flat grid all LEDs share
     // a z-plane, so a single pass let draw order + z-fighting clip a lit dot behind a neighbor's
     // placeholder. Pass 1 draws the off-LED placeholders, pass 2 the lit ones with depthFunc LEQUAL
+    // so they land on top.
     // Placeholders do NOT write depth. They are decoration, not geometry: an unlit LED that
     // occupies the depth buffer HIDES every lit LED behind it, however transparent it looks, since
     // the depth test rejects the later fragment before its alpha is ever considered. That is what

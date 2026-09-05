@@ -786,7 +786,14 @@ uv run moondeck/docs/screenshot_modules.py    # requires projectMM running on lo
 uv run moondeck/docs/screenshot_modules.py --host 192.168.1.210:8080
 uv run moondeck/docs/screenshot_modules.py --gif    # also record 3-second GIF previews
 uv run moondeck/docs/screenshot_modules.py --force  # re-capture and overwrite existing screenshots
+uv run moondeck/docs/screenshot_modules.py --all-registered  # every registered module, not just the listed ones
 ```
+
+`--all-registered` is what keeps the set complete. The script carries a hand-written MODULES list
+for the few modules that need particular props or a parent that is not a Layer; every other
+registered effect and modifier is captured on a Layer with its defaults. Without it a module added
+today is silently skipped until someone remembers to edit the list, which is how 42 effects came to
+have no preview.
 
 The **GIF** and **Force** checkboxes in MoonDeck toggle these flags.
 

@@ -1,9 +1,7 @@
 #pragma once
 
-#include "core/oscillators.h"         // OscillatorBank: the drift, and the clock fieldRate counts
 #include "light/effects/EffectBase.h"   // and core/noise.h with it: fbm8, curl16
 
-#include <cstring>                    // memset: the reshape clear
 
 namespace mm {
 

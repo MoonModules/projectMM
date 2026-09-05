@@ -4,6 +4,13 @@
 
 ## TL;DR
 
+> **Status (2026-09-05): the three gaps this document names are closed.** Advection shipped as
+> `draw::advect`/`advect16`, gradient noise replaced value noise behind the same names, and color
+> state above 8 bits shipped as effect-owned 16-bit planes rather than a wide Layer (the top-down's
+> § 11 records why). The "What we need to add" list in Part 3 is therefore built, and the builtin
+> count below (55) is now 67. The rest of the document is a Stage-1 snapshot and is left as written.
+
+
 - **The target is two textbook techniques over one block set.** A **procedural shader**: color as a function of (position, time), computed per pixel from noise sampled through a coordinate transform. **Advection**: the previous frame transported by a velocity field and decayed, with sources drawn into it each frame. Both stand on the same primitives: a polar coordinate mapping, gradient noise with fractional Brownian motion and domain warping, low-frequency oscillators, a contrast window and palette, anti-aliased sub-pixel rasterization, a bilinear resampler, framerate-independent exponential decay, and fixed-point arithmetic with quantization last (Part 1).
 - **Every algorithm has a name and an originator.** Perlin noise (1985, 2002), fBm, domain warping (Quilez), semi-Lagrangian advection and stable fluids (Stam 1999, 2003), curl noise (Bridson 2007), flow-field particle tracing (Hobbs; Shiffman), Wu's anti-aliased lines (1991), coverage from signed distance, exponential half-life decay, LFO modulation. None needs more than adds, multiplies, a sine table and a noise function (Part 1).
 - **The cost model is arithmetic and decides the design.** A shader costs samples per pixel and scales with area × samples; advection costs a few loads and lerps per pixel per pass and scales with area × channels, plus memory for color state above 8 bits. For both, framerate is part of the rendering method: transport must stay sub-pixel per frame, decay must not step, oscillators must not alias. Throughput in pixels per second, not frames per second, is the honest metric (Part 1 § Cost).

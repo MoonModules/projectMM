@@ -1,10 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // kaleido, angle16
-#include "core/noise.h"               // fbm8: the field each layer samples
-#include "core/oscillators.h"         // OscillatorBank: every layer's motion
 #include "light/effects/EffectBase.h"
-#include "light/polar.h"              // PolarLut: the per-pixel angle and radius, precomputed
 
 namespace mm {
 

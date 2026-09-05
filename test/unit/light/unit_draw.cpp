@@ -640,3 +640,91 @@ TEST_CASE("upscale16 declines rather than writing when the caller's tap table is
     draw::upscale16(dst.data(), 16, 16, 1, src.data(), 4, 4, 1, taps.data(), taps.size());
     for (uint16_t v : dst) CHECK(v == 7);                // untouched
 }
+
+// advect16 and blit16 are what every wide-plane effect (Trails, Nebula, Fluid, and a scripted
+// trail) actually renders through, and neither had a test: the 8-bit advect was pinned and its
+// 16-bit sibling was not, which is how a plane-wide primitive ships unverified.
+
+TEST_CASE("a 16-bit plane carried by a whole-cell flow arrives intact, so light is transported rather than smeared away") {
+    // One lit cell, pushed one whole cell to the right each frame. A whole-cell step has no
+    // bilinear fraction, so the value must survive exactly: any loss here is the transport itself
+    // leaking, which over a hundred frames of a trail is the difference between a tail and a haze.
+    const lengthType W = 8, H = 1;
+    std::vector<uint16_t> a(size_t(W) * H * 3, 0), b(a.size(), 0);
+    a[(0 * 3) + 0] = 60000; a[(0 * 3) + 1] = 40000; a[(0 * 3) + 2] = 20000;
+    uint16_t* src = a.data(); uint16_t* dst = b.data();
+    for (int step = 1; step <= 3; step++) {
+        draw::advect16(dst, src, W, H, 1,
+                       [](lengthType, lengthType, lengthType, draw::pos_t& vx, draw::pos_t& vy) {
+                           vx = draw::pos_t(draw::kSubOne);   // exactly one cell
+                           vy = 0;
+                       }, draw::Edge::Clamp);
+        std::swap(src, dst);
+        CHECK(src[(size_t(step) * 3) + 0] == 60000);
+        CHECK(src[(size_t(step) * 3) + 1] == 40000);
+        CHECK(src[(size_t(step) * 3) + 2] == 20000);
+    }
+}
+
+TEST_CASE("a half-cell flow splits a 16-bit sample between the two cells it straddles, and loses none of it") {
+    // The bilinear case: half a cell of motion puts half the light in each neighbor. What matters
+    // is that the TOTAL is conserved, which is what keeps a long trail from fading on its own.
+    const lengthType W = 8;
+    std::vector<uint16_t> a(size_t(W) * 3, 0), b(a.size(), 0);
+    a[(4 * 3) + 0] = 40000;
+    draw::advect16(b.data(), a.data(), W, 1, 1,
+                   [](lengthType, lengthType, lengthType, draw::pos_t& vx, draw::pos_t& vy) {
+                       vx = draw::pos_t(draw::kSubOne / 2); vy = 0;
+                   }, draw::Edge::Clamp);
+    uint32_t total = 0;
+    for (lengthType x = 0; x < W; x++) total += b[(size_t(x) * 3)];
+    CHECK(total >= 39000);                      // conserved, bar the fixed-point rounding
+    CHECK(total <= 40000);
+    CHECK(b[(4 * 3)] > 0);                      // and it straddles the two cells
+    CHECK(b[(5 * 3)] > 0);
+}
+
+TEST_CASE("a flow off the edge circulates under Wrap and carries the light out of the grid under Clamp") {
+    // The advection samples BACKWARD (every destination asks where its contents came from), so a
+    // leftward flow means cell x reads cell x+1. Under Wrap the left column reads the right one and
+    // the light comes round; under Clamp nothing reads past the wall, so light that flows off the
+    // edge is GONE rather than piling up against it. Both are correct and an effect picks one: a
+    // trail that should circulate wants Wrap, a fluid in a box wants Clamp.
+    const lengthType W = 4;
+    std::vector<uint16_t> a(size_t(W) * 3, 0), b(a.size(), 0);
+    a[(0 * 3)] = 50000;                          // at the left wall, pushed further left
+    auto push = [](lengthType, lengthType, lengthType, draw::pos_t& vx, draw::pos_t& vy) {
+        vx = draw::pos_t(-draw::kSubOne); vy = 0;
+    };
+    draw::advect16(b.data(), a.data(), W, 1, 1, push, draw::Edge::Wrap);
+    CHECK(b[(size_t(W - 1) * 3)] == 50000);      // came round the far side, intact
+    std::fill(b.begin(), b.end(), uint16_t(0));
+    draw::advect16(b.data(), a.data(), W, 1, 1, push, draw::Edge::Clamp);
+    uint32_t total = 0;
+    for (lengthType x = 0; x < W; x++) total += b[(size_t(x) * 3)];
+    CHECK(total == 0);                           // left the grid rather than banking against the wall
+}
+
+TEST_CASE("blit16 narrows a wide plane to the canvas, and dithering carries the error a truncation would drop") {
+    // A value just under the halfway point of an 8-bit step: truncation reports the lower step on
+    // every frame forever, while the carry accumulates and reaches the higher one part of the time.
+    // That difference IS the smooth fade the 16-bit planes exist for.
+    const lengthType W = 4, H = 4;
+    Buffer buf;
+    REQUIRE(buf.allocate(static_cast<nrOfLightsType>(W) * H, 3));
+    buf.clear();
+    const draw::Canvas cv = draw::Canvas::of(buf, W, H, 1);
+    std::vector<uint16_t> plane(size_t(W) * H * 3, uint16_t(0x01C0));   // 1.75 of an 8-bit step
+    std::vector<uint8_t> carry(plane.size(), 0);
+
+    draw::blit16(cv, plane.data(), W, H, 1, nullptr);
+    for (size_t i = 0; i < size_t(W) * H * 3; i++) REQUIRE(buf.data()[i] == 1);   // truncated, always
+
+    int higher = 0;
+    for (int frame = 0; frame < 8; frame++) {
+        draw::blit16(cv, plane.data(), W, H, 1, carry.data());
+        if (buf.data()[0] == 2) higher++;
+    }
+    CHECK(higher > 0);                            // the carry reaches the step above
+    CHECK(higher < 8);                            // but not on every frame: it is a ratio, not a bias
+}

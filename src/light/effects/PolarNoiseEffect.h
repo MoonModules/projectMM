@@ -1,10 +1,6 @@
 #pragma once
 
-#include "core/math16.h"              // kaleido, angle16
-#include "core/noise.h"               // fbm8, warp8
-#include "core/oscillators.h"         // OscillatorBank: the drift, as an oscillator
 #include "light/effects/EffectBase.h"
-#include "light/polar.h"              // PolarLut: the per-pixel angle and radius, precomputed
 
 namespace mm {
 

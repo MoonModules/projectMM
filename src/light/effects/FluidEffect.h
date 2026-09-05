@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/oscillators.h"          // OscillatorBank: where the jets point, and how they breathe
 #include "light/effects/EffectBase.h"
 #include "light/fluid.h"               // the Stam solver: the medium itself
 
@@ -56,9 +55,20 @@ public:
         // would do and is a different solver. A panel is depth 1 and pays nothing for it.
         const bool medium = fluid_.resize(w, h, d);
         const size_t n = medium ? static_cast<size_t>(w) * h * d * 3 : 0;
+        const size_t had = dyeA_.count();
         dyeA_.resize(n);
         dyeB_.resize(n);
         carry_.resize(n);        // the dither's error, sized here: tick() is MM_NONBLOCKING
+        // Same sample count but a different shape (8x16 to 16x8, or a cube reshaped): resize() kept
+        // the samples and they are laid out for the old geometry, so they would smear. BOTH planes,
+        // because the ping-pong swaps the spare one in on the very next frame and clearing only the
+        // live one leaves the stale picture one frame away. (A changed count needs no clear:
+        // resize() zero-fills when it reallocates.) The guard Trails and Nebula carry.
+        if (n > 0 && n == had && (w != planeW_ || h != planeH_ || d != planeD_)) {
+            std::memset(dyeA_.data(), 0, dyeA_.bytes());
+            std::memset(dyeB_.data(), 0, dyeB_.bytes());
+        }
+        planeW_ = w; planeH_ = h; planeD_ = d;
         started_ = false;
         pourCarry_ = 0;
         poured_ = false;
@@ -153,6 +163,16 @@ public:
 
         draw::decay16(dye, dyeA_.count(), 40u + static_cast<uint32_t>(persistence) * persistence / 10u, dt);
         draw::blit16(canvas(), dye, w, h, d, carry_ ? carry_.data() : nullptr);
+    }
+
+    /// Read-only access to the dye planes, for the reshape test: a rendered frame pours fresh dye
+    /// over a stale plane, so the picture cannot tell a cleared plane from an uncleared one.
+    std::size_t dyeSamples() const { return dyeA_.count() + dyeB_.count(); }
+    uint16_t dyeAt(std::size_t i) const {
+        const std::size_t n = dyeA_.count();
+        if (i < n) return dyeA_.data()[i];
+        const std::size_t j = i - n;
+        return j < dyeB_.count() ? dyeB_.data()[j] : 0;   // past the end reads 0, never off it
     }
 
 private:
@@ -251,6 +271,7 @@ private:
     bool                    started_ = false;
     uint32_t                lastMs_ = 0;
     uint32_t                pourCarry_ = 0;   ///< time owed to the jets, in ms
+    lengthType              planeW_ = 0, planeH_ = 0, planeD_ = 0;   ///< the shape the planes hold
     bool                    poured_ = false;  ///< has the opening pour happened yet
 };
 

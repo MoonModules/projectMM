@@ -80,10 +80,10 @@
           "tick_us": {
             "p50": 30,
             "p95": 31,
-            "min": 30,
+            "min": 29,
             "max": 31,
-            "n": 4,
-            "samples": [30, 30, 30, 31]
+            "n": 8,
+            "samples": [30, 30, 30, 31, 30, 31, 29, 31]
           },
           "last_updated": "2026-09-05"
         }
@@ -100,12 +100,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 20,
+            "p50": 19,
             "p95": 20,
             "min": 19,
             "max": 20,
-            "n": 4,
-            "samples": [20, 20, 20, 19]
+            "n": 8,
+            "samples": [20, 20, 20, 19, 19, 19, 20, 19]
           },
           "last_updated": "2026-09-05"
         }
@@ -122,12 +122,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 69,
+            "p50": 68,
             "p95": 70,
-            "min": 68,
+            "min": 66,
             "max": 70,
-            "n": 4,
-            "samples": [69, 69, 68, 70]
+            "n": 8,
+            "samples": [69, 69, 68, 70, 68, 68, 66, 68]
           },
           "last_updated": "2026-09-05"
         }
@@ -144,12 +144,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 30,
+            "p50": 29,
             "p95": 31,
-            "min": 30,
+            "min": 29,
             "max": 31,
-            "n": 4,
-            "samples": [30, 31, 30, 30]
+            "n": 8,
+            "samples": [30, 31, 30, 30, 29, 29, 29, 29]
           },
           "last_updated": "2026-09-05"
         }
@@ -157,7 +157,7 @@
     },
     {
       "name": "grid-64",
-      "description": "Double each side under a running solver: four times the cells, and every one of the six grids is reallocated in prepare(). A solver that carried its old grid over would be addressing cells that no longer exist.",
+      "description": "Widen to 64 under a running solver, height still 32: one dimension doubled, so twice the cells, and every one of the six grids is reallocated in prepare(). A solver that carried its old grid over would be addressing cells that no longer exist.",
       "op": "set_control",
       "id": "Grid",
       "key": "width",
@@ -166,12 +166,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 65,
+            "p50": 64,
             "p95": 66,
-            "min": 64,
+            "min": 63,
             "max": 66,
-            "n": 4,
-            "samples": [64, 65, 65, 66]
+            "n": 8,
+            "samples": [64, 65, 65, 66, 66, 64, 64, 63]
           },
           "last_updated": "2026-09-05"
         }
@@ -187,16 +187,17 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 134,
+            "p50": 133,
             "p95": 138,
-            "min": 133,
+            "min": 130,
             "max": 138,
-            "n": 4,
-            "samples": [133, 134, 138, 136]
+            "n": 8,
+            "samples": [133, 134, 138, 136, 134, 131, 130, 132]
           },
           "last_updated": "2026-09-05"
         }
-      }
+      },
+      "description": "And the height, making it 64x64: four times the cells of the 32x32 the pair started from. Reallocating on each axis separately is the shape a UI resize actually takes."
     },
     {
       "name": "all-jets",
@@ -209,12 +210,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 136,
+            "p50": 133,
             "p95": 140,
-            "min": 133,
+            "min": 131,
             "max": 140,
-            "n": 4,
-            "samples": [133, 140, 137, 136]
+            "n": 8,
+            "samples": [133, 140, 137, 136, 135, 131, 132, 131]
           },
           "last_updated": "2026-09-05"
         }
@@ -231,12 +232,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 135,
-            "p95": 141,
-            "min": 134,
-            "max": 141,
-            "n": 4,
-            "samples": [134, 141, 138, 135]
+            "p50": 134,
+            "p95": 147,
+            "min": 130,
+            "max": 147,
+            "n": 8,
+            "samples": [134, 141, 138, 135, 147, 134, 130, 131]
           },
           "last_updated": "2026-09-05"
         }
@@ -253,12 +254,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 38,
-            "p95": 39,
-            "min": 36,
-            "max": 39,
-            "n": 3,
-            "samples": [39, 38, 36]
+            "p50": 36,
+            "p95": 40,
+            "min": 35,
+            "max": 40,
+            "n": 7,
+            "samples": [39, 38, 36, 40, 36, 35, 36]
           },
           "last_updated": "2026-09-05"
         }
@@ -278,8 +279,8 @@
             "p95": 12,
             "min": 11,
             "max": 12,
-            "n": 3,
-            "samples": [12, 11, 11]
+            "n": 7,
+            "samples": [12, 11, 11, 11, 11, 11, 11]
           },
           "last_updated": "2026-09-05"
         }
@@ -295,12 +296,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 232,
+            "p50": 222,
             "p95": 249,
-            "min": 229,
+            "min": 220,
             "max": 249,
-            "n": 3,
-            "samples": [249, 232, 229]
+            "n": 7,
+            "samples": [249, 232, 229, 220, 220, 220, 222]
           },
           "last_updated": "2026-09-05"
         }
@@ -321,8 +322,8 @@
             "p95": 12,
             "min": 11,
             "max": 12,
-            "n": 3,
-            "samples": [12, 11, 11]
+            "n": 7,
+            "samples": [12, 11, 11, 11, 11, 11, 11]
           },
           "last_updated": "2026-09-05"
         }
@@ -339,12 +340,12 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 9,
+            "p50": 8,
             "p95": 29,
-            "min": 9,
+            "min": 8,
             "max": 29,
-            "n": 4,
-            "samples": [29, 9, 9, 9]
+            "n": 8,
+            "samples": [29, 9, 9, 9, 8, 8, 8, 8]
           },
           "last_updated": "2026-09-05"
         }
@@ -362,10 +363,10 @@
           "tick_us": {
             "p50": 7,
             "p95": 7,
-            "min": 7,
+            "min": 6,
             "max": 7,
-            "n": 4,
-            "samples": [7, 7, 7, 7]
+            "n": 8,
+            "samples": [7, 7, 7, 7, 6, 7, 6, 7]
           },
           "last_updated": "2026-09-05"
         }

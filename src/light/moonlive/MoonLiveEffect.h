@@ -73,6 +73,12 @@ public:
     // unchanged script costs a read rather than a re-JIT. It reports the status and the dynamic
     // bytes itself, which is why nothing here repeats that.
     void prepare() override {
+        // The next tick is the first: it has no previous frame to measure against. Without this the
+        // frame after a disable, a re-enable or a resize hands the flow and the decay the whole
+        // interval the module sat idle, which teleports the trail and fades it away. Trails, Nebula
+        // and Fluid reset the same flag in prepare() for the same reason; setting it once at
+        // construction covers only the very first frame of the module's life.
+        tickStarted_ = false;
         // The script sizes its own pool from defineControls(), which sync() runs after a compile.
         script_.setPoolSizer([](void* ctx, uint16_t n) -> uint16_t {
             return static_cast<MoonLiveEffect*>(ctx)->particles_.resize(n);
@@ -134,8 +140,13 @@ public:
         // pay. The binding owns the geometry, the ping-pong and the dt for the same reason it owns
         // the particle pool's frame scale: none of it is the script author's to get right.
         const uint32_t nowMs = elapsed();
-        const uint32_t dt = nowMs - lastTickMs_;
+        // A zero delta on the first tick, and on the first after a disable: `nowMs - 0` hands the
+        // flow and the decay the whole uptime, which teleports the trail and fades it away on the
+        // frame it starts. Trails, Nebula and Fluid each carry this guard; the binding needs it for
+        // the same reason.
+        const uint32_t dt = tickStarted_ ? nowMs - lastTickMs_ : 0u;
         lastTickMs_ = nowMs;
+        tickStarted_ = true;
         if (trailA_) {
             moonlive::FlowSink f{};
             f.a = trailA_.data();
@@ -201,29 +212,22 @@ private:
     // holds the trail, and the flow builtins flip it through a pointer.
     ScratchBuffer<uint16_t> trailA_{*this};
     ScratchBuffer<uint16_t> trailB_{*this};
+    ScratchBuffer<uint8_t>  trailCarry_{*this};   ///< the dither's per-channel error
     bool                    trailFront_ = true;
     uint32_t                frameCount_ = 0;   ///< the counter fieldRate reads
     bool                    trailWanted_ = false;
     uint32_t                lastTickMs_ = 0;
+    bool                    tickStarted_ = false;   ///< has a frame been timed yet
+    lengthType              trailW_ = 0, trailH_ = 0, trailD_ = 0;  ///< the shape the planes hold
 
-    /// The wide trail plane onto the layer. `draw::pixel` per light rather than a memcpy, because
-    /// the plane holds three uint16 per light while the layer holds `cpl` bytes: the widths differ
-    /// and so may the channel count.
+    /// The trail plane onto the layer. Through `draw::blit16` like the compiled effects: a
+    /// fourth hand-rolled copy of the narrowing loop is what left this one truncating where the
+    /// others dithered, which is the divergence blit16 exists to end.
     void blitTrail() {
-        const uint16_t* p = (trailFront_ ? trailA_ : trailB_).data();
-        if (!p) return;
-        const draw::Canvas cv = canvas();
         const lengthType w = width(), h = height(), d = depth();
-        const std::size_t samples = static_cast<std::size_t>(w) * h * d * 3;
-        std::size_t i = 0;
-        for (lengthType z = 0; z < d; z++)
-            for (lengthType y = 0; y < h; y++)
-                for (lengthType x = 0; x < w; x++, i += 3) {
-                    if (i + 2 >= samples) return;
-                    draw::pixel(cv, {x, y, z}, RGB{static_cast<uint8_t>(p[i] >> 8),
-                                                   static_cast<uint8_t>(p[i + 1] >> 8),
-                                                   static_cast<uint8_t>(p[i + 2] >> 8)});
-                }
+        if (!trailA_ || !trailB_) return;
+        const uint16_t* live = trailFront_ ? trailA_.data() : trailB_.data();
+        draw::blit16(canvas(), live, w, h, d, trailCarry_ ? trailCarry_.data() : nullptr);
     }
 
     /// Size (or free) the trail planes for the current fixture. Returns whether one is available,
@@ -231,14 +235,33 @@ private:
     /// rendering nothing in silence.
     bool resizeTrail(bool want) {
         trailWanted_ = want;
-        if (!want) { trailA_.resize(0); trailB_.resize(0); return false; }
-        const size_t n = static_cast<size_t>(width()) * height() * depth() * 3;
-        if (n == 0) { trailA_.resize(0); trailB_.resize(0); return false; }
-        if (!trailA_.resize(n) || !trailB_.resize(n)) {
-            trailA_.resize(0); trailB_.resize(0);       // a half-allocated pair is worse than none
+        // Every exit frees all THREE buffers together: the carry is as much part of the trail as
+        // the planes, and leaving it behind on a failure path is memory nothing will ever read.
+        if (!want) { releaseTrail(); return false; }
+        const lengthType w = width(), h = height(), d = depth();
+        const size_t n = static_cast<size_t>(w) * h * d * 3;
+        if (n == 0) { releaseTrail(); return false; }
+        const size_t had = trailA_.count();
+        if (!trailA_.resize(n) || !trailB_.resize(n) || !trailCarry_.resize(n)) {
+            releaseTrail();                             // a half-allocated set is worse than none
             return false;
         }
+        // Same sample count but a different shape (8x16 to 16x8, or a cube reshaped): resize() kept
+        // the samples and they are laid out for the old geometry, so they would smear. BOTH planes,
+        // because the ping-pong swaps the spare one in on the very next frame. The guard Trails,
+        // Nebula and Fluid all carry; a scripted trail is no different.
+        if (n == had && (w != trailW_ || h != trailH_ || d != trailD_)) {
+            std::memset(trailA_.data(), 0, trailA_.bytes());
+            std::memset(trailB_.data(), 0, trailB_.bytes());
+        }
+        trailW_ = w; trailH_ = h; trailD_ = d;
         return true;
+    }
+
+    /// Free the trail set. One place, so a new buffer cannot be forgotten on one exit path.
+    void releaseTrail() {
+        trailA_.resize(0); trailB_.resize(0); trailCarry_.resize(0);
+        trailW_ = trailH_ = trailD_ = 0;
     }
 };
 
