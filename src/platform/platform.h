@@ -982,7 +982,10 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbo
 // timed-out frame is simply dropped and re-encoded next tick (self-heals). With
 // N channels waited sequentially the worst case is N×timeoutMs; acceptable for
 // the same self-healing reason.
-void rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs);
+/// Block until this channel's transmit completes. Returns false on TIMEOUT, meaning the frame is
+/// STILL CLOCKING OUT: the caller must not touch the symbol buffer it handed over, because the
+/// peripheral is still reading it.
+bool rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs);
 
 void rmtWs2812Deinit(RmtWs2812Handle& h);
 

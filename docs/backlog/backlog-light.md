@@ -25,6 +25,117 @@ Forward-looking to-build items for the **light domain** (`src/light/`: drivers, 
 MoonLight has several moving-head effects that have no equivalent here, two of them troyhack's.
 Migrate them all, on the power functions per the standing mandate rather than traced across.
 
+### RMT over DMA on the S3/P4, with a completion callback (Funkelfetisch, July 2026)
+
+Funkelfetisch's fork carries a finished branch, `codex/upstream-rmt-rgbw-performance`, that the
+classic-ESP32 flicker work of 2026-09-05 makes worth adopting: on chips with RMT DMA
+(`SOC_RMT_SUPPORT_DMA`: S3, P4) it sets `with_dma` with the IDF-recommended 1024-symbol block, so
+the frame streams from RAM and the refill interrupt that causes flicker on a DMA-less chip does not
+exist at all. It replaces the blocking `rmt_tx_wait_all_done` with `rmt_tx_register_event_callbacks`
+(`on_trans_done`) plus a per-channel busy flag so the next tick skips while a frame is in flight,
+and reports `"RMT DMA"` in the driver status so a user can see which path is live. Files:
+`platform_esp32_rmt.cpp` (+105), `RmtLedDriver.h` (+75), `LedDriverConfig.h`, `Correction.h`
+(RGBW presets, a separate topic in the same branch), with unit tests.
+
+What it does NOT address: on the classic ESP32 the DMA half compiles to nothing, and nothing in it
+moves the channel's interrupt off core 0 (the root cause found on the Dig-Next-2, fixed by
+creating the channel from core 1). The two are complementary, one driver with the right answer
+per chip: DMA where the silicon has it, the core-1 refill where it does not. Adopt his DMA and
+callback path, keep the core hop, and drop the classic-only `txInFlight_` guard where his busy
+flag covers it. Study, do not copy: write it against the seam as it stands, credit the branch.
+
+### A script's setControl rebuilds a control subtree on every write (2026-09-06)
+
+Measured on the P4 at .139: **2 fps**, with `MoonLive-2` at 251 ms and `MoonLive-3` at 245 ms per
+tick, together 498 ms of a 506 ms frame, and HTTP down to a 0.5 s round trip because it is served
+from the same loop. Both services ran `sweep.mls`, whose `tick20ms` writes four faders. Two copies
+at 50 Hz is 400 control writes a second, and `Scheduler::setControl` calls `rebuildControls()`
+unconditionally on each one:
+
+```
+clearControlsRecursive();   // wipes this module's controls AND every child's, recursively
+defineControls();           // then rebuilds them all
+```
+
+So each fader write tears down and re-creates the whole `Control` subtree. A person moving a slider
+does this a few times a second and nobody notices; a script at 50 Hz multiplies it by hundreds.
+
+Two things to fix, and they are independent. **The rebuild should be conditional**: a `live`
+control's value change cannot alter the schema, and `rebuildControls` already computes
+`schemaSignature()` before and after to decide whether to notify, so it knows. Rebuilding only when
+the shape can actually change (what `setLive` and `affectsPrepare` already distinguish) removes the
+cost for every value write, scripted or human. **And the script tick is too fast for its job**: a
+fader sweep does not need 50 Hz, so `sweep.mls` should run on a slower tick, which also caps the
+damage any future script can do through this path.
+
+Not a regression from the RMT work: it predates it and was found while measuring an unrelated slow
+board.
+
+### Speed up the fluid solver: 4 fps at 128x128, and it is not the divide (2026-09-05)
+
+Measured on an S31 (RISC-V, 320 MHz, octal PSRAM at 200 MHz), `iterations` 5, depth 1:
+
+| grid | Fluid tick | fps | cycles per cell-update |
+|---|---|---|---|
+| 32x32 | 8.5 ms | 109 | 151 |
+| 64x64 | 38 ms | 24 | 159 |
+| 128x128 | 204 ms | 4 | 205 |
+
+A cell-update is four loads, three adds, a multiply and a store: under 20 cycles of arithmetic. It
+costs **151 even at 32x32**, where the whole working set is small enough to cache, so the loop
+itself is roughly 8x more expensive than the work it does. Memory adds a further 35% by 128x128 but
+is not the wall: at 4 fps the solver moves ~25 MB/s, about 5% of what this PSRAM delivers.
+
+**A wrong turn worth recording.** The first diagnosis blamed the 64-bit divide in `relax()`, on the
+reasoning that Xtensa has no integer divide instruction. It was implemented (a power-of-two shift
+dispatched once per call, bit-exact over 8M values) and measured on the board: **no change, 326 ms
+before and after**, so it was reverted. Two errors: the S31 is RISC-V rather than Xtensa, and at
+151 cycles per update the divide was never the dominant term. A desktop measurement could not have
+caught either, since arm64 divides in hardware; only the board settles it.
+
+**Allocation placement is worth 1.6x, and nobody chose it.** Same firmware, same grid, same
+controls: **326 ms after a fresh boot, 204 ms after resizing the grid to 32 and back to 128**,
+reproducible across reboots. The solver's six buffers are ~638 KB and land in PSRAM either way, but
+where they land at boot is slower than where they land once the heap has moved. Whatever is done
+about speed, this says a boot-time allocation can be paying a large penalty invisibly, and it is
+worth understanding before optimizing the loop around it.
+
+Ordered by expected return:
+
+1. **Cut the 64-bit arithmetic in the inner loop.** Every cell computes an `int64` shift, an
+   `int64` multiply and an `int64` divide on a 32-bit core, where each is several instructions and
+   a register pair. This is the most likely source of the 151 cycles. A 32-bit formulation, or a
+   narrower intermediate with a proven bound, is the first thing to measure. Precedent: the SWAR
+   work found the 32-bit pair form bit-identical and 41% smaller.
+2. **Hoist `idx()`.** The loop addresses five neighbors per cell through `idx(x, y)`, each a
+   multiply-add. Walking row pointers instead is the standard fix and removes most of the address
+   arithmetic.
+3. **Understand the allocation-placement effect above**, since it is worth more than most loop
+   tuning and costs nothing to trigger deliberately once understood.
+4. **Solve the pressure at half resolution.** Pressure is smooth, so a half-scale solve with a
+   bilinear upsample of its gradient costs a quarter of the cells. Same trade `fieldScale` already
+   makes for noise fields, measured 3.0x there. Changes the picture slightly, unlike 1 to 3.
+5. **Fewer iterations, documented per target.** Linear in cost: 5 to 2 is 2.5x, and the picture
+   gets springier. The card should say what a target can afford rather than leaving a user to find
+   4 fps.
+6. **Question whether the full solver belongs on this class of board at all.** See the ColorTrails
+   entry below: a separable noise advection gets a flowing, swirling picture for two passes over
+   the grid and no solve. The fluid's own header already calls it a desktop and P4 effect.
+
+**Why `fluid.mle` runs at 13 fps while the compiled effect runs at 3.** They are not the same
+algorithm, and the script is not a faster fluid: it is not a solver at all. `fluid.mle` calls
+`flowCurl`, which is curl noise, a divergence-free velocity read analytically from noise
+derivatives in one advection pass, with no solve. Per frame at 128x128 the script visits ~16k cells
+and divides nowhere; the compiled solver visits ~429k, of which 318k carry the 64-bit divide. That
+is 27x the work, and the measured gap is only 4.3x because the interpreter gives most of it back in
+dispatch overhead. So a COMPILED curl effect would beat both. What curl cannot do is what a solver
+does: no pressure, no interaction between jets, and no vortex forming out of the flow's own
+history. Whether that is worth 27x is a question for the product owner's eyes.
+
+**Measure on hardware, not on the desktop**: this is an in-order-core property and the desktop
+divides in hardware, which is exactly how the wrong diagnosis above survived a desktop check.
+Record before and after in performance.md per target.
+
 ## Drivers
 
 ### Logarithmic brightness, and a power budget the device knows about (2026-09-02)

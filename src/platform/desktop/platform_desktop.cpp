@@ -1930,7 +1930,7 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols,
     if (!h.impl || !symbols || symbolCount == 0) return false;
     return true;
 }
-void rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) {}
+bool rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) { return true; }
 void rmtWs2812Deinit(RmtWs2812Handle& h) {
     delete static_cast<HostRmt*>(h.impl);
     h.impl = nullptr;

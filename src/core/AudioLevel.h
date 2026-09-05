@@ -19,14 +19,22 @@ namespace mm {
 //     window = a sound fills more of the range: spanDb = (255-gain)/4 + 4.
 // Human hearing is logarithmic and FFT/RMS magnitudes span a huge range, so a
 // linear map crushes the quiet or saturates the loud; this is the standard fix.
-inline uint8_t magToByte(float m, uint16_t noiseFloor, uint16_t gain) {
-    if (m <= 1.0f) return 0;
-    const float floorDb = 60.0f + static_cast<float>(noiseFloor) * 0.5f;
-    const float spanDb = static_cast<float>(255 - gain) * 0.25f + 4.0f;
-    const float t = (20.0f * std::log10(m) - floorDb) / spanDb;
+/// The display window in dB: where it starts and how wide it is. One home for the two knobs.
+inline float windowFloorDb(uint16_t noiseFloor) { return 60.0f + static_cast<float>(noiseFloor) * 0.5f; }
+inline float windowSpanDb(uint16_t gain)        { return static_cast<float>(255 - gain) * 0.25f + 4.0f; }
+
+/// A value already in dB onto 0..255 through the window. The band path conditions in dB first
+/// (AudioBands.h, BandConditioner) and then comes here, so the window means one thing everywhere.
+inline uint8_t dbToByte(float db, uint16_t noiseFloor, uint16_t gain) {
+    const float t = (db - windowFloorDb(noiseFloor)) / windowSpanDb(gain);
     if (t <= 0.0f) return 0;
     if (t >= 1.0f) return 255;
     return static_cast<uint8_t>(t * 255.0f);
+}
+
+inline uint8_t magToByte(float m, uint16_t noiseFloor, uint16_t gain) {
+    if (m <= 1.0f) return 0;
+    return dbToByte(20.0f * std::log10(m), noiseFloor, gain);
 }
 
 // DC-blocker: the standard one-pole/one-zero high-pass that removes the constant
