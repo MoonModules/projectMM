@@ -1949,13 +1949,14 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     if (!source) { r.error = "no source"; return r; }
     if (!out || cap == 0) { r.error = "no code buffer"; return r; }
 
-    // Size the op array to THIS script before parsing. The bound is per-TOKEN rather than
-    // per-construct: no token the lexer can produce lowers to more than a handful of ops (the
-    // densest is a call argument — evaluate, then the Call itself), so counting tokens and
-    // multiplying is an over-estimate that cannot undershoot. Over-estimating costs a few unused
-    // entries on a cold path; undershooting would fail a script that fits, so the direction of the
-    // error is the whole point. push() still refuses past `cap`, so a wrong estimate degrades with
-    // a diagnostic rather than corrupting memory.
+    // Size the op array to THIS script before parsing, from its token count times kIrOpsPerToken.
+    // That constant is EMPIRICAL, not a per-construct bound: measured across every shipped script
+    // the ratio is 0.75 ops per token and never above 0.85, and the reservation is the largest
+    // single block a compile makes on a classic ESP32, so it is sized to what scripts need rather
+    // than to a worst case that failed real scripts (see kIrOpsPerToken). A script denser than the
+    // constant is refused by push() with "script too large" rather than corrupting memory, which is
+    // the graceful direction; the cost of a too-small constant is a refusal, of a too-large one a
+    // compile that cannot get its memory at all.
     const uint32_t tokens = countTokens(source);
     IrProgram ir;
     // +8 covers a program's fixed overhead (the prologue/epilogue ops a tiny script still needs)
@@ -1978,7 +1979,21 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     // what a device would execute without flashing one. The front end is identical either way, which
     // is the point — the seam is one function pointer, not a second copy of the compiler.
     size_t len = lower ? lower(ir, out, cap, squeeze) : lowerToBytes(ir, out, cap, squeeze);
-    if (len == 0) { r.error = kCodegenFailed; return r; }
+    // len == 0 with a null buffer means an allocation failed upstream, not that the program is
+    // unlowerable: report the cause a user can act on (free memory) rather than one they cannot.
+    if (len == 0) {
+        switch (lowerRefusal()) {
+            // The allocator's own numbers are in spillDetail() (thread_local, outlives this result), so
+            // the error is a literal and the caller formats the detail if it wants it: nothing here
+            // owns a buffer the result would carry out of scope.
+            case LowerRefusal::Spill:       r.error = kSpillRefused; break;
+            case LowerRefusal::NullCall:    r.error = "codegen failed: a builtin has no function on this target"; break;
+            case LowerRefusal::AsmOverflow: r.error = "codegen failed: assembler overflow (branch range, slot, or immediate)"; break;
+            case LowerRefusal::OverCap:     r.error = "codegen failed: code larger than its buffer"; break;
+            default:                        r.error = kCodegenFailed; break;
+        }
+        return r;
+    }
     r.ok = true;
     r.len = len;
     // Surface the declared controls so the binding can create real MoonModule controls.

@@ -2143,3 +2143,33 @@ TEST_CASE("a returning function still works as a statement, with its value dropp
     CHECK(buf[0] == 1);
     eng.free();
 }
+
+// A compile that has no buffer to emit into is a MEMORY failure and must say so. It used to fall
+// through to kCodegenFailed ("unsupported on this target, or too large"), which sends a user, and
+// an investigator, after the script when the fix is to free heap. Bench 2026-09-09: noise.mle on a
+// fragmented classic ESP32.
+TEST_CASE("compileSource: a missing code buffer is refused before any lowering runs") {
+    // The guard is in compileSource itself, so no LowerRefusal can fire for it: there is exactly one
+    // message for this case and it is this one. (A separate "no memory" constant used to exist for
+    // a NoBuffer refusal that this guard made unreachable; it was deleted rather than kept dead.)
+    auto r = moonlive::compileSource(mmScript("setRGB(0, 1, 2, 3);"), kTable, kSys, nullptr, 64);
+    CHECK_FALSE(r.ok);
+    CHECK(std::string(r.error) == "no code buffer");
+}
+
+// The allocator's refusal must reach the caller as a pointer that outlives the CompileResult: a
+// buffer inside that temporary dangled (pre-merge review, 2026-09-09). The contract now is that
+// `error` is a string literal, so it is valid forever; the numbers behind it live in spillDetail().
+TEST_CASE("compileSource: a register refusal returns a literal, and spillDetail carries the numbers") {
+    const char* src = "class E {\n  int dimensions() { return 2; }\n  void tick() {\n"
+                      "    for (int x = 0; x < width; x = x + 1) { setRGB(x, 1, 2, 3); }\n  }\n}\n";
+    moonlive::RegBudget tiny{1, 0, 8};
+    uint8_t code[moonlive::kCodeCap];
+    auto r = moonlive::compileSource(src, kTable, kSys, code, sizeof(code), &tiny);
+    REQUIRE_FALSE(r.ok);
+    // By CONTENT, not address: clang merges identical literals so the pointers happened to
+    // coincide, GCC gives the inline constexpr a distinct address per translation unit and the
+    // pointer compare failed on CI while the strings were identical. The contract is the text.
+    CHECK(std::strcmp(r.error, moonlive::kSpillRefused) == 0);
+    CHECK(moonlive::spillDetail().guard != 0);            // and the guard that fired is recorded
+}

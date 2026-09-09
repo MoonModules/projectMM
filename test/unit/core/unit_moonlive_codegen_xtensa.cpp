@@ -23,6 +23,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 
 // The SHARED front end first, at real `mm::moonlive` scope: the backend below drags in the IR
@@ -389,4 +392,37 @@ TEST_CASE("Xtensa: a fixed multiply emits mulsh beside mull") {
     for (size_t i = 0; i + 2 < bytes.size(); i++)
         if (bytes[i] == 0xb2) { sawMulsh = true; break; }
     CHECK(sawMulsh);
+}
+
+
+
+// Every SHIPPED script compiles for the classic ESP32 at the buffer the device itself sizes
+// (codeCapFor of its token count), read from moonlive/ on disk so there is one home for each script
+// and a newly added one is under test the moment it exists. This is the contract behind the factory
+// catalog: a user on a Dig-Next-2 or a Dig-Octa picks any of these and gets an effect. It is a
+// COMPILER guardrail: a host has no heap ceiling, so it cannot see the allocation failures that
+// were reported as "codegen failed" on 2026-09-09 (the on-device sweep is the test for those).
+TEST_CASE("Xtensa: every shipped script compiles at the device's own code budget") {
+    const std::filesystem::path dir =
+        std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path()
+        / "moonlive" / "effects";
+    REQUIRE(std::filesystem::exists(dir));
+    int checked = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".mle") continue;
+        std::ifstream f(entry.path());
+        std::ostringstream ss; ss << f.rdbuf();
+        const std::string src = ss.str();
+        std::vector<uint8_t> out(mm::moonlive::codeCapFor(mm::moonlive::countTokens(src.c_str())));
+        static char strings[mm::moonlive::CompileResult::kStringPool];
+        auto r = mm::moonlive::compileSource(src.c_str(), mm::moonlive::lightBuiltins(),
+                                             mm::moonlive::effectSysVars(), out.data(), out.size(),
+                                             nullptr, MM_ISA_LOWER, strings, sizeof(strings));
+        INFO(entry.path().filename().string() << ": " << (r.error ? r.error : ""));
+        CHECK(r.ok);
+        CHECK(r.len > 0);
+        CHECK(r.len <= out.size());   // never past the buffer the device allocated
+        checked++;
+    }
+    CHECK(checked >= 33);   // the shipped set as of 2026-09-09; a silently empty folder must not pass
 }

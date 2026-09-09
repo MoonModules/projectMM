@@ -1,4 +1,5 @@
 #include "core/moonlive/MoonLive.h"
+#include <cstdio>
 #include "core/moonlive/MoonLiveCompiler.h"
 #include "platform/platform.h"
 
@@ -113,7 +114,22 @@ bool MoonLive::compile(const char* source, const BuiltinTable& table, const SysV
     // the compiler's convention and everyone else's, rather than in each reader.
     if (!cr.ok) {
         freeCode();
-        error_ = cr.error;
+        // The allocator's refusal is the one error worth the numbers behind it (which guard, and the
+        // budget it saw): they are what turned "codegen failed" into a diagnosis on the bench. One
+        // FILE-static line, formatted on this cold path only: not a buffer per engine (there are
+        // several), not one per result (a temporary; a pointer into it dangled). Two modules failing
+        // this way at once would share the line, which is a diagnostic corner, not a data path.
+        if (cr.error == kSpillRefused) {
+            // 160: the literal is 63 bytes and each of six uint8 fields can print three digits, which
+            // GCC's -Wformat-truncation proved 112 could clip (clang says nothing, the CI gap).
+            static char detail[160];
+            const SpillDetail& d = spillDetail();
+            std::snprintf(detail, sizeof(detail), "%s (guard %u, avail %u, temps %u, vregs %u, slots %u, spilled %u)",
+                          kSpillRefused, d.guard, d.avail, d.temps, d.vregs, d.slots, d.spilled);
+            error_ = detail;
+        } else {
+            error_ = cr.error;
+        }
         errorPos_ = cr.errorCol > 0 ? static_cast<uint16_t>(cr.errorCol - 1) : 0;
         hasErrorPos_ = true;
         return false;
