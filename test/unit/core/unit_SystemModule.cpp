@@ -4,6 +4,7 @@
 #include "core/SystemModule.h"
 
 #include <cstring>
+#include <string>
 
 namespace {
 // Stand-in wired-by-code child: counts the lifecycle callbacks a real fixed
