@@ -2143,3 +2143,16 @@ TEST_CASE("a returning function still works as a statement, with its value dropp
     CHECK(buf[0] == 1);
     eng.free();
 }
+
+// A compile that has no buffer to emit into is a MEMORY failure and must say so. It used to fall
+// through to kCodegenFailed ("unsupported on this target, or too large"), which sends a user, and
+// an investigator, after the script when the fix is to free heap. Bench 2026-09-09: noise.mle on a
+// fragmented classic ESP32.
+TEST_CASE("compileSource: a missing code buffer is refused before any lowering runs") {
+    // The guard is in compileSource itself, so no LowerRefusal can fire for it: there is exactly one
+    // message for this case and it is this one. (A separate "no memory" constant used to exist for
+    // a NoBuffer refusal that this guard made unreachable; it was deleted rather than kept dead.)
+    auto r = moonlive::compileSource(mmScript("setRGB(0, 1, 2, 3);"), kTable, kSys, nullptr, 64);
+    CHECK_FALSE(r.ok);
+    CHECK(std::string(r.error) == "no code buffer");
+}

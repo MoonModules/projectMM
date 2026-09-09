@@ -906,73 +906,32 @@ file name for the editor, so the value exists; what is missing is using it as th
 list changes. The alternative, appending new scripts rather than sorting them, keeps indices stable
 but makes the picker unreadable as the list grows, which is the trade the sort was chosen over.
 
-## Move the remaining board entries off RmtLedDriver (2026-09-08)
+## Classic-board memory: the wins are system-level, not per-module (2026-09-09)
 
-**Superseded on 2026-09-09, and the memory half of this item no longer applies.** `RmtLedDriver`
-now ships the correction's WIRE BYTES and lets the peripheral expand them (the IDF bytes encoder on
-the DMA chips, the level-5 refill on classic), so its buffer is `lights x channels` = 3 bytes per
-RGB light and 4 for RGBW, flat in the expansion. Bench, Dig-Next-2 at 1,024 lights: 3,075 bytes
-against 98,307 under the old form, a 32x cut. Dig-2-Go at 341 lights: 32,772 bytes to 1,028, which
-handed 33 KB of internal RAM back to the system. The crossover below is therefore gone,
-RMT is now the cheaper driver at every light count, and the reason to move a board off it is
-throughput or pin count rather than memory.
+The Dig-Octa on a clean boot with RmtLed has **88,284 bytes free internal, 86,016 largest block**.
+Under load and after driver swaps that largest block fell to 24,576, so fragmentation matters as
+much as the total.
 
-The rest of this entry is kept as the record of why the swaps that were already made were made.
+What the modules hold is NOT where the RAM went. The whole tree reports **9,342 bytes** of
+`dynamicBytes` (Layer 3,586, Preview 2,560, RmtLed 1,536, Drivers 1,536). So per-module trimming has
+almost nothing left to win, and the remaining ~230 KB of internal RAM in use is WiFi, lwIP, FreeRTOS
+task stacks and the binary's static data.
 
-Historically `RmtLedDriver` expanded every bit into a 32-bit hardware symbol, so its buffer cost
-`lights x channels x 8 x 4`: **96 bytes per RGB light, 128 for a 4-channel RGBW or GRBW preset**,
-since `channels` is the preset's output width rather than a constant.
-`ParallelLedDriver` bit-bangs the lanes through one I2S/LCD_CAM transfer and costs **384 bytes
-flat**, independent of pin count and light count. Measured on the bench, same hardware and same
-light count either side:
+Where to look, in order of likely return:
 
-| Board | Lights | RmtLed | ParallelLed | FPS |
-|---|---|---|---|---|
-| QuinLED Dig-Octa 32-8L (8 pins) | 512 | 49,155 B | 384 B | 99 to 407 |
-| QuinLED Dig-Next-2 (.186 vs .122) | 256 | 24,579 B | 384 B | - |
+- **Task stack sizes.** Every task allocates its stack from internal RAM at creation, and the
+  defaults are generous. The Tasks module already reports them, so the measurement exists.
+- **lwIP pool sizes** (`CONFIG_LWIP_*`): TCP PCBs, pbuf counts, and the send/receive windows are all
+  sdkconfig knobs, sized for a general-purpose device rather than a controller with a handful of
+  connections.
+- **WiFi buffer counts** (`CONFIG_ESP32_WIFI_*_BUFFER_NUM`): the static RX/TX buffer pools are the
+  single largest tunable block on a classic board.
+- **Fragmentation, not just totals.** A 24 KB largest block with 50 KB free is a placement problem;
+  allocating the long-lived buffers early and together is what fixes that.
 
-On a classic ESP32 with ~320 KB of internal DRAM that is the difference between 24 KB and 61 KB of
-largest contiguous block, which is what a large allocation actually fails on.
+Each is an sdkconfig change measurable on the bench in minutes (`freeInternal` and `maxBlock` on a
+clean boot), and each risks a different failure: too few WiFi buffers drops packets under load, too
+small a stack overflows under a rare path. So measure one at a time on a board that is actually
+serving the UI, not idle. The payoff is real: at 88 KB free a classic board is one large allocation
+away from trouble, which is what drove both driver decisions on 2026-09-09.
 
-Both those entries are switched. **Twenty entries still specify `RmtLedDriver`**, and most of them
-should stay that way: measured on the QuinLED Dig-2-Go (one lane, 256 lights, no PSRAM), the swap
-CUT the driver's own readout from 32,772 to 512 bytes and LOST 49 KB of free heap (96,552 to
-47,156, steady after a reboot). The i80 DMA frame is sized by the bus width, not the pins in use, so
-a one-lane board pays the same ~50 KB as an eight-lane one, while RMT cost 96 bytes per RGB light
-(128 for RGBW). The crossover was around 500 RGB lights, and lower for a 4-channel preset. (That
-fixed frame was invisible on the card until `driverHeapBytes()` started counting it.) Both numbers
-are historical: see the note at the top of this entry.
-
-For the boards where it does pay, the blocker is not the driver: it is that each one needs a **DC
-pin chosen against that board's real pinout**, and picking one blind is how a peripheral lands on a
-pad the package does not have ([lessons](../history/lessons.md), PICO-V3-02: silent TG1WDT, PC at
-panicHandler).
-
-**Two cost classes, and they differ by chip.** On a classic ESP32 only DC costs a GPIO: WR is routed
-through the GPIO matrix to SENSOR_VP (36), bonded on every classic package and driving nothing, so
-`clockPin` can stay -1. On S3 / P4 / S31 the LCD_CAM backend needs a real pad for **both** WR and DC
-(`platform_esp32_i80.cpp`), so those boards pay two pins for a saving that is small at one lane.
-
-**What each board needs**, in order: find a free output-capable GPIO for DC (avoiding strapping
-0/2/5/12/15, flash 6-11, input-only 34-39, and whatever the entry already spends on Ethernet, relays,
-audio or buttons); set it on real hardware and confirm the lights still run; then fold the verified
-values into `deviceModels.json`. Step two is the one that counts, and it is why this is a per-board
-job rather than a sweep.
-
-- **Classic, one free GPIO needed (13):** Dig-Quad V3, Dig-Uno V3, Cube 2020-10 (10 pins, the
-  largest RMT saving left), MHC V4.3, MHC V5.7 PRO, ESP32-WROVER, Dig-2-Go, Serg MiniShield, Serg
-  UniShield V5, Yves V4.8, MM testbench ESP32-16MB, MM testbench classic olimex. Shelly is on the
-  list but is the read-only old-firmware rig, so it changes only with the product owner's say-so.
-- **S3 / S31, two free GPIOs needed (4):** ESP32-S3 N16R8 Dev, ESP32-S3-Zero (N4R2), MM testbench S3,
-  Espressif ESP32-S31 CoreBoard. Worth checking the saving is worth two pins at one lane before
-  switching these.
-- **No pins defined (3):** Generic ESP32 Dev, LOLIN D32, Olimex ESP32-Gateway Rev G. The user supplies
-  pins, so the default driver matters less and they still have to supply DC.
-
-Open question for the boards nobody physically has: propose a DC pin from the vendor pinout and mark
-the entry unverified, or leave them on RMT until someone can test one. RMT stays correct either way,
-it is only more expensive.
-
-Two things to fix while in here: **ESP32-S3-Zero (N4R2) defines both** a `ParallelLedDriver` (pin 2)
-and an `RmtLedDriver` (pin 21), and **MM testbench S3 defines two `RmtLedDriver`s** (pins 38 and 18).
-Both may be deliberate (independent outputs), but they are the only entries shaped that way.

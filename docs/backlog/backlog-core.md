@@ -1168,6 +1168,27 @@ module's tick goes from ~615 us to ~658 us, about 40 us (7%) against 3.3 ms of t
 Stability confirmed over a soak with HLS streaming: zero crashes, zero corrupt packets.
 
 **Reported upstream:** [esp-idf#19025](https://github.com/espressif/esp-idf/issues/19025)
+
+**Root cause found upstream (2026-09-09), and it is not the one above.** Espressif reproduced it
+deterministically and found two separate problems. The "Cause" paragraph above, which names the
+unguarded HWLP save path, was our reading of `portasm.S` and it was wrong; it stays as the record of
+what we thought. What is actually happening:
+
+1. **esp-dsp violates the P4's hardware-loop constraints.** The loop start (`esp.lp.setup`) and the
+   last loop instruction must be 4-byte aligned, the body needs enough 32-bit instructions, and the
+   last instruction must not be a coprocessor (FPU/PIE) op. Some kernels are misaligned, and an
+   interrupt landing exactly on that boundary corrupts the loop counter. That is why it is
+   timing-dependent (it hid for a 20-minute soak on 2026-09-08) and why `CONFIG_DSP_ANSI` cured it:
+   the C kernels never enter the misaligned assembly. Fix: an esp-dsp release with `.balign 4`.
+2. **The IDF erratum workaround was gated on a misnamed macro** (`ESP32P4_REV_MIN_FULL` without
+   the `CONFIG_` prefix), so it was always on for every revision. Being corrected to rev < v3.0 only,
+   with a positive test (preemption inside a live hardware loop) and negative tests (interrupt at a
+   misaligned boundary).
+
+**To do when the esp-dsp release lands:** bump the managed component, drop the `CONFIG_DSP_ANSI`
+line for good, and re-run the workload that found it (continuous FFT + the H.264/HLS encoder as a
+second task, sustained HTTP load) on the rev v1 board. We have the reproducing workload and told
+them we would report back; that soak is the report.
 (2026-08-28), which names the unguarded save path. Espressif already had the symptom on file from
 another reporter: [esp-dsp#119](https://github.com/espressif/esp-dsp/issues/119) hits the same
 fault at the same instruction on IDF v5.5-beta1 and settles on the same `CONFIG_DSP_ANSI=y`

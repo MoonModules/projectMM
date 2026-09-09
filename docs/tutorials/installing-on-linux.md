@@ -154,8 +154,9 @@ boards; none of it is needed to start building shows.
 
 > **A board with 1 GB of RAM or less can run out of memory while compiling.** The symptom is the
 > compiler being killed rather than an error you can read. Either add swap
-> (`sudo dphys-swapfile swapoff && sudo nano /etc/dphys-swapfile` to raise `CONF_SWAPSIZE`, then
-> `swapon`), or build with fewer parallel jobs.
+> (edit `/etc/dphys-swapfile` to raise `CONF_SWAPSIZE`, then `sudo dphys-swapfile swapoff &&
+> sudo dphys-swapfile setup && sudo dphys-swapfile swapon`: `setup` is what regenerates the
+> file at the new size, editing alone changes nothing), or build with fewer parallel jobs.
 
 ## Keeping it running after a reboot
 

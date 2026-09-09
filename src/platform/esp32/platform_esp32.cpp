@@ -267,6 +267,14 @@ size_t maxInternalAllocBlock() {
     return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
+size_t maxExecAllocBlock() {
+    // The pool allocExec draws from. On a classic ESP32 that is IRAM, tens of KB rather than the
+    // hundreds the data heap has, and it is not visible in freeInternalHeap: a script whose compiled
+    // code does not fit reported "codegen failed" with 80 KB of DRAM free, which is what made this
+    // worth reporting rather than inferring.
+    return heap_caps_get_largest_free_block(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+}
+
 size_t totalHeap() {
     return heap_caps_get_total_size(MALLOC_CAP_8BIT);
 }

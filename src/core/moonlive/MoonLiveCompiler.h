@@ -66,6 +66,7 @@ inline constexpr size_t kMaxClassName = 31;
 struct CompileResult {
     bool        ok = false;
     const char* error = "";
+    char        spillMsg[96] = {};   // backing store when `error` is the allocator's detail line
     uint16_t    errorCol = 0;
     size_t      len = 0;
     // Every member the class declared (`uint8_t speed = 50;`). The engine seeds each one's arena

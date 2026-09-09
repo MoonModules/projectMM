@@ -371,6 +371,10 @@ size_t maxInternalAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
 
+size_t maxExecAllocBlock() {
+    return 0;   // no distinct executable pool: pages are mapped per allocation
+}
+
 // No RTOS on desktop — the TasksModule shows only its MoonModule cost table here.
 // Test seam: a unit test can inject a canned task snapshot + render-task name so TasksModule's
 // row/detail JSON + the nesting predicate are exercised on the host (no RTOS here otherwise). Empty

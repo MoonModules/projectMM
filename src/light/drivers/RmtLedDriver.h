@@ -448,17 +448,19 @@ private:
     /// Hand the peripheral the two symbols a data bit expands to. The bit expansion now happens on
     /// the way out (the IDF bytes encoder, or the level-5 refill), so these shapes are the whole of
     /// what the wire timing means: the `timing` control changes them live, between frames.
-    void pushBitTiming(uint8_t i) {
-        const uint16_t t0h = nsToTicks(cfg_.t0h_ns);
-        const uint16_t t1h = nsToTicks(cfg_.t1h_ns);
-        const uint16_t period = nsToTicks(cfg_.period_ns);
-        platform::rmtWs2812SetBitTiming(rmt_[i],
+    bool pushBitTiming(uint8_t i) {
+        const uint16_t t0h = nsToTicks(cfg_.t0h_ns, i);
+        const uint16_t t1h = nsToTicks(cfg_.t1h_ns, i);
+        const uint16_t period = nsToTicks(cfg_.period_ns, i);
+        return platform::rmtWs2812SetBitTiming(rmt_[i],
             makeRmtSymbol(t0h, 1, static_cast<uint16_t>(period - t0h), 0),
             makeRmtSymbol(t1h, 1, static_cast<uint16_t>(period - t1h), 0));
     }
 
-    uint16_t nsToTicks(uint32_t ns) const MM_NONBLOCKING {
-        uint32_t hz = inited_ ? platform::rmtWs2812Resolution(rmt_[0]) : kResolutionHz;
+    /// Ticks for `ns` on channel `i`. Every channel is inited at kResolutionHz today so they agree,
+    /// but the granted rate is the channel's, so a mismatch would not be papered over by channel 0.
+    uint16_t nsToTicks(uint32_t ns, uint8_t i = 0) const MM_NONBLOCKING {
+        uint32_t hz = platform::rmtWs2812Resolution(rmt_[i]);   // 0 before init: fall through
         if (hz == 0) hz = kResolutionHz;
         return static_cast<uint16_t>((static_cast<uint64_t>(ns) * hz) / 1'000'000'000ull);
     }
@@ -714,8 +716,8 @@ private:
         if (pinCount_ == 0) return;   // parse error — already in the status slot
         for (uint8_t i = 0; i < pinCount_; i++) {
             if (platform::rmtWs2812Init(rmt_[i], static_cast<uint8_t>(pinList_[i]),
-                                        kResolutionHz, cfg_.invert)) {
-                pushBitTiming(i);   // the expander needs the bit shapes before the first frame
+                                        kResolutionHz, cfg_.invert)
+                && pushBitTiming(i)) {   // the expander needs the bit shapes before the first frame
                 continue;
             }
             // Surface which pin failed instead of silently no-op'ing in tick() —

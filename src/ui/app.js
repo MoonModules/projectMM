@@ -4555,7 +4555,11 @@ function updateModuleControls(mod) {
                 break;
             }
             case "filepath": {
-                const sel = queryByName(`select.fileedit-pick[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
+                // A BUTTON, not a select: buildFilePathControl replaced the native select with a
+                // painted picker that keeps its value in `_value` behind a `value` property, so the
+                // assignment below still works. Matching `select` here found nothing, and a script
+                // changed from another client (or by a preset) never repainted this picker.
+                const sel = queryByName(`button.fileedit-pick[data-mid="${cssEscape(mid)}"][data-key="${k}"]`, "data-mid", mid);
                 // Don't clobber the choice while it is focused, and don't reload the pane under
                 // someone who is typing in it: the value is only pushed back when it really moved.
                 if (sel && document.activeElement !== sel && sel.value !== (ctrl.value ?? "")) {

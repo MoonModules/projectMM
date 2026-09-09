@@ -1,4 +1,5 @@
 #include "core/moonlive/MoonLiveSpill.h"
+#include "core/moonlive/moonlive_emit.h"
 
 // Linear-scan register allocation with spilling to the call frame. See MoonLiveSpill.h for why this
 // lives in core rather than in each backend.
@@ -143,19 +144,20 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // the ONE frame — so a spill numbered from zero would land on a loop counter. Start above them,
     // and report the total the prologue must reserve.
     slotsUsed = ir.localSlots;
-    if (!ir.ops) return false;
+    if (!ir.ops) { spillDetail().guard = 1; return false; };
 
+    spillDetail() = SpillDetail{};   // every field honest for whichever guard fires, including 1-3
     const uint8_t avail = budget.allocatable();
     // The front end's own variables have to fit the frame whether or not anything spills — it hands
     // out slot indices without knowing the target, and a slot the backend cannot address would be
     // encoded as a truncated offset writing over something else. Checked BEFORE the early return
     // below, or a program that needs no spilling skips the check entirely.
-    if (ir.localSlots > kMaxLocals || ir.localSlots > budget.slots) return false;
+    if (ir.localSlots > kMaxLocals || ir.localSlots > budget.slots) { spillDetail().guard = 2; return false; };
 
     // Already fits: leave the program byte-identical. A script that never needed the allocator must
     // not pay a renumbering for its existence — and this is the path every shipped script takes.
     if (ir.vregsUsed <= avail) return true;
-    if (ir.vregsUsed > kMaxVRegs) return false;
+    if (ir.vregsUsed > kMaxVRegs) { spillDetail().guard = 3; return false; };
 
     // The fixed ABI vregs (buf, nLights, cpl, t, ctrls) arrive in machine registers the host chose
     // and every backend indexes them directly, so they can be neither renumbered nor spilled. They
@@ -173,11 +175,13 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // reading `buf` or `t` needs no temp for it. Everything else may end up in a slot and therefore
     // may need somewhere to land, so count the distinct non-ABI sources of the widest op present.
     //
-    // Note the shape this leaves on Xtensa: 10 registers - 1 inline scratch - 5 fixed ABI vregs
-    // leaves 4, and a setRGB reads exactly 4 distinct operands — so a looped effect lands on
-    // keepable == 0 and is refused. The pass is right to refuse (it has nothing to allocate with);
-    // what is wrong is that FIVE registers are reserved for host arguments that a script reads
-    // rarely. Freeing those is register-promotion work, deliberately out of scope for this step.
+    // Note the shape this leaves on Xtensa: 10 registers minus 3 inline scratch leaves 7, and the
+    // ABI vregs are no longer subtracted (see the note below the loop), so a widest-op reservation
+    // of 4 leaves 3 keepable, which every shipped script fits (pinned by the Xtensa codegen test
+    // that compiles all of them at the device's own budget). A "codegen failed" for one of those on
+    // a classic ESP32 is therefore NOT this pass: on 2026-09-09 it was the assembler's heap buffer
+    // failing to allocate on a fragmented board, misreported as a codegen fault. That allocation is
+    // gone (the assembler now emits into the caller's buffer) and the report says "no memory".
     uint8_t reloadTemps = 0;
     for (uint16_t i = 0; i < ir.count; i++) {
         VReg s[4];
@@ -196,7 +200,8 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // they hold a register only for the parking store itself — which runs before any temp exists, so
     // sharing those registers afterwards is not a conflict. Reserving five here was holding space for
     // values that had already moved out, and on a ten-register target that was the entire budget.
-    if (avail <= reloadTemps) return false;
+    { auto& d = spillDetail(); d.guard = 0; d.avail = avail; d.temps = reloadTemps; d.vregs = ir.vregsUsed; d.slots = ir.localSlots; }
+    if (avail <= reloadTemps) { spillDetail().guard = 4; return false; };
     const uint8_t keepable = static_cast<uint8_t>(avail - reloadTemps);
 
     // --- 1. Find the loops, innermost first ----------------------------------------------------
@@ -213,10 +218,10 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         for (uint16_t i = 0; i < ir.count; i++) {
             const IrInst& in = ir.ops[i];
             if (in.op != IrOp::BranchNe) continue;
-            if (in.imm < 0 || in.imm >= kIrLabels) return false;      // an unbindable label: refuse
+            if (in.imm < 0 || in.imm >= kIrLabels) { spillDetail().guard = 5; return false; };      // an unbindable label: refuse
             const int32_t tgt = labelAt[in.imm];
             if (tgt < 0 || static_cast<uint16_t>(tgt) > i) continue;  // forward branch — not a loop
-            if (loopCount >= kIrLabels) return false;
+            if (loopCount >= kIrLabels) { spillDetail().guard = 6; return false; };
             loops[loopCount++] = {static_cast<uint16_t>(tgt), i};
         }
         // Proper nesting is what makes "innermost first" meaningful and what the extension rule below
@@ -228,7 +233,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
                 const bool disjoint = loops[x].back < loops[y].header || loops[y].back < loops[x].header;
                 const bool xInY = loops[y].header <= loops[x].header && loops[x].back <= loops[y].back;
                 const bool yInX = loops[x].header <= loops[y].header && loops[y].back <= loops[x].back;
-                if (!disjoint && !xInY && !yInX) return false;
+                if (!disjoint && !xInY && !yInX) { spillDetail().guard = 7; return false; };
             }
     }
 
@@ -313,7 +318,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         // nActive >= keepable >= 1 here: the `avail <= reloadTemps` guard above makes keepable at
         // least one, and this branch is only reached when nActive is not below it. Stated because
         // the index below would read active[-1] if that invariant ever moved.
-        if (nActive == 0) return false;
+        if (nActive == 0) { spillDetail().guard = 8; return false; };
         const VReg furthest = active[nActive - 1];
         if (iv[furthest].end > iv[cur].end) {
             iv[furthest].spilled = true;
@@ -331,7 +336,8 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // arguments (hostArgSlot), which are stored once at entry and reloaded wherever a script reads
     // buf/nLights/cpl/t/ctrls. Allowing a spill into that range would overwrite them — budget.slots
     // is the frame's whole capacity, of which only the bottom kMaxLocals are assignable.
-    if (nSpilled > kMaxLocals || nSpilled > budget.slots) return false;
+    spillDetail().spilled = nSpilled;
+    if (nSpilled > kMaxLocals || nSpilled > budget.slots) { spillDetail().guard = 9; return false; };
 
     // --- 4. Compact the survivors ---------------------------------------------------------------
     // The kept temps take the register numbers directly above the fixed ABI vregs, so the rewritten
@@ -352,17 +358,61 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     // --- 5. Rewrite -----------------------------------------------------------------------------
     // Into a SECOND program: a Reload has to be inserted before the op that reads a spilled value and
     // a Spill after the op that defines one, and a right-sized array has no room to shift into.
+    // NOTHING spilled: the program already fits the register file, so every vreg keeps a register
+    // and the rewrite below would copy the program op for op into a second array only to swap it
+    // back. Skip it. That is the common case (32 of the 33 shipped scripts) and it makes those
+    // compiles cost no allocation here at all, which on a classic ESP32 is the difference between
+    // holding two IR arrays at the peak and holding one. The compacted register numbering still
+    // has to be applied, since a kept vreg's `assigned` may differ from its original index.
+    if (nSpilled == ir.localSlots) {
+        for (uint16_t i = 0; i < ir.count; i++) {
+            IrInst& in = ir.ops[i];
+            VReg src[4];
+            const uint8_t n = sourcesOf(in, src);
+            auto keep = [&](VReg v) -> VReg { return (v < kMaxVRegs && iv[v].live) ? iv[v].assigned : v; };
+            if (n > 0) in.a = keep(src[0]);
+            if (n > 1) in.b = keep(src[1]);
+            if (n > 2) in.c = keep(src[2]);
+            if (n > 3) in.d = keep(src[3]);
+            if (writesDst(in) && in.dst < kMaxVRegs) in.dst = keep(in.dst);
+        }
+        ir.vregsUsed = newHighWater;
+        slotsUsed = nSpilled;
+        return true;
+    }
+
     IrProgram out;
-    // Worst case per op: four Reloads, the op, one Spill. Over-estimating costs a cold-path
-    // allocation; under-estimating would fail a script that fits, so the direction is deliberate.
-    const uint32_t want = static_cast<uint32_t>(ir.count) * (kMaxReloadTemps + 2);
-    if (want > kMaxIrOps) return false;
-    if (!out.reserve(static_cast<uint16_t>(want))) return false;
+    // Sized to what the rewrite below will ACTUALLY emit, counted in a dry pass over the same rules:
+    // one Reload per distinct spilled source of an op, the op, one Spill per spilled destination.
+    // It used to reserve the worst case, six ops per input op, and that was the ceiling on a classic
+    // ESP32: for a 284-op script it asked for ~41 KB in one block while the first IR array, the
+    // staging buffer and the assembler were all still live, so on a heap whose largest free block
+    // had fragmented to 65 KB the allocation failed and the compile reported "codegen failed" for a
+    // script that spills nothing at all (bench 2026-09-09, plasma/balls/nebula/aurora). The exact
+    // count is a fraction of that for every shipped script, and it is also the honest number: an
+    // estimate that fails a script which fits is the wrong direction to be conservative in.
+    uint32_t want = 0;
+    for (uint16_t i = 0; i < ir.count; i++) {
+        const IrInst& in = ir.ops[i];
+        VReg src[4];
+        const uint8_t n = sourcesOf(in, src);
+        for (uint8_t s = 0; s < n; s++) {
+            const VReg v = src[s];
+            if (v >= kMaxVRegs || !iv[v].spilled) continue;
+            bool already = false;
+            for (uint8_t q = 0; q < s; q++) if (src[q] == v) { already = true; break; }
+            if (!already) want++;                                   // a Reload
+        }
+        want++;                                                     // the op itself
+        if (writesDst(in) && in.dst < kMaxVRegs && iv[in.dst].spilled) want++;   // a Spill
+    }
+    if (want > kMaxIrOps) { spillDetail().guard = 10; return false; };
+    if (!out.reserve(static_cast<uint16_t>(want))) { spillDetail().guard = 11; return false; };
 
     auto emit = [&](const IrInst& in) {
         // push() also re-validates every vreg against kMaxVRegs, so a rewrite that named a register
         // outside the budget fails the compile here instead of reaching a backend's register map.
-        if (!out.push(in)) return false;
+        if (!out.push(in)) { spillDetail().guard = 12; return false; };
         return true;
     };
 
@@ -408,7 +458,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             rl.op = IrOp::Reload;
             rl.dst = tempOf[s];
             rl.imm = iv[v].slot;
-            if (!emit(rl)) return false;
+            if (!emit(rl)) { spillDetail().guard = 13; return false; };
         }
 
         // Rewrite the operands in place: a spilled one now names its temp, a kept one its compacted
@@ -430,13 +480,13 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             // instruction, so the aliasing is the ordinary `add d, d, b` every ISA here defines.
             in.dst = dstSpilled ? firstTemp : (in.dst < kMaxVRegs ? iv[in.dst].assigned : in.dst);
         }
-        if (!emit(in)) return false;
+        if (!emit(in)) { spillDetail().guard = 14; return false; };
         if (dstSpilled) {
             IrInst sp{};
             sp.op = IrOp::Spill;
             sp.a = firstTemp;
             sp.imm = dstSlot;
-            if (!emit(sp)) return false;
+            if (!emit(sp)) { spillDetail().guard = 15; return false; };
         }
     }
 

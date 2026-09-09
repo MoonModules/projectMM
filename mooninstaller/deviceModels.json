@@ -210,12 +210,11 @@
         }
       },
       {
-        "type": "ParallelLedDriver",
-        "id": "ParallelLed",
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "2,4",
-          "dcPin": 33
+          "pins": "2,4"
         }
       },
       {
@@ -340,15 +339,15 @@
         }
       },
       {
-        "type": "ParallelLedDriver",
-        "id": "ParallelLed",
+        "type": "RmtLedDriver",
+        "id": "RmtLed",
         "parent_id": "Drivers",
         "controls": {
-          "pins": "0,1,2,3,4,5,12,13",
-          "dcPin": 16
+          "pins": "0,1,2,3,4,5,12,13"
         }
       }
-    ]
+    ],
+    "flashBaud": 460800
   },
   {
     "name": "Serg UniShield V5",

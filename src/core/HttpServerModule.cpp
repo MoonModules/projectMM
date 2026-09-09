@@ -1553,13 +1553,14 @@ void HttpServerModule::serveSystem(platform::TcpConnection& conn) {
     // thing on a board and on a laptop: free heap does not, since a desktop has as much as it wants
     // and reports 0. It is what makes a memory change measurable without hardware.
     sink.appendf(
-        "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"freeInternal\":%u,\"maxBlock\":%u,"
+        "{\"fps\":%u,\"tickTimeUs\":%u,\"freeHeap\":%u,\"freeInternal\":%u,\"maxBlock\":%u,\"maxExec\":%u,"
         "\"allocated\":%u,\"allocPeak\":%u,\"allocBlocks\":%u,\"uptime\":%u,\"modules\":[",
         static_cast<unsigned>(scheduler_ ? scheduler_->fps() : 0),
         static_cast<unsigned>(scheduler_ ? scheduler_->tickTimeUs() : 0),
         static_cast<unsigned>(platform::freeHeap()),
         static_cast<unsigned>(platform::freeInternalHeap()),
         static_cast<unsigned>(platform::maxInternalAllocBlock()),
+        static_cast<unsigned>(platform::maxExecAllocBlock()),
         static_cast<unsigned>(platform::allocatedBytes()),
         static_cast<unsigned>(platform::allocatedPeak()),
         static_cast<unsigned>(platform::allocatedCount()),

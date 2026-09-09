@@ -143,6 +143,12 @@ size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve ch
 size_t maxAllocBlock();     // largest contiguous block (any memory type: incl PSRAM)
 size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
 
+// Largest contiguous block of EXECUTABLE memory (IRAM on an ESP32). A separate, much smaller pool
+// than the data heap above: a MoonLive script's compiled code is allocated from it, so this is what
+// bounds how large a script may be, and nothing else reports it. Zero where the platform has no
+// distinct executable pool (desktop maps pages on demand).
+size_t maxExecAllocBlock();
+
 // --- RTOS task introspection (TasksModule) --------------------------------------------------
 // A fixed-size, allocation-free snapshot of the OS tasks, filled by the platform layer so no
 // FreeRTOS type escapes src/platform/ (the platform-boundary rule). ESP32 fills it from

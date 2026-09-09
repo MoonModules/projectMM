@@ -40,10 +40,21 @@ static constexpr uint8_t kMaxVRegs = 32;
 // a diagnostic instead of asking for an allocation that would exhaust a small device's heap.
 static constexpr uint16_t kMaxIrOps = 4096;
 
-// Ops a single source token can lower to, worst case. The compiler sizes its op array by counting
-// tokens and multiplying — an over-estimate by construction, which is the safe direction: a few
-// unused entries on a cold path, versus refusing a script that would have fit.
-static constexpr uint16_t kIrOpsPerToken = 4;
+// Ops a source token lowers to. The compiler sizes its op array by counting tokens and multiplying,
+// so this is a ceiling on the RESERVATION, and it is the number that decides whether a script
+// compiles on a classic ESP32 at all.
+//
+// It was 4, on the reasoning that an over-estimate is the safe direction ("a few unused entries on
+// a cold path"). Measured across every shipped script it is 0.75 ops per token, never above 0.85,
+// so 4 reserved five to six times the IR a script actually builds: for the largest scripts that was
+// ~1,900 ops at 32 bytes each, a 61 KB single-block request for 10 KB of IR, made while the staging
+// buffer and the spill pass's second array are also live. On a heap whose largest free block is
+// 65 KB it failed, and the compile reported "codegen failed" for scripts that lower fine on the
+// host (bench Dig-Octa 2026-09-09: six of 33 shipped scripts). A reservation that refuses a script
+// which fits is the wrong direction to be conservative in. 1 keeps a real margin over the measured
+// 0.85, and a script that somehow exceeds it still fails cleanly: IrProgram::push refuses past
+// cap, which the parser reports as "script too large" rather than writing past the array.
+static constexpr uint16_t kIrOpsPerToken = 1;
 
 // The op set — neutral. Three-address form: dst plus up to three source operands. (Counted
 // Control flow arrived with the script-level `for`, which is what the note here anticipated: the

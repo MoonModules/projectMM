@@ -176,6 +176,7 @@ struct RmtTxState {
     rmt_channel_handle_t channel = nullptr;
     rmt_encoder_handle_t encoder = nullptr;
     uint32_t resolutionHz = 0;
+    bool     timed = false;       // rmtWs2812SetBitTiming succeeded: a transmit before it would clock all-zero symbols
     uint32_t sym0 = 0, sym1 = 0;  // bit shapes, set live by rmtWs2812SetBitTiming (every chip:
                                   // the bytes encoder takes them, and so does the level-5 refill)
 #if CONFIG_IDF_TARGET_ESP32
@@ -299,7 +300,6 @@ uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING {
 bool rmtWs2812SetBitTiming(RmtWs2812Handle& h, uint32_t sym0, uint32_t sym1) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st || !st->encoder) return false;
-    st->sym0 = sym0; st->sym1 = sym1;
     // The `timing` control is live (400 kHz WS2811, 800 kHz, custom ns), so the encoder's bit
     // shapes are rewritten rather than fixed at init.
     rmt_bytes_encoder_config_t cfg = {};
@@ -307,12 +307,16 @@ bool rmtWs2812SetBitTiming(RmtWs2812Handle& h, uint32_t sym0, uint32_t sym1) {
     std::memcpy(&cfg.bit0, &sym0, sizeof(uint32_t));
     std::memcpy(&cfg.bit1, &sym1, sizeof(uint32_t));
     cfg.flags.msb_first = 1;
-    return rmt_bytes_encoder_update_config(st->encoder, &cfg) == ESP_OK;
+    // Commit the shapes only once the encoder took them, so a transmit can never run on stale or
+    // zero symbols: `timed` is what rmtWs2812Transmit checks.
+    if (rmt_bytes_encoder_update_config(st->encoder, &cfg) != ESP_OK) return false;
+    st->sym0 = sym0; st->sym1 = sym1; st->timed = true;
+    return true;
 }
 
 bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint8_t* wire, size_t byteCount) {
     auto* st = static_cast<RmtTxState*>(h.impl);
-    if (!st || !wire || byteCount == 0) return false;
+    if (!st || !wire || byteCount == 0 || !st->timed) return false;   // no bit shapes yet: refuse, not garbage
 
 #if CONFIG_IDF_TARGET_ESP32
     if (st->channelId != 0xFF) {
@@ -377,9 +381,19 @@ bool rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
         // TX_DONE clears `busy` from the level-5 handler. Polled with a yield, not a semaphore:
         // the handler runs where no RTOS call is allowed, so it cannot signal one.
         const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeoutMs) * 1000;
+        // SPIN first, yield only if the frame is genuinely long. `vTaskDelay(1)` sleeps a whole
+        // scheduler tick, 10 ms at CONFIG_FREERTOS_HZ=100, so a frame that clocks out in 240 us
+        // still cost 10 ms: the tick measured a FLAT ~9,600 us on a Dig-Octa whether it drove 8
+        // lights or 256, on one lane or eight, which is the scheduler and not the wire (bench
+        // 2026-09-09). A WS2812 frame is bounded and short (1.25 us per bit: 1.9 ms for 64 lights,
+        // 7.7 ms for 256), so busy-waiting to about one tick and only then sleeping keeps the CPU
+        // for the case that is over in microseconds while still yielding on a long strand rather
+        // than burning a core.
+        const int64_t spinUntil = esp_timer_get_time() + 10000;   // ~1 scheduler tick
         while (s_hi[st->channelId].busy) {
-            if (esp_timer_get_time() > deadline) return false;
-            vTaskDelay(1);
+            const int64_t now = esp_timer_get_time();
+            if (now > deadline) return false;
+            if (now > spinUntil) vTaskDelay(1);   // long frame: hand the core back
         }
         return true;
     }
