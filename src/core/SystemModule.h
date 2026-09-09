@@ -137,6 +137,17 @@ public:
     /// Changing verbosity does not reshape any derived state, so this is onControlChanged, not prepare.
     void onControlChanged(const char* controlName) override {
         if (std::strcmp(controlName, "logLevel") == 0) applyLogLevel();
+        // `firmware` is persisted Text (so MoonBase can read it from the config file), and the
+        // config load writes the PREVIOUS image's value back over the compile-time one that
+        // defineControls set: a board flashed from eth-wifi to eth-only kept reporting eth-wifi,
+        // and that field is what steers MoonBase's recovery list toward the right flash layout.
+        // The compile-time constant is the truth, so re-assert it whenever the control is written
+        // and mark it dirty, which persists the correction rather than the stale value.
+        if (std::strcmp(controlName, "firmware") == 0
+            && std::strcmp(firmwareVariant_, kFirmwareName) != 0) {
+            std::snprintf(firmwareVariant_, sizeof(firmwareVariant_), "%s", kFirmwareName);
+            markDirty();
+        }
     }
 
     void defineControls() override {

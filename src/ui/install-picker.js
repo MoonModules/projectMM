@@ -938,7 +938,7 @@ export const installPicker = {
      * most recently mounted picker, or "" when the picker is in
      * "(any board)" mode, the catalog is unavailable, or the picker isn't
      * mounted yet. Used by the install-orchestrator to know what to push
-     * via Improv SET_DEVICE_MODEL after WiFi provisioning succeeds.
+     * via Improv APPLY_OP (the device-model ops are applied as REST-over-serial) after WiFi provisioning succeeds.
      */
     getSelectedBoard() {
         return _lastState ? (_lastState.selectedBoard || "") : "";

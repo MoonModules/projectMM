@@ -15,7 +15,7 @@ namespace mm {
 /// buffer (8-bit, GRB). The default LED driver for classic-ESP32 and S3 board entries, and the
 /// readable EXAMPLE future LED drivers copy: a sibling of NetworkSendDriver (same DriverBase hooks,
 /// same per-light `correction_.apply()` guard, same once-allocated owned buffer sized off the hot
-/// path); only the emit differs — this fuses the correction + WS2812 symbol-encode into one pass
+/// path); only the emit differs: this fuses the correction into the wire-byte frame into one pass
 /// (the encode is `RmtSymbol.h`, host-tested) then hands per-pin slices to the platform.
 ///
 /// **Wire contract — [WS2812B](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf):** 1-wire NRZ
@@ -218,7 +218,7 @@ public:
     /// Parse the config and (re)init the RMT channels. Lifecycle has two
     /// deliberately-separate concerns, so the buffer half stays host-testable and a
     /// hardware-only guard can never strand it:
-    ///   - SYMBOL BUFFER (plain heap): resizeFrame() / freeFrame(), run on
+    ///   - FRAME BUFFER (plain heap): resizeFrame() / freeFrame(), run on
     ///     every platform.
     ///   - RMT CHANNELS (hardware): reinit() / deinitAll(), RMT-targets-only
     ///     (if constexpr).
@@ -384,13 +384,13 @@ public:
     /// pin the multi-pin slice arithmetic (unit_RmtLedDriver_pins.cpp). Not part
     /// of any runtime API.
     const uint8_t* frameBuffer() const { return frame_; }
-    /// Words allocated in the symbol buffer. Test-only.
+    /// Bytes allocated in the symbol buffer. Test-only.
     size_t frameCapacity() const { return frameCap_; }
     /// Number of parsed output pins (0 = idle). Test-only.
     uint8_t pinCount() const { return pinCount_; }
     /// Lights on pin `i` (0 if out of range). Test-only.
     nrOfLightsType pinLightCount(uint8_t i) const { return i < pinCount_ ? pinCounts_[i] : 0; }
-    /// Word offset of pin `i`'s slice in the symbol buffer (0 if out of range). Test-only.
+    /// Byte offset of pin `i`'s slice in the symbol buffer (0 if out of range). Test-only.
     size_t pinFrameOffsetBytes(uint8_t i) const { return i < pinCount_ ? pinOffsets_[i] : 0; }
 
 private:
@@ -473,7 +473,7 @@ private:
     // clears it. Off the hot path.
     /// Turn the `timing` selection into the wire timing the encoder reads. Called from
     /// parseConfig, so every path that rebuilds the driver picks it up: the numbers are read per
-    /// frame from cfg_, so a change takes effect on the next frame with no channel reinit (the RMT
+    /// frame from cfg_, so a change reaches the peripheral through pushBitTiming, which reinit() runs: `timing` is in affectsPrepare, so a change is a rebuild, not a per-frame read
     /// tick clock is unchanged, only how many ticks each bit lasts).
     void applyTiming() {
         switch (timing) {
@@ -606,7 +606,7 @@ private:
 protected:
     // Matches DriverBase's visibility — a private override would silently hide the hook from any
     // future caller holding a DriverBase*. ParallelLedDriver keeps it protected for the same reason.
-    /// This driver's heap = the base scratch + the RMT symbol buffer (one word per WS2812 data bit,
+    /// This driver's heap = the base scratch + the RMT frame buffer (one byte per output channel per light,
     /// the driver's largest buffer). Summed for the per-module memory readout — see
     /// DriverBase::driverHeapBytes.
     size_t driverHeapBytes() const override {

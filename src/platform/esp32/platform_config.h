@@ -430,7 +430,7 @@ constexpr bool hasOta = true;
 
 // Improv-serial is the device's serial RPC channel (UART0 + native USB-Serial-JTAG):
 // the WiFi-provisioning RPCs (WIFI_SETTINGS, GET_WIFI_NETWORKS) AND the vendor RPCs
-// (SET_DEVICE_MODEL, SET_TX_POWER, APPLY_OP: "Improv = REST over serial"). The
+// (SET_TX_POWER, APPLY_OP: "Improv = REST over serial"). The
 // transport is always available on ESP32, so the listener runs everywhere: including
 // Ethernet-only builds (`--firmware esp32-eth*`), where the WiFi-only RPCs are compiled
 // out (the `esp_wifi_*` calls aren't linked) but the vendor RPCs still work, so the web

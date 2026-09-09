@@ -1983,18 +1983,10 @@ CompileResult compileSource(const char* source, const BuiltinTable& table,
     // unlowerable: report the cause a user can act on (free memory) rather than one they cannot.
     if (len == 0) {
         switch (lowerRefusal()) {
-            case LowerRefusal::Spill: {
-                // The allocator's own numbers, so the message says what it saw rather than a guess.
-                // Written into the RESULT, not a shared static: the string is handed out as the
-                // module's status by pointer, so a static would let a second failing module rewrite
-                // the text shown under the first.
-                char* spillMsg = r.spillMsg;
-                const SpillDetail& d = spillDetail();
-                std::snprintf(spillMsg, sizeof(r.spillMsg),
-                              "codegen failed: registers (guard %u, avail %u, temps %u, vregs %u, slots %u, spilled %u)",
-                              d.guard, d.avail, d.temps, d.vregs, d.slots, d.spilled);
-                r.error = spillMsg; break;
-            }
+            // The allocator's own numbers are in spillDetail() (thread_local, outlives this result), so
+            // the error is a literal and the caller formats the detail if it wants it: nothing here
+            // owns a buffer the result would carry out of scope.
+            case LowerRefusal::Spill:       r.error = kSpillRefused; break;
             case LowerRefusal::NullCall:    r.error = "codegen failed: a builtin has no function on this target"; break;
             case LowerRefusal::AsmOverflow: r.error = "codegen failed: assembler overflow (branch range, slot, or immediate)"; break;
             case LowerRefusal::OverCap:     r.error = "codegen failed: code larger than its buffer"; break;

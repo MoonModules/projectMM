@@ -2156,3 +2156,17 @@ TEST_CASE("compileSource: a missing code buffer is refused before any lowering r
     CHECK_FALSE(r.ok);
     CHECK(std::string(r.error) == "no code buffer");
 }
+
+// The allocator's refusal must reach the caller as a pointer that outlives the CompileResult: a
+// buffer inside that temporary dangled (pre-merge review, 2026-09-09). The contract now is that
+// `error` is a string literal, so it is valid forever; the numbers behind it live in spillDetail().
+TEST_CASE("compileSource: a register refusal returns a literal, and spillDetail carries the numbers") {
+    const char* src = "class E {\n  int dimensions() { return 2; }\n  void tick() {\n"
+                      "    for (int x = 0; x < width; x = x + 1) { setRGB(x, 1, 2, 3); }\n  }\n}\n";
+    moonlive::RegBudget tiny{1, 0, 8};
+    uint8_t code[moonlive::kCodeCap];
+    auto r = moonlive::compileSource(src, kTable, kSys, code, sizeof(code), &tiny);
+    REQUIRE_FALSE(r.ok);
+    CHECK(r.error == moonlive::kSpillRefused);            // the literal itself, not a copy
+    CHECK(moonlive::spillDetail().guard != 0);            // and the guard that fired is recorded
+}

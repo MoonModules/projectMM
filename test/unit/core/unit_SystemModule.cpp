@@ -158,3 +158,21 @@ TEST_CASE("SystemModule propagates lifecycle to a wired-by-code child") {
 TEST_CASE("Service role name") {
     CHECK(std::strcmp(mm::roleName(mm::ModuleRole::Service), "service") == 0);
 }
+
+// The persisted `firmware` text must not outlive the image that wrote it. A device flashed from one
+// variant to another loaded the old name back over the compile-time one (bench, MHC P4 shield,
+// 2026-09-08) and MoonBase would have offered the wrong flash layout. The constant wins on every
+// write of the control, which is the moment a stale value lands.
+TEST_CASE("SystemModule: a persisted firmware name is overwritten by the compile-time one") {
+    mm::SystemModule m;
+    m.defineControls();
+    // The same access the deviceName test uses: the control's bound pointer IS the module's buffer.
+    char* text = nullptr;
+    for (uint8_t i = 0; i < m.controls().count(); i++)
+        if (std::strcmp(m.controls()[i].name, "firmware") == 0) text = static_cast<char*>(m.controls()[i].ptr);
+    REQUIRE(text != nullptr);
+    // Simulate the config load writing a stale variant, then the change notification it triggers.
+    std::snprintf(text, 32, "%s", "some-other-variant");
+    m.onControlChanged("firmware");
+    CHECK(std::string(text) == mm::kFirmwareName);
+}
