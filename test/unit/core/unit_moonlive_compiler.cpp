@@ -2167,6 +2167,9 @@ TEST_CASE("compileSource: a register refusal returns a literal, and spillDetail 
     uint8_t code[moonlive::kCodeCap];
     auto r = moonlive::compileSource(src, kTable, kSys, code, sizeof(code), &tiny);
     REQUIRE_FALSE(r.ok);
-    CHECK(r.error == moonlive::kSpillRefused);            // the literal itself, not a copy
+    // By CONTENT, not address: clang merges identical literals so the pointers happened to
+    // coincide, GCC gives the inline constexpr a distinct address per translation unit and the
+    // pointer compare failed on CI while the strings were identical. The contract is the text.
+    CHECK(std::strcmp(r.error, moonlive::kSpillRefused) == 0);
     CHECK(moonlive::spillDetail().guard != 0);            // and the guard that fired is recorded
 }
