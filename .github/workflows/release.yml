@@ -352,8 +352,34 @@ jobs:
       # The runner image does NOT ship NSIS (the first release run after the installer merged
       # proved it: "no makensis on this CI runner"). choco installs it into
       # Program Files (x86)\NSIS, one of the two locations find_makensis already searches.
+      #
+      # RETRIED AND VERIFIED, because `choco install` exits 0 when it installed nothing. A 503 from
+      # the Chocolatey CDN (run 34470353617) left the step green and failed the build two steps
+      # later with "no makensis on this CI runner", which names our script rather than the outage.
+      # So: three attempts, then assert the binary exists and fail here if it does not.
       - name: Install NSIS (the Windows installer compiler)
-        run: choco install nsis --no-progress -y
+        shell: pwsh
+        run: |
+          # Both install locations, and the same two find_makensis searches. Braces are required
+          # around the x86 name: "$env:ProgramFiles(x86)" parses as $env:ProgramFiles followed by
+          # a literal "(x86)", which is a path that never exists.
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "$env:ProgramFiles\NSIS\makensis.exe"
+          )
+          function Find-Nsis { $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+          foreach ($attempt in 1..3) {
+            if (Find-Nsis) { break }
+            Write-Host "choco install nsis (attempt $attempt of 3)"
+            choco install nsis --no-progress -y
+            if (Find-Nsis) { break }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 15 }
+          }
+          $found = Find-Nsis
+          if (-not $found) {
+            throw "NSIS did not install after 3 attempts. Chocolatey exits 0 even when it installs nothing, so look above for a CDN error (a 503 caused run 34470353617)."
+          }
+          Write-Host "NSIS present: $found"
       - name: Build + package Windows x64
         run: uv run moondeck/ci/package_desktop.py --version "${{ steps.ver.outputs.version }}"
       - uses: actions/upload-artifact@v4
