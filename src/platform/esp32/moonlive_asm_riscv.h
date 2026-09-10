@@ -38,15 +38,27 @@ public:
     // Named here because each backend's Reg is its own enum, sized to its own file.
     using RegType = Reg;
 
-    // Owns buf_ (see below). Freed here, copying deleted — an emitter that was copied
-    // would double-free the buffer it emits into.
-    ~RiscvAssembler() { platform::free(buf_); }
+    // Frees buf_ only when this emitter OWNS it (the one-argument form below). The borrowing form
+    // emits straight into a buffer the caller already holds, so there is nothing to free. Copying
+    // deleted: a copied owner would double-free.
+    ~RiscvAssembler() { if (owned_) platform::free(buf_); }
     /// `cap` is the code buffer's size, chosen per SCRIPT by the caller (codeCapFor) rather
-    /// than a shared constant — the backends differ by up to 1.9x on identical source, so one
+    /// than a shared constant: the backends differ by up to 1.9x on identical source, so one
     /// number cannot fit them all. Defaults to the sanity bound for callers that emit a fixed
-    /// blob (emitFill) and have no token count to size from.
+    /// blob (emitFill) and have no token count to size from. This form ALLOCATES; the unit tests
+    /// that probe single instructions use it.
     explicit RiscvAssembler(size_t cap = kCodeCap)
-        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))) {}
+        : kCap(cap), buf_(static_cast<uint8_t*>(platform::alloc(cap))), owned_(true) {}
+    /// Emit straight into `out`, the caller's staging buffer, rather than into a twin of it. The
+    /// lowering used to allocate a second full-size buffer here and memcpy into `out` at the end,
+    /// so every compile held TWO copies of its code cap on the heap. On a classic ESP32 whose
+    /// largest free block had fragmented to 24 KB that second allocation failed, and because the
+    /// failure surfaced through emit() as overflow_, the compile reported "codegen failed
+    /// (unsupported on this target, or too large)" for a script that compiles fine (the shipped
+    /// noise.mle, bench 2026-09-09). Borrowing removes that allocation and halves the compile's
+    /// transient heap; when `out` is null the emitter reports through overflowed() as before.
+    RiscvAssembler(uint8_t* out, size_t cap)
+        : kCap(cap), buf_(out), owned_(false) {}
     RiscvAssembler(const RiscvAssembler&) = delete;
     RiscvAssembler& operator=(const RiscvAssembler&) = delete;
 
@@ -135,8 +147,10 @@ private:
     // member put 2 KB on the compile chain's stack — on top of the staging buffer and the parser
     // frames. On a classic ESP32 that overflowed the task and faulted inside _xt_context_save
     // (the plan named this: "buf_[kCap] inside the assembler, itself a stack local"). The buffer is
-    // scratch that ends in a memcpy to the caller's output, so nothing outlives the object.
+    // the caller's own staging buffer in the borrowing form (nothing to copy out), or a private
+    // one in the owning form; either way nothing outlives the object.
     uint8_t* buf_;
+    bool     owned_;   // true = we allocated buf_ and free it; false = the caller's buffer
     size_t   len_ = 0;
     bool     overflow_ = false;
     // Frame size in bytes, 0 when no prologue was emitted. epilogue() reads it, so the teardown can

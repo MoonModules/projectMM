@@ -1,45 +1,49 @@
 {
-  "commit": "7f46574a",
+  "commit": "b2a5bce6",
   "flash": {
-    "esp32s3-n16r8": 2065376,
-    "desktop": 1855496,
-    "esp32": 2023776,
-    "esp32p4rev1-eth": 1955408,
-    "esp32p4rev1-eth-wifi": 2019392,
-    "esp32s3-n8r8": 1971008,
+    "esp32s3-n16r8": 2103024,
+    "desktop": 1910456,
+    "esp32": 2060272,
+    "esp32p4rev1-eth": 1997440,
+    "esp32p4rev1-eth-wifi": 2284640,
+    "esp32s3-n8r8": 2087168,
     "esp32s31": 2348592,
-    "esp32-16mb": 1809472,
+    "esp32-16mb": 2060368,
     "esp32-eth": 1397456,
     "esp32-wrover": 1843760,
     "qemu": 1383648,
     "esp32p4rev3-eth": 1643760,
-    "esp32s3-zero": 1788624,
-    "esp32-pico": 2071584
+    "esp32s3-zero": 2024192,
+    "esp32-pico": 2107168
   },
   "measured": {
-    "esp32p4rev1-eth": "2026-09-06",
+    "esp32p4rev1-eth": "2026-09-09",
     "esp32s31": "2026-09-06",
-    "esp32": "2026-09-06",
-    "esp32-pico": "2026-09-06",
-    "esp32s3-n16r8": "2026-09-06",
-    "desktop": "2026-09-06"
+    "esp32": "2026-09-09",
+    "esp32-pico": "2026-09-09",
+    "esp32s3-n16r8": "2026-09-09",
+    "desktop": "2026-09-09",
+    "esp32s3-n8r8": "2026-09-08",
+    "esp32s3-zero": "2026-09-08",
+    "esp32-16mb": "2026-09-09",
+    "esp32p4rev1-eth-wifi": "2026-09-08"
   },
   "perf": {
     "desktop": {
-      "tick_us": 137,
-      "fps": 7299,
+      "tick_us": 147,
+      "fps": 6802,
       "scenario_p50": {
         "Layer_base_pipeline": {
-          "p50": 71,
-          "p95": 179,
+          "p50": 69,
+          "p95": 139,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "Layer_memory_1to1": {
           "p50": 5,
-          "p95": 40,
+          "p95": 11,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         }
       }
     },
@@ -50,10 +54,10 @@
     "scenario_matrix": {
       "MoonModule_control_change": {
         "desktop-macos": {
-          "p50": 144,
-          "p95": 248,
+          "p50": 125,
+          "p95": 246,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32-eth-wifi": {
           "p50": 89895,
@@ -166,10 +170,10 @@
       },
       "Audio_mutation": {
         "desktop-macos": {
-          "p50": 26,
-          "p95": 70,
+          "p50": 23,
+          "p95": 61,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 40,
@@ -192,18 +196,18 @@
       },
       "Aurora_fps": {
         "desktop-macos": {
-          "p50": 1514,
-          "p95": 1828,
-          "n": 23,
-          "last": "2026-09-06"
+          "p50": 1556,
+          "p95": 2013,
+          "n": 32,
+          "last": "2026-09-09"
         }
       },
       "Driver_mutation": {
         "desktop-macos": {
-          "p50": 21,
-          "p95": 64,
+          "p50": 20,
+          "p95": 29,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 42,
@@ -226,10 +230,10 @@
       },
       "Effects_composition": {
         "desktop-macos": {
-          "p50": 169,
-          "p95": 768,
+          "p50": 147,
+          "p95": 248,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 549,
@@ -240,26 +244,26 @@
       },
       "Fields_polar_lut": {
         "desktop-macos": {
-          "p50": 1234,
-          "p95": 1402,
-          "n": 24,
-          "last": "2026-09-06"
+          "p50": 1261,
+          "p95": 1686,
+          "n": 32,
+          "last": "2026-09-09"
         }
       },
       "Fluid_solver": {
         "desktop-macos": {
-          "p50": 220,
-          "p95": 249,
-          "n": 17,
-          "last": "2026-09-06"
+          "p50": 226,
+          "p95": 265,
+          "n": 30,
+          "last": "2026-09-09"
         }
       },
       "GridBlacks_blackpixel": {
         "desktop-macos": {
           "p50": 2,
-          "p95": 12,
+          "p95": 3,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32s3-n16r8": {
           "p50": 267,
@@ -282,10 +286,10 @@
       },
       "GridLayout_resize": {
         "desktop-macos": {
-          "p50": 127,
-          "p95": 311,
+          "p50": 122,
+          "p95": 189,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32-eth-wifi": {
           "p50": 82231,
@@ -326,10 +330,10 @@
       },
       "Layer_base_pipeline": {
         "desktop-macos": {
-          "p50": 71,
-          "p95": 179,
+          "p50": 69,
+          "p95": 139,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 118,
@@ -341,9 +345,9 @@
       "Layer_memory_1to1": {
         "desktop-macos": {
           "p50": 5,
-          "p95": 40,
+          "p95": 11,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 1,
@@ -354,10 +358,10 @@
       },
       "Layouts_mutation": {
         "desktop-macos": {
-          "p50": 96,
-          "p95": 248,
+          "p50": 94,
+          "p95": 169,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 111,
@@ -407,9 +411,9 @@
       "MoonLiveEffect_livescript": {
         "desktop-macos": {
           "p50": 6,
-          "p95": 22,
-          "n": 32,
-          "last": "2026-09-06"
+          "p95": 8,
+          "n": 26,
+          "last": "2026-09-09"
         },
         "esp32s3-n16r8": {
           "p50": 8255,
@@ -456,10 +460,10 @@
           "last": "2026-08-20"
         },
         "desktop-macos": {
-          "p50": 6,
-          "p95": 21,
+          "p50": 5,
+          "p95": 11,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 1,
@@ -471,9 +475,9 @@
       "MultiplyModifier_memory_lut": {
         "desktop-macos": {
           "p50": 3,
-          "p95": 21,
+          "p95": 4,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 3,
@@ -484,10 +488,10 @@
       },
       "MultiplyModifier_pipeline": {
         "desktop-macos": {
-          "p50": 126,
-          "p95": 283,
+          "p50": 121,
+          "p95": 172,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 225,
@@ -498,18 +502,18 @@
       },
       "Trails_ladder": {
         "desktop-macos": {
-          "p50": 355,
-          "p95": 608,
-          "n": 18,
-          "last": "2026-09-06"
+          "p50": 364,
+          "p95": 442,
+          "n": 31,
+          "last": "2026-09-09"
         }
       },
       "modifier_chain": {
         "desktop-macos": {
-          "p50": 47,
-          "p95": 123,
+          "p50": 43,
+          "p95": 48,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 69,
@@ -526,10 +530,10 @@
       },
       "modifier_swap": {
         "desktop-macos": {
-          "p50": 24,
-          "p95": 87,
+          "p50": 22,
+          "p95": 31,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32-eth": {
           "p50": 1010,
@@ -564,10 +568,10 @@
       },
       "perf_full": {
         "desktop-macos": {
-          "p50": 279,
-          "p95": 1114,
+          "p50": 265,
+          "p95": 402,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32s3-n16r8": {
           "p50": 16915,
@@ -596,10 +600,10 @@
       },
       "perf_light": {
         "desktop-macos": {
-          "p50": 17,
-          "p95": 61,
+          "p50": 16,
+          "p95": 24,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32s3-n16r8": {
           "p50": 2485,
@@ -640,10 +644,10 @@
           "last": "2026-07-25"
         },
         "desktop-macos": {
-          "p50": 308,
-          "p95": 881,
+          "p50": 272,
+          "p95": 813,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "desktop-windows": {
           "p50": 649,
@@ -667,9 +671,9 @@
         },
         "desktop-macos": {
           "p50": 4,
-          "p95": 16,
+          "p95": 6,
           "n": 32,
-          "last": "2026-09-06"
+          "last": "2026-09-09"
         },
         "esp32p4rev1-eth": {
           "p50": 217,
@@ -693,54 +697,54 @@
     }
   },
   "loc": {
-    "core": 25516,
-    "light": 34615,
-    "platform": 18036,
-    "ui": 10204,
-    "test": 56361,
-    "moondeck": 22570
+    "core": 26218,
+    "light": 35665,
+    "platform": 18705,
+    "ui": 10659,
+    "test": 57853,
+    "moondeck": 22906
   },
   "comments": {
     "core": {
-      "lines": 10242,
+      "lines": 10544,
       "ratio": 0.434
     },
     "light": {
-      "lines": 13197,
-      "ratio": 0.419
+      "lines": 13554,
+      "ratio": 0.417
     },
     "platform": {
-      "lines": 6336,
-      "ratio": 0.385
+      "lines": 6608,
+      "ratio": 0.387
     },
     "ui": {
-      "lines": 3014,
-      "ratio": 0.312
+      "lines": 3190,
+      "ratio": 0.316
     },
     "test": {
-      "lines": 10536,
-      "ratio": 0.214
+      "lines": 10859,
+      "ratio": 0.215
     },
     "moondeck": {
-      "lines": 3673,
+      "lines": 3723,
       "ratio": 0.186
     }
   },
   "tests": {
-    "cases": 1955,
+    "cases": 2004,
     "scenarios": 27
   },
   "docs": {
-    "md_files": 219,
-    "md_lines": 36362,
-    "plans_files": 115,
-    "backlog_lines": 6747,
+    "md_files": 222,
+    "md_lines": 37624,
+    "plans_files": 117,
+    "backlog_lines": 7155,
     "lessons_lines": 705,
     "claude_md_lines": 259
   },
   "complexity": {
-    "functions": 3441,
-    "over_threshold": 239,
-    "worst_ccn": 108
+    "functions": 3514,
+    "over_threshold": 251,
+    "worst_ccn": 128
   }
 }

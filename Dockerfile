@@ -68,7 +68,10 @@ RUN apt-get update \
 # (glibc 2.39), so the binary requires glibc >= 2.38. The debian12/bookworm images ship 2.36, where
 # it installs cleanly and then dies at startup with "GLIBC_2.38 not found" from libc and libm.
 # Verified both ways on the bench. If the release ever moves to an older builder, this can too.
-FROM gcr.io/distroless/cc-debian13
+# Pinned by digest, not by tag: `cc-debian13` is mutable, so an unpinned base means two
+# builds of the same commit can ship different runtimes. Re-pin deliberately when picking
+# up base updates (docker buildx imagetools inspect gcr.io/distroless/cc-debian13:latest).
+FROM gcr.io/distroless/cc-debian13@sha256:9b615fff20e1a4fad29c2b30562580b212c7dd5e2225236735cca0070ed11c78
 
 COPY --from=fetch /rootfs/usr/bin/projectMM /usr/bin/projectMM
 

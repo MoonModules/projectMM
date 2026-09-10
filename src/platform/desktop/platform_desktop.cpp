@@ -1,4 +1,5 @@
 #include "platform/platform.h"
+#include "core/FirmwareImage.h"  // identify/moonBaseRejection: shared image vetting
 
 #include <algorithm>
 #include <chrono>
@@ -202,18 +203,60 @@ uint32_t micros() MM_NONBLOCKING {
 #pragma clang diagnostic pop
 #endif
 
+// WHAT THIS PROCESS HAS DELIBERATELY ALLOCATED, in bytes. Not a heap figure: a desktop has as much
+// memory as it wants, and freeHeap() keeps reporting 0 because three call sites read that 0 as
+// "unlimited" and switch off gates that only mean something on a device (polar.h's LUT budget,
+// MappingLUT's paging fallback).
+//
+// What it IS good for is the DELTA. Every buffer the system takes on purpose (layer buffers,
+// mapping LUTs, script arenas, driver rings) comes through alloc/allocInternal, so adding or
+// removing a module moves this number by exactly what that module costs, on a laptop, in a second,
+// with no board attached. The process's own RSS cannot answer that: the allocator, the JIT and the
+// HTTP buffers move it too, and a 100 KB layer would be lost in the noise.
+//
+// The REQUESTED size is recorded rather than malloc's rounded one (malloc_size reports 1024 for a
+// 1000-byte ask), so a reported delta is the number the caller asked for.
+std::atomic<size_t> g_allocatedBytes{0};
+std::atomic<size_t> g_allocatedPeak{0};
+std::atomic<uint32_t> g_allocCount{0};
+
+namespace {
+// Requested size, kept immediately before the block handed out. 16 bytes rather than 8 so the
+// returned pointer keeps the alignment malloc promised for any type.
+constexpr size_t kAllocHeader = 16;
+
+void* trackedAlloc(size_t bytes) {
+    void* raw = std::malloc(bytes + kAllocHeader);
+    if (!raw) return nullptr;
+    *static_cast<size_t*>(raw) = bytes;
+    const size_t now = g_allocatedBytes.fetch_add(bytes, std::memory_order_relaxed) + bytes;
+    // Peak is advisory, so a lost race between two threads costs a slightly low high-water mark
+    // rather than anything a caller depends on.
+    if (now > g_allocatedPeak.load(std::memory_order_relaxed))
+        g_allocatedPeak.store(now, std::memory_order_relaxed);
+    g_allocCount.fetch_add(1, std::memory_order_relaxed);
+    return static_cast<uint8_t*>(raw) + kAllocHeader;
+}
+}  // namespace
+
 void* alloc(size_t bytes) {
-    return std::malloc(bytes);
+    return trackedAlloc(bytes);
 }
 
 bool ptrIsPsram(const void* /*p*/) { return false; }   // desktop has no PSRAM
 
 void* allocInternal(size_t bytes) {
-    return std::malloc(bytes);   // desktop has one flat RAM — internal == ordinary
+    return trackedAlloc(bytes);   // desktop has one flat RAM: internal == ordinary
 }
 
 void free(void* ptr) {
-    std::free(ptr);
+    if (!ptr) return;
+    void* raw = static_cast<uint8_t*>(ptr) - kAllocHeader;
+    g_allocatedBytes.fetch_sub(*static_cast<size_t*>(raw), std::memory_order_relaxed);
+    // Decremented, so the count is LIVE blocks and not allocations-ever. Without this it only
+    // climbed, which reads as a leak on any device left running.
+    g_allocCount.fetch_sub(1, std::memory_order_relaxed);
+    std::free(raw);
 }
 
 // Executable memory for MoonLive's emitted code. macOS on Apple Silicon enforces W^X
@@ -303,6 +346,10 @@ void pauseLoop() {
     lastWake = std::chrono::steady_clock::now();
 }
 
+size_t allocatedBytes() { return g_allocatedBytes.load(std::memory_order_relaxed); }
+size_t allocatedPeak()  { return g_allocatedPeak.load(std::memory_order_relaxed); }
+uint32_t allocatedCount() { return g_allocCount.load(std::memory_order_relaxed); }
+
 size_t freeHeap() {
     return 0; // Not meaningful on desktop (0 = unlimited)
 }
@@ -324,6 +371,10 @@ size_t maxAllocBlock() {
 
 size_t maxInternalAllocBlock() {
     return 0; // Not meaningful on desktop (0 = unlimited)
+}
+
+size_t maxExecAllocBlock() {
+    return 0;   // no distinct executable pool: pages are mapped per allocation
 }
 
 // No RTOS on desktop — the TasksModule shows only its MoonModule cost table here.
@@ -1113,14 +1164,19 @@ void getMacAddress(uint8_t mac[6]) {
                 cached[0] = static_cast<uint8_t>((cached[0] & 0xFC) | 0x02);   // locally administered, unicast
             }
             std::filesystem::create_directories(file.parent_path(), ec);
-            if (std::ofstream out(file); out) {
-                char line[24];
-                std::snprintf(line, sizeof(line), "%02X %02X %02X %02X %02X %02X",
-                              cached[0], cached[1], cached[2], cached[3], cached[4], cached[5]);
-                out << line << "\n";
-            }
-            // A write failure is not fatal: the address is still valid for this run, and the next
-            // start will try again. A read-only mount then behaves like the old constant did.
+            // ATOMIC, like every other .config write: a crash mid-write would otherwise leave a
+            // half-line that the parse above rejects, and the next start would take a DIFFERENT
+            // identity, renaming the device and moving its MQTT topics. Temp file plus rename
+            // means a reader sees either the old identity or the new one, never a torn one.
+            char line[24];
+            const int n = std::snprintf(line, sizeof(line), "%02X %02X %02X %02X %02X %02X\n",
+                                        cached[0], cached[1], cached[2], cached[3], cached[4], cached[5]);
+            if (n > 0) (void)fsWriteAtomic("/.config/identity", line, static_cast<size_t>(n));
+            // A write failure is not fatal for THIS run: the address above is valid and serves.
+            // What it costs is persistence, and the two cases differ. An install that already has
+            // config keeps the historic address every time, so it stays stable. A FRESH install on
+            // a read-only mount generates a new address on every start, so its device name and
+            // MQTT topics move each time: visible, and the fix is to mount the volume writable.
         }
     }
     for (int i = 0; i < 6; i++) mac[i] = cached[i];
@@ -1459,7 +1515,7 @@ int wifiStaRssi() { return 0; }
 void wifiStaBssid(uint8_t out[6]) { std::memset(out, 0, 6); }
 int wifiStaChannel() { return 0; }
 
-bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }
+bool wifiApInit(const char* /*apName*/, const char* /*ip*/) { return false; }   // no AP on a host
 bool wifiApConnected() { return false; }
 void wifiApStop() {}
 uint32_t wifiApClientCount() { return 0; }
@@ -1512,6 +1568,35 @@ bool otaWriteStream(FsWriteSrc /*src*/, void* /*user*/, size_t /*contentLen*/,
 bool otaHasMoonBase() { return false; }
 bool otaBootMoonBase() { return false; }
 bool otaRunningMoonBase() { return false; }
+// No factory partition off-device, so nothing to read a version from.
+bool otaMoonBaseVersion(char*, size_t) { return false; }
+bool otaMoonBaseBuild(char*, size_t) { return false; }
+bool otaMoonBaseSize(uint32_t*, uint32_t*) { return false; }
+// No factory partition to install into off-device.
+bool otaFetchMoonBaseUrl(const char*, char* statusBuf, size_t statusBufLen,
+                         uint32_t* bytesReadOut, uint32_t* bytesTotalOut) {
+    if (statusBuf && statusBufLen > 0) std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    if (bytesReadOut) *bytesReadOut = 0;
+    if (bytesTotalOut) *bytesTotalOut = 0;
+    return false;
+}
+
+// Desktop has no factory partition, so this cannot install anything. It DOES run the vetting,
+// which is the part worth exercising off-device: the checks below are what stand between a
+// mistyped URL and a board with no recovery image, and they are pure byte inspection. Tests
+// drive this to prove each rejection fires; the write itself has no meaning here and the
+// function reports so, which also keeps a desktop caller from believing it worked.
+// Desktop has no factory partition, so this installs nothing. It also does not CONSUME anything:
+// an earlier version read the caller's first chunk to run the vetting, which took bytes off a
+// stream the caller still owned for a check whose real coverage is unit_FirmwareImage driving
+// mm::firmware::identify directly. Refusing without touching the source is the honest stub.
+bool otaWriteMoonBase(FsWriteSrc, void*, size_t, char* statusBuf, size_t statusBufLen,
+                      uint32_t* bytesReadOut) {
+    if (statusBuf && statusBufLen > 0) std::snprintf(statusBuf, statusBufLen, "unsupported on desktop");
+    if (bytesReadOut) *bytesReadOut = 0;
+    return false;
+}
+
 bool moonbaseStageInstallUrl(const char*) { return false; }
 void moonbaseClearStagedUrl() {}
 
@@ -2001,10 +2086,13 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t /*gpio*/, uint32_t resolutionHz,
 uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING {
     return h.impl ? static_cast<HostRmt*>(h.impl)->resolutionHz : 0;
 }
-bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols,
-                       size_t symbolCount) {
-    if (!h.impl || !symbols || symbolCount == 0) return false;
+bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint8_t* wire, size_t byteCount) {
+    if (!h.impl || !wire || byteCount == 0) return false;
     return true;
+}
+
+bool rmtWs2812SetBitTiming(RmtWs2812Handle& h, uint32_t /*sym0*/, uint32_t /*sym1*/) {
+    return h.impl != nullptr;   // no peripheral to program off-target
 }
 bool rmtWs2812Wait(RmtWs2812Handle& /*h*/, uint32_t /*timeoutMs*/) { return true; }
 void rmtWs2812Deinit(RmtWs2812Handle& h) {

@@ -78,7 +78,8 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // instruction.
     constexpr uint8_t kSharedScratch = 2;
     const uint8_t scratchTotal = kSharedScratch + 1;
-    if (!out || cap == 0) return 0;
+    lowerRefusal() = LowerRefusal::None;
+    if (!out || cap == 0) return 0;   // unreachable from compileSource, which refuses this first
 
     // Run the register allocator before lowering. It leaves a program that already fits untouched,
     // and rewrites one that does not into Spill/Reload against this backend's frame, replacing the
@@ -91,16 +92,17 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     // lowering then overwrites, miscompiling exactly the squeezed programs the seam exists to prove.
     const RegBudget budget = squeeze ? RegBudget{squeeze->regs, scratchTotal, squeeze->slots}
                                      : RegBudget{regCount, scratchTotal, A::kMaxSpillSlots};
-    if (!spillToBudget(ir, budget, slots)) return 0;
+    if (!spillToBudget(ir, budget, slots)) { lowerRefusal() = LowerRefusal::Spill; return 0; }
     // sAddr FIRST: it is the one StoreElem also uses, and a store-only program reserves a single
     // scratch, so the shared one has to be the lowest index or it would name an unreserved register.
     const RegId sAddr = static_cast<RegId>(ir.vregsUsed);       // per-channel address (both ops)
     const RegId sCtr  = static_cast<RegId>(ir.vregsUsed + 1);   // FillElems loop counter
 
-    // Size the assembler's buffer to the CALLER's: `cap` is what the staging buffer holds, so the
-    // two can never disagree about how much a script may emit (they were separately constant, and
-    // a script that fit one overflowed the other).
-    A a(cap);
+    // Emit INTO the caller's buffer. `out` and `cap` are the staging buffer and its size, so the
+    // assembler and the caller cannot disagree about how much a script may emit (they were
+    // separately constant once, and a script that fit one overflowed the other), and there is no
+    // second full-size allocation to fail: see the borrowing constructor for what that cost.
+    A a(out, cap);
     using LabelId = decltype(a.newLabel());
     // The LAST reserved scratch index, derived from scratchTotal rather than hard-coded: the `+1`
     // in scratchTotal above IS this register, so the reservation and the use cannot drift apart.
@@ -406,7 +408,7 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
                 // the FRAME SLOT its arguments start at. Hand the host their address and their
                 // count: nothing is held in a register across the call, and how many arguments a
                 // builtin takes stops being a property of this instruction.
-                if (!op.callFn) return 0;
+                if (!op.callFn) { lowerRefusal() = LowerRefusal::NullCall; return 0; }
                 const RegId argPtr = static_cast<RegId>(ir.vregsUsed);
                 a.slotAddr(argPtr, static_cast<uint8_t>(op.imm));
                 const RegId argN = static_cast<RegId>(ir.vregsUsed + 1);
@@ -467,9 +469,9 @@ size_t lowerWith(IrProgram& ir, uint8_t* out, size_t cap, const RegBudget* squee
     if (ir.fnCount > 0) closeFn(static_cast<uint8_t>(ir.fnCount - 1));
     else a.epilogue();
     a.finalize();
-    if (a.overflowed() || a.size() > cap) return 0;
-    std::memcpy(out, a.bytes(), a.size());
-    return a.size();
+    if (a.overflowed()) { lowerRefusal() = LowerRefusal::AsmOverflow; return 0; }
+    if (a.size() > cap) { lowerRefusal() = LowerRefusal::OverCap; return 0; }
+    return a.size();   // already in `out`: the assembler emitted there
 }
 
 }  // namespace mm::moonlive

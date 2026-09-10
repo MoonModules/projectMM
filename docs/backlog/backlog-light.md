@@ -41,8 +41,19 @@ What it does NOT address: on the classic ESP32 the DMA half compiles to nothing,
 moves the channel's interrupt off core 0 (the root cause found on the Dig-Next-2, fixed by
 creating the channel from core 1). The two are complementary, one driver with the right answer
 per chip: DMA where the silicon has it, the core-1 refill where it does not. Adopt his DMA and
-callback path, keep the core hop, and drop the classic-only `txInFlight_` guard where his busy
-flag covers it. Study, do not copy: write it against the seam as it stands, credit the branch.
+callback path and keep the core hop. Study, do not copy: write it against the seam as it stands,
+credit the branch.
+
+Re-read against the wire-byte driver (2026-09-09), which changed two of the assumptions above. The
+driver no longer holds pre-expanded symbols at all: it ships the correction's wire bytes and the
+peripheral expands them (IDF bytes encoder on the DMA chips, the level-5 refill on classic), so the
+frame buffer is ~3 bytes per light rather than 96. So (a) his `mem_block_symbols = 1024` is now the
+only symbol memory in play and is cheap, and (b) `rmt_transmit` already takes the bytes, so the DMA
+path needs no buffer change, only `flags.with_dma` plus the callback. The `txInFlight_` guard STAYS
+whatever happens: the peripheral streams straight out of the driver's frame buffer, so a rebuild
+that frees it mid-frame still tears; his busy flag would replace the blocking wait, not that guard.
+The win left on the table is the blocking `rmtWs2812Wait` on S3/P4, which today costs the tick the
+whole wire time of the longest strand.
 
 ### A script's setControl rebuilds a control subtree on every write (2026-09-06)
 
@@ -218,6 +229,40 @@ The bandwidth arithmetic (datasheet-derived): DMA demand = bus-bytes × pclk. Di
 
 **Conclusion — this does not open a new path; the proper ring fix already is the path.** The internal-RAM footprint of the ring is NOT set by light count: the ring transposes from a PSRAM-resident source into a small fixed internal buffer pool, so PSRAM is never on the DMA's read path at all. The 240-light wall is the `kRingBufs=16` no-reuse stopgap (the wrap read-while-write race), NOT the ring's design — and "more buffers" is a confirmed dead end. The shipped ring (above) holds internal RAM constant at arbitrary light count, which is exactly the "unlimited lights/strand" the PSRAM-hybrid idea was reaching for — obtained the correct way, at the mandatory shift clock, without PSRAM on the read path. **Action: none — the ring shipped; the "lower shift pclk + PSRAM whole-frame" hybrid is closed as physically blocked and should not be re-attempted.** (If the mechanism is ever contested, the one bench measurement worth doing is registering GDMA underrun/FIFO-empty counters at 26.67 MHz whole-frame-PSRAM to distinguish underrun from latency — but it would not change the conclusion.)
 
+### RmtLedDriver's out-of-memory status has no test, and cannot have one yet (2026-09-09)
+
+`frameUnusable_` reports a frame buffer the driver could not get (or, on classic, one that landed in
+PSRAM where the refill cannot read it), and two guards keep that error from being overwritten by the
+resting "driving N of N" status. All of it shipped unpinned, and not by oversight: the desktop
+`allocInternal` is a flat `trackedAlloc` that never refuses and ignores `setTestMaxAllocBlock`, and
+`ptrIsPsram` is hard-coded false. A test written against that would pass whatever the driver did.
+`unit_JsonSink_overflow` shows the trap: it grows until a 64-bit host might refuse and accepts "no
+refusal" as a pass, so it tests nothing on a machine with RAM.
+
+**What it takes:** a cap inside the desktop `allocInternal` that `setTestMaxAllocBlock` (or a new
+`setTestInternalCap`) drives, so a test can make the frame allocation fail deterministically, plus a
+`setTestPsramFrom(ptr)` seam so the PSRAM branch is reachable off-target. Then three cases: the
+status appears, `prepare()` does not replace it with "driving N of N", and `reinit()` does not clear
+it (the bug the bench found: the error retracted microseconds after it was set). A platform change
+with its own review, which is why it is here and not in the change that shipped the status.
+
+### The ring's memory readout counts one buffer, not the pool (CodeRabbit, 2026-09-09)
+
+`ParallelLedDriver::driverHeapBytes()` derives its DMA figure from `peripheral_->busCapacity()`,
+which is `st->cap`: the size of ONE buffer. It then adds a second when `busBuffer(1)` exists, which
+is right for the double-buffered path and wrong for the ring, where `createRingState` allocates
+`ringBufs` slices (up to 30 at the 48x256 geometry) plus the shared zero-pad. So a ring board
+under-reports its DMA memory by roughly the buffer count, on the card that exists to make exactly
+that number visible.
+
+Not a correctness bug: the memory is spent either way, and nothing sizes an allocation from this
+value. It is a reporting bug in the one readout a user consults before adding lights.
+
+**What it takes:** an aggregate size on the peripheral (the ring knows `ringBufs * bufBytes + pad`
+at creation) rather than arithmetic in the driver, which cannot see the pool. Wants a ring-mode
+accounting test alongside, since the existing ones only cover the non-ring path. Touching
+`createRingState` means a bench pass on the wall, which is why this is its own change.
+
 ### MoonI80 ring — boot / first-frame-after-rebuild trips a transient give-up status (2026-07-16)
 
 A cosmetic residual left after the rebuild-wedge fix (below): on boot, and for a beat after any shift-ring rebuild, the driver shows **"output stalled"** even though `wireUs` reports live completions — the *first* frame after a fresh ring build occasionally misses its completion window and trips the dead-frame give-up before the ring settles, so the stale error latches until the next interaction clears it. It is NOT the old wedge (that stayed dead until reboot; this self-clears on any control edit and the ring is genuinely driving underneath). Two clean fixes to weigh: (a) don't count the very first frame after a rebuild toward `deadFrames_` (give the fresh ring one grace frame), or (b) have the give-up retry re-derive status the moment `wireUs` shows a real completion. Low priority — the LEDs drive correctly; only the status string is briefly wrong.
@@ -368,7 +413,7 @@ So the fix is scoped to the preview, and the open question is where travel is de
   fixture someone plugged in. The leanest thing that stops the lie.
 - **The light preset** — correct once two different heads run at once, but a preset is a
   *channel-role* layout today, and carrying physical travel widens what a preset means. Belongs
-  with the [fixture model](#fixture-model--moving-heads-beams-long-term), not before it.
+  with the [fixture model](#fixture-model-moving-heads-beams-long-term), not before it.
 
 **Positioning is 8-bit while the fixture offers 16.** The bench head has a fine channel for each
 axis ([light fixtures reference](../reference/light-fixtures.md)); both sit unused, so pan resolves
@@ -447,10 +492,10 @@ where upscaling has the least to offer.
 
 **The fix when it earns its place:** iterate the OUTPUT rows rather than the input lights, so
 writes are sequential: for each output row, walk its source row once and emit `scale` copies of
-each light's colour, then `memcpy` that finished row to the remaining `scale - 1` rows of the
+each light's color, then `memcpy` that finished row to the remaining `scale - 1` rows of the
 block. Same output, one pass through the destination in address order.
 
-### Sprite follow-ups (draw::sprite + FlyingToasters shipped; [spec + plan](../history/plans/Plan-20260827%20-%20Sprites%20and%20flying%20toasters.md))
+### Sprite follow-ups (draw::sprite + FlyingToasters shipped; spec + plan in the plans archive)
 
 Deliberately deferred when sprites landed: P4 PPA acceleration behind the same `draw::sprite`
 signature (the 2D-DMA blitter the WLED-MM-P4 world uses via LovyanGFX; ours would sit in the
@@ -489,16 +534,26 @@ a codec. So the three things a Tab5 could be are separate pieces of work, and on
 
 ### Multi-card walls — does a daisy chain work today? (open, ask before building)
 
-The ColorLight format has **no card addressing**: the destination MAC is a fixed constant and every card filters on it, so every card on a segment shows the same image. A user with six cards on a switch observed exactly that.
+The ColorLight format has **no card addressing in the PIXEL path**: the destination MAC is a fixed
+constant and every card filters on it, so every card on a segment shows the same image. A user with
+six cards on a switch observed exactly that.
 
-The industry-standard answer is **daisy-chaining** — a sending card's ports each drive a chain, and each card takes its region by position in the chain. That user works around it with per-card VLANs and a managed switch instead, which he built for throughput and for per-card colour-temperature grouping across mixed panel batches; he described it as his own solution, not a standard.
+The DISCOVERY path does distinguish them. A discovery reply (0x08) carries a controller number at
+payload offset 0x62, and the acknowledgement echoes it plus one, which is how a sender tells several
+cards apart. Documented by a reader of [Harald Kubota's protocol
+write-up](https://hkubota.wordpress.com/2022/01/31/winter-project-colorlight-5a-75b-protocol/) and
+confirmed by its author. That is an identity, not a destination: it does not let a sender aim pixel
+data at one card, so the same-image behavior above stands. It is what a per-card brightness or
+color-temperature feature below would key on.
+
+The industry-standard answer is **daisy-chaining** — a sending card's ports each drive a chain, and each card takes its region by position in the chain. That user works around it with per-card VLANs and a managed switch instead, which he built for throughput and for per-card color-temperature grouping across mixed panel batches; he described it as his own solution, not a standard.
 
 **Establish first whether a daisy chain already works with projectMM** (one contact has a 96K daisy-chained rig). If the cards self-assign by chain position, the standard multi-card case is already solved and nothing is needed. Only if it does not work is there a feature here, and it should follow the daisy-chain standard rather than the VLAN workaround. 802.1Q tagging is technically a clean fit for a raw-L2 sender (the tag is part of the Ethernet header, the switch strips it before the card, so card firmware is unaffected), but it serves one bespoke architecture.
 
 ### Smaller asks from the same thread
 
 - **Read the wall layout from the ColorLight cards.** The cards can report their configuration and at least one user's own tool already does it; it would remove the manual layout step.
-- **Per-card colour temperature and brightness**, via the ColorLight sync-packet bytes, grouped by sync group — used to colour-match mixed panel batches live.
+- **Per-card color temperature and brightness**, via the ColorLight sync-packet bytes, grouped by sync group — used to color-match mixed panel batches live.
 - **Docker image**, asked for by a user tracking updates in an IoT system. The Linux binary and `.deb` already ship, so this is packaging rather than new capability.
 
 ## Sensors and audio-reactive input
@@ -685,7 +740,6 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
 
   **Build and prove chunking on the unshifted path first** (Parlio 4,096 → 16,384 is the measurable win, on proven code), then let shift mode inherit it — that is a sequencing rule about *where to de-risk the mechanism*, **not** a claim that the expander is optional. It is not: it is the only route to 100 fps at this scale without spending 48+ GPIOs. Correct WS2812 inter-chunk timing is the one hard constraint: the lines must idle LOW for < 300 µs between chunks or the strand latches mid-frame. The driver already rejects an over-limit frame with a loud status. Measured detail: [performance.md § Multi-pin](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid).
 - **`rmtWs2812Show` fuller error handling** (deferred from PR #17 / 🐇 CodeRabbit). The shipped path has a finite `rmt_tx_wait_all_done` timeout (1 s) so a wedged DMA can't hang the render tick forever, and a dropped frame self-heals (the driver re-encodes the whole frame next tick). The fuller version — `rmt_transmit` return check, `rmt_tx_stop` to cancel an in-flight transfer on timeout, `show()` returning failure so `loop()` won't reuse `symbols_` mid-transmit — belongs with the **core-1 driver-task** work, since that task owns the buffer lifetime and in-flight state the cancel logic needs.
-- **Surface RMT symbol-buffer alloc failure as a status** (bench-found 2026-07-12, [multi-pin driving results](../performance.md#multi-pin-led-driving-all-three-peripherals-128128-grid)). `resizeSymbols()` sizes for the driver's `count` window, so on a classic ESP32 (~90 KB heap) a whole-grid window (`count=0` on a 128×128 grid ≈ 1.5 MB) fails to allocate: `symbols_` stays null, `tick()` bails at its `!symbols_` guard, and the strip goes **dark with no status** — the user sees nothing lit and no error. The fix mirrors the Parlio over-limit guard (already loud): when the symbol alloc returns null, set a clear "not enough memory — reduce lights or use start/count" status instead of silently idling. Small, robustness-principle work; pairs with the fuller RMT error handling above.
 - **Auto-derived DMA buffer count** (7 / 30 / 75 per [analysis §7.4](../history/leddriver-analysis-top-down.md)), **16-bit pipeline + dither** ([§7.3](../history/leddriver-analysis-top-down.md)), **shift-register expander stubs** ([§7.5](../history/leddriver-analysis-top-down.md)).
 - **IR RX live-reconfigure recovery — unconfirmed, park until it recurs** (bench 2026-07-13, SE16). IR reception on the SE16 (`IrService` pin 5) went dead mid-session and only a **hard reset** brought it back; a warm/API path did not. **Ruled out:** not hardware (hard reset fixed it, receiver+switch+wiring fine), not LED-count (IR survives the full 16384-light / 8 fps load — a received code still toggled a control at max load), not a regression from the i80 commit (`platform_esp32_ir.cpp` untouched, the 1250 ns glitch-filter fix intact). **Prime suspect (unproven):** the session's live pin churn — including transiently setting the i80 `clockPin` to **5, which IS the IR pin** — left GPIO 5 routed to the wrong peripheral, and the RMT-RX channel (a pin-keyed static behind `platform::irStop`/`ensureChannel`) didn't re-acquire cleanly on the next `irRead`; only a full GPIO re-init (hard reset) cleared it. This may be pure test artifact (nothing in a *normal* user flow points two live modules at GPIO 5). **To conclude:** from a fresh hard reset (IR working), in isolation set i80 `clockPin=5` then restore `clockPin=8` and check whether IR dies and whether it self-recovers *without* a hard reset — self-recovers → no bug (test artifact); stays dead → a real live-reconfigure gap in the IR channel re-acquire worth fixing (per *No reboot to apply a configuration change*). Small robustness/repro work; do it only if IR breaks again in real use.
 - **Moving-head preview = peer interpreter.** When moving heads land, the previewer must interpret channel semantics (pan/tilt/RGBW-at-arbitrary-indices) to render a moving fixture — the same light-preset model physical drivers use, interpreted to screen. This is *why* the increments named the abstraction "interpret the preset" rather than "apply correction / opt out": so Preview becomes a full peer here without a rename. Its own design plan when moving-head support starts.
@@ -826,3 +880,74 @@ The LED-driver increments **shipped**: increment 1 (RMT/WS2812B single-strand on
   I2S0 first.
 
 (The shared lane-driver scaffolding extraction — when a 3rd parallel backend lands — is tracked separately under [§ Extract shared lane-driver scaffolding](#extract-shared-lane-driver-scaffolding-when-the-3rd-parallel-backend-lands-deferred) above.)
+
+## FixedPoint fades outside the Layer's aggregation (2026-09-07)
+
+`FixedPointEffect` calls `draw::fade` directly where every other fading effect calls
+`layer()->fadeToBlackBy`, so it skips what the Layer adds: the per-frame aggregation (N effects on
+one layer cost one buffer pass, gentlest rate wins), the framerate scaling, the sub-unit carry, and
+the buffer-generation bump. Invisible until a second effect shares the layer.
+
+The swap is one line and was tried: it makes the effect **3.1x brighter at high framerate than at
+low**, against the 1.35x band `unit_Effects_framerate` enforces. The two calls mean different
+things. `draw::fade(cv, n)` applies n every frame; `fadeToBlackBy(n)` is a RATE per reference frame
+that Layer scales by elapsed time. The `fade` control (default 70, range 0..255) was tuned against
+the first meaning, so moving it needs the default re-tuned and the trail looked at on a device, not
+a silent swap.
+
+Worth doing, as its own change: it is the last effect outside the shared fade path, and while it
+stays outside, "every fade goes through the Layer" is not true.
+
+## Downloading a scripted palette can repoint the active one (2026-09-06)
+
+Found while testing the palette-download fixes. A `.mlp` that sorts BEFORE an already-installed one
+silently changes what the current selection points at: with `fire.mlp` active at index 60,
+downloading `beat-flash.mlp` re-sorts the scripted tail and index 60 becomes `beat-flash.mlp`. The
+stored value never moved; what it means did.
+
+[Palette.h](../../src/light/Palette.h) already reasons about exactly this and solves half of it. A
+palette selection is an index: it persists, it rides `seg[0].pal` over the WLED API, and Home
+Assistant renders `paletteNames` positionally, so scripted palettes sort AFTER the built-ins and the
+sixty built-in indices are fixed forever. What is not solved is the scripted tail among itself, and
+that tail now grows at runtime, which is what the download path made reachable.
+
+Nobody has reported it, and the blast radius is small: a rig with one scripted palette cannot hit it,
+and the value re-reads correctly the moment the user picks again. It matters most where a preset or
+an MQTT/HA automation stores the index and replays it later, which is the case where nobody is
+watching the LEDs when it changes.
+
+**What it would take:** persist the scripted palette by NAME alongside the index and re-resolve the
+index on load, so a stored selection survives a re-sort. `paletteScript` already holds the resolved
+file name for the editor, so the value exists; what is missing is using it as the authority when the
+list changes. The alternative, appending new scripts rather than sorting them, keeps indices stable
+but makes the picker unreadable as the list grows, which is the trade the sort was chosen over.
+
+## Classic-board memory: the wins are system-level, not per-module (2026-09-09)
+
+The Dig-Octa on a clean boot with RmtLed has **88,284 bytes free internal, 86,016 largest block**.
+Under load and after driver swaps that largest block fell to 24,576, so fragmentation matters as
+much as the total.
+
+What the modules hold is NOT where the RAM went. The whole tree reports **9,342 bytes** of
+`dynamicBytes` (Layer 3,586, Preview 2,560, RmtLed 1,536, Drivers 1,536). So per-module trimming has
+almost nothing left to win, and the remaining ~230 KB of internal RAM in use is WiFi, lwIP, FreeRTOS
+task stacks and the binary's static data.
+
+Where to look, in order of likely return:
+
+- **Task stack sizes.** Every task allocates its stack from internal RAM at creation, and the
+  defaults are generous. The Tasks module already reports them, so the measurement exists.
+- **lwIP pool sizes** (`CONFIG_LWIP_*`): TCP PCBs, pbuf counts, and the send/receive windows are all
+  sdkconfig knobs, sized for a general-purpose device rather than a controller with a handful of
+  connections.
+- **WiFi buffer counts** (`CONFIG_ESP32_WIFI_*_BUFFER_NUM`): the static RX/TX buffer pools are the
+  single largest tunable block on a classic board.
+- **Fragmentation, not just totals.** A 24 KB largest block with 50 KB free is a placement problem;
+  allocating the long-lived buffers early and together is what fixes that.
+
+Each is an sdkconfig change measurable on the bench in minutes (`freeInternal` and `maxBlock` on a
+clean boot), and each risks a different failure: too few WiFi buffers drops packets under load, too
+small a stack overflows under a rare path. So measure one at a time on a board that is actually
+serving the UI, not idle. The payoff is real: at 88 KB free a classic board is one large allocation
+away from trouble, which is what drove both driver decisions on 2026-09-09.
+

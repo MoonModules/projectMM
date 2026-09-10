@@ -56,6 +56,32 @@ running projectMM permanently on a NAS or a Pi.
 
 ## Distribution
 
+### An arm64 Linux release build, so SBCs stop building from source (2026-09-09)
+
+Every Linux job in `release.yml` runs on `ubuntu-latest`, which is x86-64, so the release publishes
+`projectMM-linux-x64` and `projectmm_X.Y.Z_amd64.deb` and nothing for arm64. That one gap is why a
+Raspberry Pi or a NanoPi has to clone and compile, and why the container image can only be amd64
+(the image in PR #98 installs the released `.deb`, so an arm64 image needs an arm64 `.deb` first).
+
+GitHub offers arm64 Linux runners for public repositories (`ubuntu-24.04-arm`), so this is a second
+job rather than cross-compilation. Unverified against this repo: whether `package_desktop.py` runs
+there unmodified, and whether the runner is available on this plan. Check both before promising it.
+
+Shipping it collapses three problems into one fix: the SBC route becomes `apt install`, the
+container can publish a multi-arch manifest (one tag, Docker picks per host), and
+[installing-on-linux.md](../tutorials/installing-on-linux.md) loses its build-from-source branch.
+
+### A flashable SD image with projectMM already on it (robwomp, 2026-09-08)
+
+Suggested on Discord while bringing up a NanoPi R28S: most Pi users want to write an `.img` to a
+card and be running, not to install a toolchain. Armbian's own build tooling supports exactly this
+(`armbian/os` carries per-application "extensions", OMV being a small worked example), so the image
+is a spin of a maintained distribution plus our package rather than a distribution to maintain.
+
+Wants the arm64 `.deb` above first: with it the extension is roughly "install this package, enable
+this service", which is the shape those extensions already have. Without it, the image would have to
+carry a source build, which is the thing it exists to avoid.
+
 ### OTA upload refuses a normal client: the body must arrive within ~50 ms (2026-09-02)
 
 `POST /api/firmware/upload` answers `400 {"error":"incomplete request body"}` to an ordinary
@@ -167,7 +193,7 @@ declared rather than for a buffer to fill, and to time out on stall rather than 
   RISC-V coprocessor-context save on INTERRUPT ENTRY. That is a symptom of something faulting inside
   an ISR context rather than a bug in the kernel itself, and the P4 is the only RISC-V target with a
   coprocessor, which is why no other board shows it. The prior art at
-  [Plan-20260718](../history/plans/archive/Plan-20260718%20-%20MoonI80%20lapping-v2%20clock-oracle%20ring%20(shipped).md)
+  `Plan-20260718 - MoonI80 lapping-v2 clock-oracle ring` (in the plans archive)
   is a DIFFERENT cause with the same panic name (an ISR reading PSRAM while a flash write disabled
   the cache, fixed with a `spi_flash_cache_enabled()` defer guard) and is worth re-reading first:
   the same shape on another ISR would present exactly like this.
@@ -192,7 +218,7 @@ DevicesModule discovers via **passive UDP presence** (UDP 65506) feeding a [`Dev
 - **Live peer state** — a discovered peer's brightness / on-off shown in our list, refreshed by polling its REST `/json` after discovery gives the IP (discovery = UDP/mDNS, state = REST). The read-side complement to the command half.
 - **Non-IP transports (board-gated, far future)** — Tasmota-MQTT / zigbee2mqtt need an MQTT client; **direct Zigbee/Thread** (S31/C6/H2 802.15.4 radio) makes projectMM the *hub itself*, driving bulbs over the mesh with no gateway — the standout differentiator, the biggest lift. Same plugin philosophy, a transport addition + board gate.
 
-Full design + the reasoned transport split: [Plan-20260629 — UDP device discovery + mDNS advertise-only (shipped)](../history/plans/archive/Plan-20260629%20-%20UDP%20device%20discovery%20%2B%20mDNS%20advertise-only%20%28shipped%29.md).
+Full design + the reasoned transport split: `Plan-20260629 - UDP device discovery + mDNS advertise-only` (in the plans archive).
 
 ## MoonBase follow-ups
 
@@ -1112,14 +1138,20 @@ They are **not** CI failures (CI is Debug) and each one inspected so far is a fa
 Not done with the multi-destination/tab-UI merge because 17 warnings across four core files is its own change, not a tail on someone else's.
 
 
-## MoonLive core/platform layering + JIT sdkconfig scoping (CodeRabbit #29, 4 findings)
+## MoonLive core/platform layering + JIT sdkconfig scoping (CodeRabbit #29, 3 findings left)
 
-Four 🟠 Major boundary findings from the PR #29 review are real but each is its own scoped change, not a tail on the ring branch. The Critical sibling (a `cpl<3` overflow guard in the MoonLive effect's `tick`) landed with the branch it was found on; these four are backlogged:
+Four 🟠 Major boundary findings from the PR #29 review are real but each is its own scoped change, not a tail on the ring branch. The Critical sibling (a `cpl<3` overflow guard in the MoonLive effect's `tick`) landed with the branch it was found on.
+
+**One of the four is CLOSED (2026-09-07):** the scenario now uses `PreviewDriver`, the in-process
+sink, instead of `NetworkSendDriver`. Its `tick_us` half was reviewed and DISMISSED rather than
+fixed: a `measure` step asserts nothing, it records, and that recording is what feeds repo-health's
+per-commit performance trend. A reviewer reading the file could not see that; deleting the
+baselines would have blinded the trend to fix nothing. Recorded here so it is not re-raised.
+
+The three that remain:
 
 - **Core includes platform, compiled core in `mm_core`.** `src/core/moonlive/MoonLive.cpp` `#include`s `platform/platform.h` and calls the exec-memory API directly, and the root `CMakeLists.txt` compiles `MoonLive.cpp`/`MoonLiveCompiler.cpp` into `mm_core` and links `mm_core → mm_platform` — violating the header-only-core / no-platform-includes contract both files declare. The runtime exec-memory placement layer wants a core-neutral injected interface (or to move out of `src/core`), so the compiled/platform-dependent surface sits behind `mm_platform` and `mm_core` stays INTERFACE-only. These two are one change (same boundary).
 - **W^X disabled in the board default.** `esp32/sdkconfig.defaults.esp32s3-n16r8` turns off `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE` and enables `CONFIG_HEAP_HAS_EXEC_HEAP` for *every* build on that board, even with no MoonLive effect installed. The JIT genuinely needs a writable-then-executable heap, but that belongs in a dedicated MoonLive/JIT opt-in overlay or an explicit build profile, not the board default — so a stock build keeps memory protection on.
-- **A scenario rides timing + network.** `test/scenarios/light/scenario_modifier_chain.json` carries `tick_us` baselines (host-performance dependent) and routes a modifier-chain-composition test through `NetworkSendDriver` (pulls network-path behavior into a test that is not about the network). It wants an in-process sink and structural assertions so it stays hermetic, per the `test/**` "no timing or network dependence" rule.
-
 ## MoonI80 prime-only ring: no stall backstop (sibling-path gap)
 
 **Found:** 👾 Reviewer, pre-commit on the whole-frame stall fix (2026-07-22).
@@ -1175,6 +1207,27 @@ module's tick goes from ~615 us to ~658 us, about 40 us (7%) against 3.3 ms of t
 Stability confirmed over a soak with HLS streaming: zero crashes, zero corrupt packets.
 
 **Reported upstream:** [esp-idf#19025](https://github.com/espressif/esp-idf/issues/19025)
+
+**Root cause found upstream (2026-09-09), and it is not the one above.** Espressif reproduced it
+deterministically and found two separate problems. The "Cause" paragraph above, which names the
+unguarded HWLP save path, was our reading of `portasm.S` and it was wrong; it stays as the record of
+what we thought. What is actually happening:
+
+1. **esp-dsp violates the P4's hardware-loop constraints.** The loop start (`esp.lp.setup`) and the
+   last loop instruction must be 4-byte aligned, the body needs enough 32-bit instructions, and the
+   last instruction must not be a coprocessor (FPU/PIE) op. Some kernels are misaligned, and an
+   interrupt landing exactly on that boundary corrupts the loop counter. That is why it is
+   timing-dependent (it hid for a 20-minute soak on 2026-09-08) and why `CONFIG_DSP_ANSI` cured it:
+   the C kernels never enter the misaligned assembly. Fix: an esp-dsp release with `.balign 4`.
+2. **The IDF erratum workaround was gated on a misnamed macro** (`ESP32P4_REV_MIN_FULL` without
+   the `CONFIG_` prefix), so it was always on for every revision. Being corrected to rev < v3.0 only,
+   with a positive test (preemption inside a live hardware loop) and negative tests (interrupt at a
+   misaligned boundary).
+
+**To do when the esp-dsp release lands:** bump the managed component, drop the `CONFIG_DSP_ANSI`
+line for good, and re-run the workload that found it (continuous FFT + the H.264/HLS encoder as a
+second task, sustained HTTP load) on the rev v1 board. We have the reproducing workload and told
+them we would report back; that soak is the report.
 (2026-08-28), which names the unguarded save path. Espressif already had the symptom on file from
 another reporter: [esp-dsp#119](https://github.com/espressif/esp-dsp/issues/119) hits the same
 fault at the same instruction on IDF v5.5-beta1 and settles on the same `CONFIG_DSP_ANSI=y`
@@ -1341,13 +1394,106 @@ We build for hardware we cannot see. Which chips people actually run, how big th
 - **Which features are switched on.** The modules present and enabled: audio, MoonLive, MQTT, Art-Net or E1.31 send and receive, panel cards, Ethernet versus WiFi. This is the half that answers "is anyone actually using this", which is what decides whether a feature earns its maintenance.
 - **A country**, derived at the server from the address the request arrives from, so the map is by region rather than by installation.
 
-**What it must never carry**, and this list is a constraint on the design rather than a note on it: device name, IP or MAC address, WiFi credentials, MQTT passwords, any free-text field a user typed, the contents of a layout or a script, and anything that lets two reports be recognized as the same installation. There is no device identifier, which also means no de-duplication: a machine reporting twice counts twice, and that inaccuracy is the price of not being able to track anyone. It is the right trade.
+**What it must never carry**, and this list is a constraint on the design rather than a note on it: device name, IP or MAC address, WiFi credentials, MQTT passwords, any free-text field a user typed, and the contents of a layout or a script.
+
+**The identifier: a random value per install, dropped after seven days** (settled 2026-09-08). Not derived from the MAC or from anything else about the hardware, so it cannot be reversed to a device even by whoever holds it. It exists to answer one question the aggregates cannot: how many DEVICES, rather than how many reports, and therefore how many installs are still on an old version. The server keeps per-report rows for seven days, de-duplicates, then keeps only the aggregate and drops the id.
+
+Two options were weighed and rejected. **No identifier at all** was the original text here: simplest to promise, but it makes every per-device question unanswerable, and "how many are still on the old version" is one of the questions this whole entry exists to answer. **A hashed MAC** is what WLED shipped first (`sha1("WLEDUSAGE" + MAC)`) and it buys exactly one thing more than a random id, given reports are one-time: linking one device's reports across months. That is the tracking capability itself, it survives a factory reset and a reflash, an open-source salt over a MAC space that size is rainbow-tablable, and a stable pseudonymous identifier is personal data under GDPR rather than anonymous. WLED's own shipped version moved off it to an anonymous id, which is the same conclusion from people who had it running.
 
 **Consent.** Opt-in, from a prompt shown after a fresh install or an upgrade, with a decline that is as easy to click as the accept and is remembered. One report per install or upgrade, never a heartbeat. A user who declines transmits nothing at all, rather than transmitting a "declined" record.
 
 **The privacy policy already commits to this shape** ([docs/privacy-policy.md](../privacy-policy.md)), including the honest wording about the IP address a server unavoidably sees. Whatever is built has to match what is promised there, and the policy has to be updated with the specifics BEFORE the feature ships, not alongside it.
 
 **Open questions for whoever picks this up.** Where the server runs and who administers it, since it is the first piece of infrastructure this project would own rather than borrow from GitHub. Whether the dashboard is public, which we would want it to be for the same reason the source is. Whether the desktop reports at all or only devices, given the desktop is the half we currently know nothing about. And what happens to a report from a version whose fields have since changed, because a schema that cannot be read a year later answers nothing.
+
+**WLED ships this, and the dashboard is public**: [usage.wled.me](https://usage.wled.me). Worth reading before building anything, because it answers two of the questions above by example and disagrees with this entry on a third.
+
+What it shows: distributions by version, chip, matrix, flash size, PSRAM, release, LED count and filesystem usage; upgrade versus install events over six months, split by chip; which LED features, peripherals, integrations, usermods and bus types are in use; and device count by country. That list is close to what is proposed above, which is reassuring about the shape.
+
+How it is collected ([PR #5116](https://github.com/wled/WLED/pull/5116), merged 2025-11-27, superseding an earlier [#4342](https://github.com/wled/WLED/pull/4342)): a one-time POST to `usage.wled.me/api/usage/upgrade` when a persisted version file shows the firmware changed, behind a startup prompt offering Yes / Not Now / Never Ask, and suppressed entirely in AP mode. The server is open source ([netmindz/WLED_usage](https://github.com/netmindz/WLED_usage)), which is how they answer "is the deployed code the published code".
+
+**Where they differ from this entry, and it is the interesting part.** WLED sends a device id: the first design hashed the MAC (`sha1("WLEDUSAGE" + MAC)`, "unique but not reversible"), the shipped one an anonymous `deviceId`. Either way the point is de-duplication, and it is what lets their dashboard say how many DEVICES rather than how many reports. This entry deliberately refuses that, and pays for it in accuracy. Their earlier PR also discussed a retention split (per-device data for 7 days, aggregates longer), which is a middle position between the two: keep an identifier only long enough to de-duplicate, then drop it. Worth considering rather than assuming the strictest option is automatically right.
+
+### The smallest honest version
+
+Sketched 2026-09-08. Not started; the blocker is the server, not the firmware.
+
+**The firmware side is small, because the payload already exists.** Every field is a control or a
+module name the device publishes today: `chip`, `cpu`, `flash`, `psram`, `sdk`, `firmware` and
+`deviceModel` are SystemModule controls; `version` and the previous version are FirmwareUpdateModule
+controls; the enabled modules are the state tree's own top level; the light setup is the Layouts
+grid and the Drivers children. So this is a serializer over facts already in memory, not new
+instrumentation. Budget it as one module of a few hundred lines, plus the consent prompt.
+
+**When it sends.** Once, when a persisted version file shows the firmware changed, which is the
+shape WLED converged on after starting from a UDP spray every second. Never a heartbeat. Suppressed
+in AP mode, where there is no internet and a device is usually mid-provisioning.
+
+**Consent.** A prompt on the first boot after an install or upgrade: Yes / Not Now / Never, with
+Never remembered. A decline sends nothing at all, not even a "declined" record. The prompt says what
+is in the report in one sentence, and links the privacy policy.
+
+**Ask WLED to host it, before building a server at all.** Investigated 2026-09-08, and their server
+is closer to a fit than expected.
+
+[netmindz/WLED_usage](https://github.com/netmindz/WLED_usage) is Kotlin on Spring Boot with a MySQL
+schema under Flyway migrations, a Docker compose deploy, and one endpoint:
+`POST /api/usage/upgrade`, no auth, with the country derived server-side from an `X-Country-Code`
+header. The dashboard is a single static `index.html` against a `/api/stats` controller.
+
+**It is already multi-project.** The `device` table carries a `repo` column (added 2025-12), there
+is a `RepoHistory` entity, and EVERY stats query is written `(:repo IS NULL OR repo = :repo)`. So a
+second project reporting under its own repo name is a supported case rather than a change they would
+have to make, and our figures would not be mixed into theirs.
+
+**We adopt their schema unchanged, and drop the one field that does not fit** (settled 2026-09-08).
+chip, version, previousVersion, releaseName, ledCount, isMatrix, flashSize, psramSize/Present,
+fsUsed/Total, busCount and busTypes mean the same thing in both projects, so those figures are
+directly comparable and projectMM can sit in a pooled overview rather than being a special case.
+Our own vocabulary rides the free-form lists: ledFeatures, peripherals, integrations, and `usermods`
+for the enabled-module names. That works because migration V2026040301 (2026-04) replaced twenty-odd
+fixed boolean feature columns with three comma-separated lists, aggregated by counting whatever
+values appear: adding projectMM's names costs their server nothing.
+
+The layout dimensions this entry originally wanted (width x height x depth, since we are 2D and 3D)
+have no equivalent there, and are DROPPED rather than added. `ledCount` plus `isMatrix` answers most
+of what they were for, and being identical to a schema someone else maintains is worth more than one
+field. If a real question later needs the third dimension, a list value is the place for it.
+
+**Their payload is close to what this entry wants.** `UpgradeEventRequest` already carries
+deviceId, version, previousVersion, releaseName, chip, ledCount, isMatrix, bootloaderSHA256, brand,
+product, flashSize, partitionSizes, psramSize, psramPresent, repo, fsUsed, fsTotal, busCount,
+busTypes, ledFeatures, peripherals, integrations, usermods. Every field we listed above maps onto one
+of those except the layout dimensions, and `usermods` is the natural home for "which modules are
+enabled". Sending it means shaping our report to their names, which is a small price for not owning
+a server.
+
+**What to settle with them before relying on it.** The repository has NO LICENCE file, so
+strictly nobody may reuse it, and it was last pushed 2026-05-31, so it is quiet rather than dead:
+both are conversations rather than blockers, but they are conversations to have first. Then the real
+questions: are they willing to take another project's reports at all, who administers the box and
+what happens to our data if that person stops, does the public dashboard gain a repo selector or
+would we render our own from their API, and does the seven-day identifier retention this entry
+commits to match what their server actually does (their earlier PR discussed it; the shipped schema
+keeps a `device` row keyed by id, which suggests it does not).
+
+If the answer is yes, this feature loses its blocker entirely and becomes a firmware change plus a
+conversation. If it is no, the plan below stands.
+
+**The server is the whole cost, and it is a standing commitment rather than a feature.** It is the
+first infrastructure this project would own rather than borrow from GitHub, and it needs an
+administrator, a domain, TLS, a retention job that actually runs, and a public dashboard. WLED
+publishes their server ([netmindz/WLED_usage](https://github.com/netmindz/WLED_usage)), which is how
+they answer "is the deployed code the published code": whatever runs here should be public for the
+same reason the firmware is. Until someone owns that, this feature cannot ship honestly, and that is
+the reason it is still in the backlog rather than in a branch.
+
+**Order of work, and the first two are worth doing whether or not the rest ever lands.** Write the
+privacy policy revision FIRST, since it is the promise everything else has to match, and the current
+page says plainly that nothing of the kind exists. Then the report BUILDER as a pure function over
+the state tree, with a unit test asserting that the forbidden fields cannot appear in its output:
+that test is the design constraint made executable, and it is worth having even if nothing ever
+sends. Only then the consent prompt, the one-time trigger, and last the server.
 
 ## A driven GPIO the Pins map never sees: bus padding, and a hidden clockPin
 
@@ -1381,7 +1527,7 @@ Lower risk than the RGMII case (six pins rather than twelve, and nothing of ours
 
 ## Input transports: foot pedals, USB game controllers, and MoonLive at the pins (2026-09-01)
 
-`ButtonService` shipped with the [GPIO seam](../history/plans/Plan-20260901%20-%20Input%20services%20and%20the%20GPIO%20seam.md)
+`ButtonService` shipped with the [GPIO seam](../history/plans/Plan-20260901%20-%20Input%20mapping%20and%20scripted%20sensors.md)
 (`gpioInputBegin` / `gpioRead` / `gpioWrite`). It names a target as `Module.control` and writes it
 through `Scheduler::setControl`, so a press and an OSC message are indistinguishable downstream.
 Three follow-ups build on that seam rather than beside it.
@@ -1508,3 +1654,140 @@ than nothing.
 Worth doing with the OTA path rather than alone: a desktop cannot install its own archive anyway, so
 the honest end state may be a card that names the platform and links the release rather than
 offering a Download button that only ever means "fetch a file and swap it by hand".
+
+## P4 WiFi cascade into a dead co-processor link aborts the board (2026-09-08)
+
+Bench, MHC-WLED ESP32-P4 shield on `esp32p4rev1-eth-wifi`, no Ethernet cable: the NetworkModule
+cascades to WiFi, and the board reboots every ~22 s with `task_wdt: main (CPU 0)` while `IDLE0`
+runs. The main task is not spinning, it is BLOCKED: on the P4 every `esp_wifi_*` call is forwarded
+over SDIO to the ESP32-C6 by `esp_wifi_remote`, and this shield's C6 never completes the ESP-Hosted
+handshake (`E H_API: ESP-Hosted link not yet up` at boot), so `esp_wifi_init` and the calls after it
+each wait out their timeout, on the render thread, past the 5 s watchdog. The wait is
+esp_hosted's `transport_drv.c` slave-ready loop: 200 ms polls, a slave reset every 50 of them (the
+`Reset slave using GPIO[54]` lines at 10 s and 21 s), up to MAX_RETRY_TRANSPORT_ACTIVE = 100
+polls, so worst case ~20.0 s in the caller's task, which is ours. Not the HWLOOP/FFT
+erratum: audio was ruled out by the watchdog text itself (a blocked main task with idle running,
+not a spinning core). Control experiment, same image on the bench P4 (.139, same shield model,
+esp_hosted host 2.12.13): its SDIO card init succeeds (`Card init success, TRANSPORT_RX_ACTIVE`),
+it never associates either, but the main task keeps ticking, it falls back to its own AP, and it
+rejoins Ethernet when the cable returns. The new shield never prints a card-init success: its C6
+does not answer the bus (no slave firmware, or one that does not match the 2.12.x host).
+
+Two defects are ours, whatever the C6 carries:
+
+1. **The cascade does not consult the link.** `coprocessorWifi()` in `platform_esp32.cpp` already
+   asks the C6 for its firmware version, bounded to two attempts, exactly to detect an absent or
+   incompatible slave. The WiFi cascade never asks; it walks straight into `esp_wifi_init`. Gate the
+   cascade on that answer (or on `esp_hosted` reporting the link up) and degrade to "no network,
+   C6 not answering" as a Network status.
+2. **A failing cascade must not abort.** Robustness says degrade visibly, never crash. Even with the
+   gate, a link that dies later would hit the same watchdog: the forwarded calls need to run off the
+   render thread, or with a timeout shorter than the watchdog, so the worst case is a status line.
+
+Practical today: the shield runs the eth-only image without WiFi, or its C6 gets the ESP-Hosted slave
+firmware flashed (the `ships: false` note on the variant in `build_esp32.py` says why that is not
+yet reproducible). The Improv script's eth-only rule and the catalog's two firmwares for the shield
+are already in place.
+
+**Everything tried on 2026-09-08 was reverted; both P4s now run `esp32p4rev1-eth` and are stable.**
+The tree is back to its pre-attempt state except for the catalog, which now lists BOTH P4 firmwares
+for the MHC-WLED shield so the installer offers the WiFi variant at all (it listed only the eth one,
+which is why the WiFi image could not be picked). What the day established, so the next attempt does
+not repeat it:
+
+- **The C6 link is INTERMITTENT on this shield, not simply dead.** After the vendor C6-update tool
+  ran (it never completed an OTA: it looped on "Not able to connect with ESP-Hosted slave device"),
+  the link came up and the board reached a DHCP lease on WiFi, first attempt, no retries. A power
+  cycle later it was back to `sdmmc_send_cmd returned 0x107` and a reboot loop. Any future fix has
+  to survive a cold boot, not one lucky session.
+- **A patient STA retry (MoonLight's 5 s cadence, ~2 min budget) was implemented and reverted.** It
+  never fired on either board: both connected on the first attempt when the link worked, and when it
+  did not the board died before the render loop. Keeping untested robustness was not worth the
+  surface. The reasoning still holds and is worth redoing WITH a repro: MoonLight retries forever
+  and never tears the radio down, and its own comment warns that toggling WiFi on a co-processor
+  board forces costly esp_hosted reinit cycles, which is exactly what our AP fallback does.
+- **Espressif does not endorse retrying into readiness.** Their esp-hosted troubleshooting puts
+  "not able to connect with slave" and SDIO 0x107 down to wiring, pull-ups, signal integrity, or a
+  host/slave VERSION MISMATCH: "use the same version for master and slave". Our host is 2.12.13; the
+  shield's C6 is on the factory build the vendor tool calls 0.0.6 (target 2.0.17). Updating the C6
+  needs Method 2 (direct USB/UART to the C6), since Method 1 needs the very link that is broken.
+
+**A fail-fast gate was tried on the bench (2026-09-08) and REVERTED.** The idea was right and both
+signals were wrong. `platform::wifiHardwareReady()` gated the STA and AP init, and it STOPPED the
+reboot loop dead: the shield ran 80 s with 0 reboots and 59 ticks, logging "WiFi co-processor link
+not up" instead of aborting. But on the bench P4 (.139), whose link demonstrably works, the same
+predicate read FALSE at its 26 s cascade and refused WiFi on a healthy board. Two signals were
+tried, neither is usable as a readiness test:
+
+- **`ESP_HOSTED_EVENT_TRANSPORT_UP`**, subscribed on the default event loop (both lazily and from
+  `ensureNetifInit`, i.e. before esp_hosted's task posts it). Never observed arriving. esp_hosted
+  posts through its own `g_h.funcs->_h_event_post` indirection; where that lands was not chased.
+- **`esp_hosted_get_coprocessor_fwversion` returning a non-zero version.** Also false on .139, which
+  matches what `coprocessorWifi()` already records: on a live link this RPC times out rather than
+  answering, which is why that function is bounded to two attempts.
+
+**Not a regression: the RELEASED v4.0.0 image fails the same way on this shield** (bench, same day).
+Flashed from the web installer after an erase, it logs `App version: v4.0.0` and then:
+
+```
+W (13438) H_SDIO_DRV: Reset slave using GPIO[54]
+W (13438) gpio: conflict found for GPIO[54]
+E (14988) sdmmc_io: sdmmc_io_rw_extended: sdmmc_send_cmd returned 0x107   (ESP_ERR_TIMEOUT)
+E (14988) H_SDIO_DRV: failed to read registers
+```
+
+and reboots without ever reaching the render loop. The same v4.0.0 image serves WiFi on the bench
+P4 (.139) with no SDIO error and no GPIO 54 conflict, and no projectMM config on any P4 entry
+references GPIO 54 (esp_hosted drives it as the slave reset). The two boards differ in silicon
+revision: this shield is chip rev **v1.0**, .139 is **v1.3**. So the C6 side of this shield does not
+come up, which is a board/slave-firmware matter rather than anything in our WiFi path, and the
+firmware's job is only to degrade rather than reboot.
+
+**The product owner reports this same shield ran WiFi under MoonLight on IDF 5.5**, which makes a
+dead C6 unlikely and points at host-side SDIO configuration on 6.1. What was checked (2026-09-08):
+
+- The SDIO data pins are NOT board-preset dependent: they come from the SLOT choice
+  (`ESP_HOSTED_SDIO_SLOT_1`, fixed silicon pins), so swapping `ESP_HOSTED_P4_DEV_BOARD_*` presets
+  would not move them. The preset mostly moves SPI pins, which we do not use.
+- `ESP_HOSTED_SDIO_GPIO_RESET_SLAVE` defaults to **54 on any P4** regardless of preset, so the
+  `gpio: conflict found for GPIO[54]` line is esp_hosted resetting the slave twice, not a wrong pin
+  from our config. No projectMM P4 entry references 54.
+
+**Our SDIO configuration is not the difference.** Diffed against a known-good local reference
+(`ewowi/FlowFields/sdkconfig.esp32-p4`, an IDF 5.5-era P4 build), every hosted setting is IDENTICAL:
+pins (CLK 18, CMD 19, D0-D3 14-17), `GPIO_RESET_SLAVE` 54, `RESET_ACTIVE_HIGH=y`, `CLOCK_FREQ_KHZ`
+40000, `SLOT_1`, `4_BIT_BUS`, `RESET_DELAY_MS` 1500, `RX_STREAMING_MODE`. So reset polarity, reset
+pin and SDIO clock are all ruled out as differences, and the identical released v4.0.0 image works
+on .139 and not on this shield. Same firmware, same config, two boards, two outcomes: what remains
+is on the board side (C6 slave firmware, power/strapping, or the SDIO traces on this revision), and
+the only projectMM work left is the degrade-instead-of-reboot fix above.
+
+What esp_hosted's private `is_transport_tx_ready()` reports is the signal the slave-ready loop
+itself polls, but it lives in a PRIVATE include dir (`host/drivers/transport`, not in the
+component's `pub_include`), so reaching it means either adding that dir to our include path or
+asking upstream to export a readiness getter. That is the next thing to try, and it needs the
+.139-still-associates control run alongside the shield-stops-rebooting one: the fix is only right
+when BOTH hold.
+
+## The persisted `firmware` variant survives a flash to a different variant (2026-09-08)
+
+`SystemModule` writes the compile-time `kFirmwareName` into its `firmware` control at
+`defineControls()`, and its own comment states the intent: "written from kFirmwareName on every boot
+rather than read from the file: the compile-time constant is the truth". But the control is
+`addText`, which is PERSISTED, and the config load runs after `defineControls()`, so a saved value
+from a previous image overwrites the compile-time one.
+
+Bench (MHC-WLED P4 shield, flashed from `esp32p4rev1-eth-wifi` to `esp32p4rev1-eth`): the Firmware
+card correctly reported `esp32p4rev1-eth` (it reads the running image), while `/api/modules/System`
+still reported `esp32p4rev1-eth-wifi` from the old config. The two disagreed on the same board, and
+the stale one is the field an outside reader trusts.
+
+Why it matters beyond cosmetics: the comment explains this value exists so **MoonBase** can narrow
+the recovery image list to one variant. A stale value points a recovering board at the wrong image,
+which is the failure that list exists to prevent (picking an `esp32s3-n16r8` build for a Zero
+installs a flash layout the board does not have).
+
+The fix has to keep the value readable by another image (that is why it is persisted at all) while
+making the compile-time constant win: re-assert `kFirmwareName` after the config load rather than
+only at `defineControls()`, and pin it with a test that loads a config naming a DIFFERENT variant
+and checks the control still reads the compiled one.

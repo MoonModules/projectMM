@@ -70,6 +70,21 @@ struct IrProgram;   // src/core/moonlive/MoonLiveIr.h
 // know about an ISA, and the reason the allocator is written once instead of three times. Each
 // backend fills this in from its own map and hands it to spillToBudget (MoonLiveSpill.h); nothing
 // ISA-specific crosses in the other direction.
+// WHY the last lowering returned 0. A lowering has four distinct ways to refuse and they used to
+// share one return value, so a failure on the device read "codegen failed (unsupported on this
+// target, or too large)" whether the register allocator gave up, the assembler overflowed, or the
+// code outgrew its buffer. Compiling the same script on the host through the same emitter succeeded,
+// which left only the device able to say which, and it could not. Static rather than threaded
+// through LowerFn: the seam has three backends and a test double, and the compile is single-threaded
+// per call, so one byte read straight after the call is the whole contract.
+enum class LowerRefusal : uint8_t { None, Spill, NullCall, AsmOverflow, OverCap };
+inline LowerRefusal& lowerRefusal() { thread_local LowerRefusal r = LowerRefusal::None; return r; }
+// The register allocator's own refusal detail: which of its guards fired, and the budget it saw.
+// Written by spillToBudget, read by compileSource into the error string, so a device can say
+// "avail 7, temps 3, guard 5" instead of one message for six different causes.
+struct SpillDetail { uint8_t guard = 0, avail = 0, temps = 0, vregs = 0, slots = 0, spilled = 0; };
+inline SpillDetail& spillDetail() { thread_local SpillDetail d; return d; }
+
 struct RegBudget {
     uint8_t regs = 0;        // machine registers the vreg map exposes (kRegCount)
     uint8_t reserved = 0;    // registers the backend keeps for the inline ops this program contains

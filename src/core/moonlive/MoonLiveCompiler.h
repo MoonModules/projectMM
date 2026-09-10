@@ -25,6 +25,7 @@ namespace mm::moonlive {
 /// Named so a test can distinguish "this host has no JIT" from "this script is wrong" without
 /// matching on prose.
 inline constexpr const char* kCodegenFailed = "codegen failed (unsupported on this target, or too large)";
+inline constexpr const char* kSpillRefused  = "codegen failed: too many live values for this chip's registers";
 
 
 // Result of compiling source: on success, ok==true and the bytes are in out[0..len). On

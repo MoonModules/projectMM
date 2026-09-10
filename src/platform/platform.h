@@ -74,6 +74,19 @@ void free(void* ptr);
 // Free with the ordinary free().
 void* allocInternal(size_t bytes);
 
+/// How many bytes this process has deliberately allocated through alloc/allocInternal, and the
+/// high-water mark. NOT a heap figure: freeHeap() stays 0 on desktop because callers read that as
+/// "unlimited" and switch off gates that only mean something on a device.
+///
+/// The point is the DELTA. Every buffer the system takes on purpose comes through this seam, so
+/// adding or removing a module moves these by exactly that module's cost, measurable on a laptop
+/// without a board. On ESP32 they report the same thing from the real heap, so a scenario reads one
+/// number on both. `count` is the number of live blocks, which separates "one buffer got bigger"
+/// from "something is allocating per frame".
+size_t allocatedBytes();
+size_t allocatedPeak();
+uint32_t allocatedCount();
+
 // True when the pointer resolves to external (PSRAM) memory: the standard residency probe (IDF's
 // esp_ptr_external_ram). Diagnostic companion to allocInternal's internal-first-PSRAM-fallback pattern:
 // the caller of that pattern cannot otherwise tell which way an allocation landed, and for buffers an
@@ -129,6 +142,12 @@ size_t freeHeap();          // total free (internal + PSRAM if present)
 size_t freeInternalHeap();  // internal RAM only (for stack/HTTP/WiFi reserve check)
 size_t maxAllocBlock();     // largest contiguous block (any memory type: incl PSRAM)
 size_t maxInternalAllocBlock(); // largest contiguous block in INTERNAL RAM only
+
+// Largest contiguous block of EXECUTABLE memory (IRAM on an ESP32). A separate, much smaller pool
+// than the data heap above: a MoonLive script's compiled code is allocated from it, so this is what
+// bounds how large a script may be, and nothing else reports it. Zero where the platform has no
+// distinct executable pool (desktop maps pages on demand).
+size_t maxExecAllocBlock();
 
 // --- RTOS task introspection (TasksModule) --------------------------------------------------
 // A fixed-size, allocation-free snapshot of the OS tasks, filled by the platform layer so no
@@ -768,15 +787,44 @@ bool http_fetch_to_ota(const char* url,
 bool otaWriteStream(FsWriteSrc src, void* user, size_t contentLen,
                     char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut);
 
-// MOONBASE, the second boot image, present only on tables that carry a factory app (the 4 MB
-// boards): a small, rarely changing firmware that owns the device when the application is not
-// running or cannot be trusted. Its first job is installing firmware into the one large app slot,
+// MOONBASE, the second boot image, present only on tables that carry a factory app (forced on a
+// 4 MB board, chosen on the larger ones): a small, rarely changing firmware that owns the device
+// when the application is not running or cannot be trusted. Its first job is installing firmware into the one large app slot,
 // since a board cannot rewrite the partition it is executing from, so an update there is two
 // stages: otaBootMoonBase() + reboot, then install from MoonBase.
 // All of these are false / no-ops on a dual-OTA table and on desktop.
 bool otaHasMoonBase();      // does this table carry MoonBase?
 bool otaBootMoonBase();     // point the bootloader at it; false when there is none
 bool otaRunningMoonBase();  // are we executing from it right now?
+// Which MoonBase is installed, read from the factory partition's app descriptor without booting
+// it. False when there is no MoonBase or the image carries no readable descriptor. The string is
+// comparable with mm::kVersion: both come from the same computed version.
+bool otaMoonBaseVersion(char* out, size_t len);
+// The rest of the same descriptor, so the UI can show MoonBase's identity the way it shows the
+// app's: when it was built, and how much of its slot it fills.
+bool otaMoonBaseBuild(char* out, size_t len);
+bool otaMoonBaseSize(uint32_t* used, uint32_t* total);
+// Install a new MOONBASE, the inverse of MoonBase installing the app: the factory partition is
+// writable only while the app is running, exactly as the app slot is only while MoonBase runs.
+// Without this a device whose recovery image is broken needs a cable.
+//
+// Same producer-callback shape as otaWriteStream, and the same status vocabulary, with two
+// differences that matter. It VETS the first chunk (magic, chip id, and that the image really is
+// MoonBase) before erasing anything, so a wrong URL costs nothing. And it does NOT reboot: the
+// running app is untouched, and the new image is simply what the device falls back to next.
+//
+// SYNCHRONOUS, and it blocks the caller for the whole erase and write: no-reboot does not mean
+// non-blocking. Called from an HTTP handler on the render task, so the lights hold still for the
+// duration, the same as the app's own upload path. False on desktop, which has no factory slot.
+bool otaWriteMoonBase(FsWriteSrc src, void* user, size_t contentLen,
+                      char* statusBuf, size_t statusBufLen, uint32_t* bytesReadOut);
+// The same install from a URL rather than an upload: the device fetches the image itself, which
+// is what lets it take a release asset straight from GitHub. Runs on its OWN TASK and returns at
+// once, like the app's URL install: while the request is open the browser cannot poll, so a
+// synchronous install could only ever report "installing" and then "installed", with no progress
+// in between. Nothing reboots, so the caller answers 202 and the UI follows the status.
+bool otaFetchMoonBaseUrl(const char* url, char* statusBuf, size_t statusBufLen,
+                         uint32_t* bytesReadOut, uint32_t* bytesTotalOut);
 // Stage an install URL for MoonBase to pick up on its next boot (NVS namespace "moonbase",
 // key "url", at most 255 bytes: MoonBase reads it into a 256-byte buffer and the HTTP route
 // rejects anything longer). This is what makes a URL install unattended: the app stages the URL, reboots into
@@ -970,12 +1018,18 @@ bool rmtWs2812Init(RmtWs2812Handle& h, uint8_t gpio, uint32_t resolutionHz, bool
 // The driver converts its ns timings to ticks with this. 0 if not initialized.
 uint32_t rmtWs2812Resolution(const RmtWs2812Handle& h) MM_NONBLOCKING;
 
-// Start transmitting `symbolCount` pre-encoded WS2812 RMT symbols and return
-// immediately: channels started back-to-back clock out concurrently. Pair with
-// rmtWs2812Wait; the caller owns the inter-frame latch (delayUs) after the last
-// wait. The symbol buffer must stay valid until the wait returns. Returns false
-// when the channel isn't initialized (and on targets without RMT).
-bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint32_t* symbols, size_t symbolCount);
+// Transmit one frame as WIRE BYTES (the corrected, channel-ordered bytes the strip expects).
+// Each byte is expanded to eight symbols on the way to the peripheral, MSB-first, using the bit
+// shapes set by rmtWs2812SetBitTiming: the IDF's bytes encoder does it where RMT has DMA, and the
+// classic ESP32's level-5 refill does it inline. So the caller's resident buffer is 3-4 bytes per
+// light rather than 32 bytes per byte of that (96 per RGB light), which is what let a long strand
+// outgrow internal RAM and silently stop transmitting. On the classic ESP32 the bytes must be in
+// internal RAM (the refill can run with the flash cache off); a few KB, so this is not a limit.
+bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint8_t* wire, size_t byteCount);
+
+// Set the symbols a 0 and a 1 bit expand to. Live: the driver's `timing` control (400 kHz WS2811,
+// 800 kHz, custom) rewrites these between frames.
+bool rmtWs2812SetBitTiming(RmtWs2812Handle& h, uint32_t sym0, uint32_t sym1);
 
 // Block until the channel's in-flight transmission finishes, bounded by
 // `timeoutMs` so a wedged peripheral can't hang the render tick forever: a

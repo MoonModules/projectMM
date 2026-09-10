@@ -40,10 +40,21 @@ static constexpr uint8_t kMaxVRegs = 32;
 // a diagnostic instead of asking for an allocation that would exhaust a small device's heap.
 static constexpr uint16_t kMaxIrOps = 4096;
 
-// Ops a single source token can lower to, worst case. The compiler sizes its op array by counting
-// tokens and multiplying — an over-estimate by construction, which is the safe direction: a few
-// unused entries on a cold path, versus refusing a script that would have fit.
-static constexpr uint16_t kIrOpsPerToken = 4;
+// Ops a source token lowers to. The compiler sizes its op array by counting tokens and multiplying,
+// so this is a ceiling on the RESERVATION, and it is the number that decides whether a script
+// compiles on a classic ESP32 at all.
+//
+// It was 4, on the reasoning that an over-estimate is the safe direction ("a few unused entries on
+// a cold path"). Measured across every shipped script it is 0.75 ops per token, never above 0.85,
+// so 4 reserved five to six times the IR a script actually builds: for the largest scripts that was
+// ~1,900 ops at 32 bytes each, a 61 KB single-block request for 10 KB of IR, made while the staging
+// buffer and the spill pass's second array are also live. On a heap whose largest free block is
+// 65 KB it failed, and the compile reported "codegen failed" for scripts that lower fine on the
+// host (bench Dig-Octa 2026-09-09: six of 33 shipped scripts). A reservation that refuses a script
+// which fits is the wrong direction to be conservative in. 1 keeps a real margin over the measured
+// 0.85, and a script that somehow exceeds it still fails cleanly: IrProgram::push refuses past
+// cap, which the parser reports as "script too large" rather than writing past the array.
+static constexpr uint16_t kIrOpsPerToken = 1;
 
 // The op set — neutral. Three-address form: dst plus up to three source operands. (Counted
 // Control flow arrived with the script-level `for`, which is what the note here anticipated: the
@@ -225,7 +236,14 @@ constexpr uint8_t idxCount(int32_t p) { return uint8_t((p >> 16) & 0xff); }
 /// runs for the whole program rather than per scope — a label is never reused once a loop closes —
 /// so this bounds the TOTAL number of loops in a script (8), not how deeply they nest. Nesting
 /// depth is bounded separately, by `locals`.
-static constexpr uint8_t kIrLabels = 16;
+/// Raised from 16 (2026-09-07). Sixteen bounded a script to eight loops, and a script that SELECTS
+/// between modes spends them fast: each `else if` arm is two, so a five-mode effect with a loop in
+/// each was refused with "too many branches" for asking something ordinary. The cost is four small
+/// stack arrays in the spill pass and the lowering, a few hundred bytes on a machine that already
+/// allocates its exec block from the heap. The ASSEMBLER tables did not move with it: they are
+/// sized by named functions and StoreElems, which an `else if` arm does not add, and raising them
+/// in step would have put lowerWith's frame past the 2 KB this file warns about below.
+static constexpr uint8_t kIrLabels = 40;
 
 /// Labels and fixups an ASSEMBLER's tables hold. Larger than kIrLabels because a backend allocates
 /// labels the IR never names: one per named function (a call may precede its definition, so these

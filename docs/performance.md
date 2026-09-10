@@ -400,7 +400,7 @@ Each parallel LED driver run on real hardware at a 128×128 = 16384-light grid, 
 
 **LOLIN D32 (classic ESP32-WROOM) usable LED GPIOs:** `4,13,14,18,19,21,22,23,25,26,27,32,33` plus `16,17` (free on WROOM — they're the PSRAM bus only on WROVER). Avoid straps `0,2,12,15`, the onboard LED on `5`, and battery-sense on `35`; input-only `34–39` can't drive an LED. (Chip-level set: [gpio-usage.md](reference/gpio-usage.md).)
 
-**Diagnostic used:** RMT `tickTimeUs > 1000` = actively encoding (LEDs on); a tiny ~30 µs tick = the symbol alloc failed and `tick()` bailed (dark). `dynamicBytes` is not reported for RMT (plain-heap symbol buffer), so it always reads 0.
+**Diagnostic used:** RMT `tickTimeUs > 1000` = actively encoding (LEDs on); a tiny ~30 µs tick = the symbol alloc failed and `tick()` bailed (dark). `dynamicBytes` for RMT is the frame buffer (`driverHeapBytes()` returns `frameCap_`: outChannels bytes per light).
 
 The **acceptance floors** these establish for the parallel backends: RMT **8×256 = 2048** (verified above); the parallel-I2S (classic i80) driver **16×256 = 4096** (verified 2026-07-13); the virtual (shift-register) driver **48×256 = 12288** — each backend must clear its floor on real hardware.
 
