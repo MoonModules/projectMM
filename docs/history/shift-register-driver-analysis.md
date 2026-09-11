@@ -23,7 +23,7 @@ So the frame is **~145 KB** for *both* targets (§ 5), and that single figure is
 | **ESP32-P4** | i80 / LCD_CAM | ✅ *(untested)* | ✅ *(untested)* | P4 has LCD_CAM too; the i80 driver is already registered on it. **This is the P4's viable route** |
 | **any chip** | RMT | ❌ | ❌ | Structurally impossible (§ 6.2) |
 
-**Blunt version: classic ESP32 cannot do the shift-register driver at any useful size, and Parlio cannot do it at all.** The PO's 48×256 target is an **S3 feature** (and probably a P4-over-i80 feature). If the plan assumes StarLight's numbers, note those were achieved on hpwit's **PSRAM-fed refill ring** — a different memory model projectMM does not have and has deliberately [parked](../backlog/led-driver-psram-ring-analysis.md).
+**Blunt version: classic ESP32 cannot do the shift-register driver at any useful size, and Parlio cannot do it at all.** The PO's 48×256 target is an **S3 feature** (and probably a P4-over-i80 feature). If the plan assumes StarLight's numbers, note those were achieved on hpwit's **PSRAM-fed refill ring**: a different memory model projectMM does not have and has deliberately [parked](../work/future/led-driver-psram-ring-analysis.md).
 
 **The good news, and it is genuinely good:** on the S3 this needs **no new memory model, no new peripheral, and no new driver class**. It is a fan-out *option on the drivers we already ship*, and the 48×256 floor lands inside a buffer size the S3 is measured to handle.
 
@@ -265,7 +265,7 @@ This explains both facts we could not otherwise account for: **`asyncTransmit` O
 
 **The fix belongs in the core, but the expander is not optional — it is the whole performance story.** The same staging mechanism lifts two bigger *unshifted* ceilings — **P4 Parlio's ~4,096-light contiguous-block wall** and the **classic ESP32's 2,048-light PSRAM-unreachable wall** — so it is tracked as a **core** item and should be **built and proven on the unshifted path first**, where the win is measurable on proven code. That is a sequencing rule about where to de-risk the mechanism.
 
-It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time is a physical constant (30 µs/light, serial per strand), so the only lever on frame rate is **lights per strand**: 16 direct lanes × 1024 = 16K lights is stuck at **33 fps**, while **48 strands × 256 = 12K at 130 fps** — which hpwit and the PO have *actually run* (StarLight). The expander is the only way to reach 48+ strands without spending 48+ GPIOs, and therefore the only route to 100 fps at this scale. The two mechanisms buy different things — **staging buys lights, the expander buys fps** — and they compound: the expander's own ~145 KB frame is precisely the one that fails from PSRAM today. See [backlog-light § Chunked transfer](../backlog/backlog-light.md).
+It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time is a physical constant (30 µs/light, serial per strand), so the only lever on frame rate is **lights per strand**: 16 direct lanes × 1024 = 16K lights is stuck at **33 fps**, while **48 strands × 256 = 12K at 130 fps**, which hpwit and the PO have *actually run* (StarLight). The expander is the only way to reach 48+ strands without spending 48+ GPIOs, and therefore the only route to 100 fps at this scale. The two mechanisms buy different things: **staging buys lights, the expander buys fps**, and they compound: the expander's own ~145 KB frame is precisely the one that fails from PSRAM today. See [backlog-light § Chunked transfer](../work/future/backlog-light.md).
 
 ### PHASE 2 DESIGN — the encode-into-the-ring (2026-07-14, arithmetic done, not yet built)
 
@@ -294,7 +294,7 @@ The `encoded frame` column is the **fully-encoded shift frame** (~1,152 B/light 
 | 4 × 4 lights (18 KB) | 259 µs |
 | 8 × 8 lights (72 KB) | 1,210 µs |
 
-**What it costs us.** The encoder + the correction LUT + the SWAR transpose all become ISR-reachable and must be `IRAM_ATTR`; a flash access or a cache miss in that path is an underrun, and an underrun is a visible glitch. That is precisely the fragility the whole-frame design was chosen to avoid ([ADR-0014](../adr/0014-own-i80-dma-driver-below-esp-lcd.md)) — and it is the price of going past 96 lights/strand on an S3. **Both drivers keep shipping**: `I80LedDriver` (esp_lcd, capped, bulletproof) and `MoonI80LedDriver` (ours, uncapped, real-time).
+**What it costs us.** The encoder + the correction LUT + the SWAR transpose all become ISR-reachable and must be `IRAM_ATTR`; a flash access or a cache miss in that path is an underrun, and an underrun is a visible glitch. That is precisely the fragility the whole-frame design was chosen to avoid (see [MoonLedDriver](../moonmodules/light/moxygen/MoonLedDriver.md)), and it is the price of going past 96 lights/strand on an S3. **Both drivers keep shipping**: `I80LedDriver` (esp_lcd, capped, bulletproof) and `MoonI80LedDriver` (ours, uncapped, real-time).
 
 **The seam**, keeping the platform boundary intact — the platform owns the ring/descriptors/ISR, the domain owns the encode:
 
@@ -327,7 +327,7 @@ The headroom menu is therefore three items, not two:
 
 | lever | buys | costs |
 |---|---|---|
-| PLL240M (19.2 MHz) | +8.4 µs/light | a peripheral clock-tree change ([ADR](../adr/README.md)-worthy) |
+| PLL240M (19.2 MHz) | +8.4 µs/light | a peripheral clock-tree change (architecture-decision-worthy) |
 | `_DMA_EXTENSTION` | arbitrary, tunable | **RAM per DMA buffer** + fps |
 | a faster encode | the real fix | engineering |
 
@@ -384,7 +384,7 @@ The module header reports the **tick** rate (252 fps) while `frameTime` reports 
 
 ### Where to start next
 
-**The scatter is diagnosed — see § 7.6 and [backlog-light.md](../backlog/backlog-light.md).** The ring is clean iff `ringBufs − nSlices ≥ ~2` (a producer/consumer headroom margin, bench-bisected on the wall 2026-07-18). "More buffers" cannot reach 48×256 (the headroom RAM is ~145 KB regardless of geometry, the whole-frame wall); the fix is a refill that structurally TRAILS the DMA read head (hpwit's model), so headroom holds at any `nSlices` at constant RAM.
+**The scatter is diagnosed, see § 7.6 and [backlog-light.md](../work/future/backlog-light.md).** The ring is clean iff `ringBufs − nSlices ≥ ~2` (a producer/consumer headroom margin, bench-bisected on the wall 2026-07-18). "More buffers" cannot reach 48×256 (the headroom RAM is ~145 KB regardless of geometry, the whole-frame wall); the fix is a refill that structurally TRAILS the DMA read head (hpwit's model), so headroom holds at any `nSlices` at constant RAM.
 
 **The loopback RX path CAPTURES and bit-verifies** (fixed 2026-07-15, `2873ec9d`: "captures it back off the strand, bit-verifies 2304/2304 bits, textbook 300/600 ns pulse widths"; the R14 bit-0 settling artifact was measured on a captured strand, independent proof). But the current loopback builds a PRIVATE frame and transmits it — it does NOT go through the render ring, so it proves the peripheral, not the pipeline, and cannot observe a ring-scatter. An **intrusive** mode — capture what the LIVE ring actually put on the wire (via `captureAndVerifyFrame`, already decoupled from the transmit) — is the closed-loop instrument the ring fix needs, so a machine can bit-verify the frame reached the LEDs intact instead of relying on the PO's eyes.
 
@@ -410,5 +410,5 @@ The module header reports the **tick** rate (252 fps) while `frameTime` reports 
 - `src/platform/esp32/platform_esp32_i80.cpp` — PSRAM-first on LCD_CAM, internal-only on classic I2S (`SOC_LCDCAM_I80_LCD_SUPPORTED` gate).
 - `src/platform/esp32/platform_esp32_parlio.cpp` — the PSRAM→internal degrade.
 - [performance.md § Multi-pin LED driving](../performance.md) — Parlio **65,535 B/lane** single-shot cap (897 RGB lights/lane); S3 i80 **16,384 lights** on PSRAM.
-- [led-driver-psram-ring-analysis.md](../backlog/led-driver-psram-ring-analysis.md) — the classic ~2,048 ceiling; the parked refill ring; the shift-register driver's 12,288 floor.
+- [led-driver-psram-ring-analysis.md](../work/future/led-driver-psram-ring-analysis.md): the classic ~2,048 ceiling; the parked refill ring; the shift-register driver's 12,288 floor.
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) — "the multiplex is a configuration of a parallel-clocked backend, not a sibling driver class"; the RMT × ShiftReg impossibility.

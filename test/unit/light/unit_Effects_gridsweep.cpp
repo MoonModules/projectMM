@@ -197,7 +197,7 @@ TEST_CASE("every effect survives degenerate grid sizes") {
     MESSAGE("swept " << swept << " effects x " << (sizeof(kGrids) / sizeof(kGrids[0])) << " grids");
 }
 
-// The Layer does NOT clear the buffer between frames (ADR-0003: an effect can fade its own last
+// The Layer does NOT clear the buffer between frames (an effect can fade its own last
 // frame for trails, or read prior pixels for a scroll). The corollary is a contract every effect
 // owes: it owns its background. An effect that only writes the pixels it lights, and skips the
 // rest, inherits whatever was on screen — its own path from earlier frames as permanent ghosts,

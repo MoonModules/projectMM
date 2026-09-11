@@ -89,7 +89,7 @@ TEST_CASE("the installation id cannot be correlated with the network identity") 
     uint8_t mac[6] = {};
     mm::platform::getMacAddress(mac);
 
-    // What ADR-0010's identities expose: the last three bytes, in hex, on the local network.
+    // What an integration identity exposes: the last three bytes, in hex, on the local network.
     char networkIdentity[7] = {};
     std::snprintf(networkIdentity, sizeof(networkIdentity), "%02x%02x%02x", mac[3], mac[4], mac[5]);
 

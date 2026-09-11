@@ -1866,7 +1866,7 @@ void mdnsShutdown() {
 // a projectMM device broadcasts and listens for the 44-byte presence packet on UDP 65506.
 // Keeping discovery off mDNS also keeps the advertise stable, because a PTR query for a
 // service this device
-// also hosts destabilises our own advertise — see docs/adr/0006-device-discovery-udp-mdns-advertise-only.md.
+// also hosts destabilizes our own advertise.
 
 // Outbound HTTP request (plain HTTP, LAN, no TLS) — see platform.h. A bounded blocking lwIP
 // socket call; the caller (HueDriver) runs it off the render path on tick1s. Mirrors the

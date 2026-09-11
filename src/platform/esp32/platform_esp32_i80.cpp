@@ -316,7 +316,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // the common path allocates exactly one frame buffer and pays no async memory. When wanted, same
     // PSRAM-first-else-internal allocate-and-degrade: if it fits, arm double-buffer mode (buf[1] + its
     // semaphore); if it doesn't (memory-tight board), leave buf[1] null and run single-buffer. The
-    // double-buffer is never *required* (allocate-and-degrade, ADR 0002).
+    // double-buffer is never *required* (allocate-and-degrade).
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {

@@ -405,7 +405,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
     // drops every module the file records after it. The two entries that must skip-not-break:
     //   - a stale slot over a code-wired child (the file predates the wired child, or names a different
     //     type where it now sits): keep the wired instance, advance past it;
-    //   - a renamed/removed module type (the documented ADR-0013 migration, e.g. a pre-consolidation
+    //   - a renamed/removed module type (a documented break rather than a migration, e.g. a pre-consolidation
     //     MoonLedDriver/MultiPinLedDriver entry): that entry drops, the rest stay.
     uint8_t pos = 0;
     for (uint8_t i = 0; ; i++) {
@@ -437,7 +437,7 @@ void FilesystemModule::applyNode(MoonModule* m, const char* json, const char* pr
             if (hasWiredChildOfType(m, typeName)) continue;
             MoonModule* created = ModuleFactory::create(typeName);
             if (!created) {
-                // Unknown/renamed type (ADR-0013 migration): the module drops. Skip this JSON entry and
+                // Unknown/renamed type: the module drops. Skip this JSON entry and
                 // keep reconciling the rest — do NOT advance `pos`, so the file's later user modules still
                 // map to the correct live position.
                 continue;

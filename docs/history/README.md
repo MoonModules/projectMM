@@ -1,6 +1,6 @@
 # History — index
 
-The backward-looking half of the docs (the forward-looking half is [`../backlog/`](../backlog/README.md)). This folder is **not** present-tense and agents don't read it automatically — only when planning new work. See [CLAUDE.md § Documentation](../../CLAUDE.md) for how `history/` and `backlog/` relate.
+The backward-looking half of the docs (the forward-looking half is [`../backlog/`](../work/future/README.md)). This folder is **not** present-tense and agents don't read it automatically, only when planning new work. See [CLAUDE.md § Documentation](../../CLAUDE.md) for how `history/` and `backlog/` relate.
 
 *Living index; the git log carries exact dates.*
 
@@ -12,19 +12,19 @@ Three kinds of document (the friend-repo digests moved out to [`../friend-repos/
 
 One-time surveys of earlier projects, used to decide what to harvest into projectMM. Reference, not maintained.
 
-- [moonlight-inventory.md](moonlight-inventory.md) — MoonLight (the closest prior art; CSR mapping, layer model, control mechanisms).
-- [v1-inventory.md](v1-inventory.md) — projectMM v1 (release 1.4.0).
-- [v2-inventory.md](v2-inventory.md) — projectMM v2.
+- [moonlight-inventory.md](../work/past/moonlight-inventory.md): MoonLight (the closest prior art; CSR mapping, layer model, control mechanisms).
+- [v1-inventory.md](../work/past/v1-inventory.md): projectMM v1 (release 1.4.0).
+- [v2-inventory.md](../work/past/v2-inventory.md): projectMM v2.
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) / [leddriver-analysis-top-down.md](leddriver-analysis-top-down.md) — the LED-driver design analyses (landscape survey + protocol-first study). The drivers shipped (RMT/MultiPin/Moon/Parlio on a shared base); kept as the how-we-got-there record.
 - [shift-register-driver-analysis.md](shift-register-driver-analysis.md) — the 74HCT595 pin-expander design analysis + lab-notebook of the ring's early transport bugs. The expander + streaming ring shipped; §7.5 records what NOT to re-try.
 
 ### The plan archive
 
-[`plans/`](plans/README.md) holds 89 approved feature plans from before plans became temporary. Under the current rule ([CLAUDE.md § Branch](../../CLAUDE.md#branch)) a plan's text goes into its PR description and the product owner may delete the file once the plan is realized, so nothing new is added here. These files predate that: they follow the older kept-forever convention, with the outcome marked in the filename (`… (shipped).md`, `… (attempted, abandoned).md`, unmarked = never finished). Reference only, and a candidate for the same subtraction the rest of `history/` gets — the merged PRs are the permanent record of what these describe.
+[`plans/`](../work/past/plans/README.md) holds 89 approved feature plans from before plans became temporary. Under the current rule ([CLAUDE.md § Branch](../../CLAUDE.md#branch)) a plan's text goes into its PR description and the product owner may delete the file once the plan is realized, so nothing new is added here. These files predate that: they follow the older kept-forever convention, with the outcome marked in the filename (`… (shipped).md`, `… (attempted, abandoned).md`, unmarked = never finished). Reference only, and a candidate for the same subtraction the rest of `history/` gets: the merged PRs are the permanent record of what these describe.
 
 ### Our own lessons
 
-- [lessons.md](lessons.md) — hard-won debugging lessons and gotchas (a bug, its cause, the fix), recorded with the code that proved them and pruned as they are absorbed (the PR-merge carry-forward gate writes here). Genuine architectural *decisions* live in [`../adr/`](../adr/README.md) instead; a lesson that hardened into a *rule* lives in CLAUDE.md / coding-standards.md.
+- [lessons.md](lessons.md): hard-won debugging lessons and gotchas (a bug, its cause, the fix), recorded with the code that proved them and pruned as they are absorbed (the PR-merge carry-forward gate writes here). A lesson that hardened into a *rule* lives in CLAUDE.md / coding-standards.md.
 
 ## Cross-repo trends
 
@@ -41,7 +41,7 @@ Reading across the friend-repo digests, the themes the wider ESP32-LED ecosystem
 
 ## What these projects do that projectMM doesn't (yet)
 
-Observational — where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../backlog/README.md), cross-referenced where one already exists.
+Observational: where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../work/future/README.md), cross-referenced where one already exists.
 
 - **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — the direct parallel drivers ship (MultiPin/Moon on LCD_CAM, Parlio on P4, driving up to 16 strands and 12,288+ lights). The shift-register/'595 expander path also ships but is dormant: it works at prime-only geometries yet has a known lapping-ring sparkle at the largest configs, so it stays off by default. See the [LED-driver analysis](leddriver-analysis-top-down.md).
 - **Audio-reactive input** — none of projectMM's effects are audio- or motion-reactive yet. The Peripheral role + the Pi-sensor backlog entry are the foundation; the producer→effect wiring is backlog.

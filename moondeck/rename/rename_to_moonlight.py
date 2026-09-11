@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mechanical projectMM -> MoonLight rename sweep (dry-run by default).
 
-The one-shot transition tool for [docs/backlog/rename-to-moonlight.md] Phase 1
+The one-shot transition tool for [docs/work/future/rename-to-moonlight.md] Phase 1
 step 4. Replaces the product-name token everywhere it is the *current* name,
 while leaving the references that must NOT change: the predecessor "MoonLight"
 prose/links (already repointed to ewowi/MoonLight), the MoonLive scripting
@@ -65,7 +65,7 @@ EXCLUDE_DIRS = [
 EXCLUDE_FILES = [
     # This plan describes BOTH names and the move between them; rewriting it would
     # corrupt its meaning ("the predecessor at MoonModules/MoonLight vacates…").
-    "docs/backlog/rename-to-moonlight.md",
+    "docs/work/future/rename-to-moonlight.md",
     # The rename script itself (it names the tokens it replaces).
     "moondeck/rename/rename_to_moonlight.py",
 ]

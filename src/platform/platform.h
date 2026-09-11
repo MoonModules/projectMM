@@ -1246,7 +1246,7 @@ RmtLoopbackResult i80Ws2812Loopback(const uint16_t* dataPins, uint8_t laneCount,
 //
 // **Both implementations ship.** The esp_lcd one above is the REFERENCE: correct, capped, and
 // what this is measured against. Selecting between them is a module swap in the UI (two
-// registered driver types), so the A/B needs no reflash. See docs/adr/0014.
+// registered driver types), so the A/B needs no reflash.
 //
 // Identical contract to the i80Ws2812* family above, function for function: the domain driver
 // (src/light/drivers/MoonLedDriver.h) is the same CRTP sibling with its forwards re-pointed.

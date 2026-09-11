@@ -173,6 +173,7 @@ nav:
       - Why we write our own code: why-we-write-our-own.md
       - Architecture: architecture.md
       - Coding standards: coding-standards.md
+      - Documentation standards: documentation-standards.md
       - Building: building.md
       - Testing strategy: testing.md
       - Performance: performance.md

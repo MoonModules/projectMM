@@ -16,8 +16,8 @@
 //
 // Discovery is PASSIVE UDP: a plugin declares the broadcast port it listens on and
 // classifies a received datagram into a device. This replaces the former mDNS *query*
-// path, which destabilised our own mDNS advertise (a PTR query for a service we also host
-// exhausts the IDF mDNS pool — see docs/adr/0006-device-discovery-udp-mdns-advertise-only.md). mDNS is
+// path, which destabilized our own mDNS advertise (a PTR query for a service we also host
+// exhausts the IDF mDNS pool). mDNS is
 // now advertise-only (so the WLED app + Home Assistant find us); discovery never queries.
 //
 // The seam covers the discovery half, with two concrete plugins (projectMM and WLED) that

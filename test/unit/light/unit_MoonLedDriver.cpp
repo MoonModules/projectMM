@@ -11,7 +11,7 @@
 #include <cstring>
 
 // MoonLedDriver is the SAME LCD_CAM output as MultiPinLedDriver, on our own DMA code instead of
-// esp_lcd (ADR-0014). It is a thin ParallelLedDriver subclass whose constructor wires a
+// esp_lcd. It is a thin ParallelLedDriver subclass whose constructor wires a
 // MoonI80Peripheral backend (a runtime LedPeripheral strategy, not compile-time CRTP), so the
 // orchestrator's whole body — lane slicing, frame sizing, the fused encode, the async double-buffer,
 // the shift-register expander, the dead-frame guard — is ALREADY covered by the Mock-driver suites

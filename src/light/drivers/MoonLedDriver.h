@@ -43,8 +43,12 @@ namespace mm {
 /// stops when the chain ends. So **one `gdma_start()` over an arbitrarily long descriptor chain plus one
 /// `lcd_ll_start()` is a single gapless stream across as many buffers as we like** — built on IDF's HAL +
 /// GDMA link-list APIs, one level below `esp_lcd` (not raw registers; IDF's own drivers use these APIs).
-/// Rationale + what we give up:
-/// [ADR-0014](https://github.com/MoonModules/projectMM/blob/main/docs/adr/0014-own-i80-dma-driver-below-esp-lcd.md).
+/// Three parts to that choice. **One level below `esp_lcd`, not down to the registers**: we decline its
+/// transaction POLICY, not its abstractions. **The whole frame in one descriptor chain**, because the frame
+/// is already pre-encoded, so the DMA just reads it: no ISR refill, no real-time deadline, and therefore no
+/// underrun for WiFi to cause. **Both drivers ship**: `I80LedDriver` stays the default and the reference
+/// implementation this one is measured against, and replaces it only by beating it on the same bench, which
+/// a UI swap makes testable without a reflash.
 ///
 /// What streaming costs: the whole-frame path has no CPU deadline once armed; the ring does. Its refill
 /// runs from the DMA's end-of-buffer interrupt and must beat the wire — 576 B per light is **28.8 µs/light**

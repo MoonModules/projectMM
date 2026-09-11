@@ -289,4 +289,4 @@ Everything else writes; this reads. Once a frame can be sampled at an arbitrary 
 
 </div>
 
-**On the "no caller yet" entries.** Each was added for a named consumer in the [power-function plan](../../backlog/power-functions-analysis-top-down.md): `splat`, `combineMax` and the remaining SDF and easing forms are what the particle kernel and the shader tier build on. They are listed rather than hidden so the gap between what exists and what is used stays visible.
+**On the "no caller yet" entries.** Each was added for a named consumer in the [power-function plan](../../work/future/power-functions-analysis-top-down.md): `splat`, `combineMax` and the remaining SDF and easing forms are what the particle kernel and the shader tier build on. They are listed rather than hidden so the gap between what exists and what is used stays visible.

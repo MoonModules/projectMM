@@ -49,7 +49,7 @@ strobe channel. Trust the printed manual; the tables below come from it.
 
 CH6 is a straight linear dimmer. Today the driver holds it fully open and keeps brightness in the
 color values; routing brightness onto it is the better model and is
-[backlogged](../backlog/backlog-light.md). The channels left
+[backlogged](../work/future/backlog-light.md). The channels left
 unmapped hold at 0, which is what a light driver wants: **strobe off** (CH7) and full-speed
 movement (CH5). The fine channels are unused until 16-bit positioning is wired up.
 

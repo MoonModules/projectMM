@@ -92,6 +92,18 @@ check list measures the configuration, not the tool: an unconfigured clang-tidy 
 6,073 findings, two thirds of them from one check that every comparable project disables by
 name. The curated config takes it to 30.
 
+### A passing test is not evidence until it can fail
+
+A test written to pin a fix is shaped by that fix, so it agrees with the fix whether or not either is right. Three in one session ran, passed, and could not have failed: a MoonLive indexing test that still passed with the emitted shift sabotaged from `<<2` to `<<3` (one array cannot show a wrong offset, because every wrong offset lands on something that array wrote); three scenarios green while their scripts failed to compile, placed no lights, and recorded 0 on every measure; and a golden that pinned a length rather than a behavior, freezing a broken encoding as correct for two weeks.
+
+**The check is mechanical: after a test passes, break the thing it tests and confirm it fails.** Not for every test, but for any test written to pin a fix.
+
+### A test that does not reproduce the user's conditions proves nothing
+
+A green result means something only if the test could have gone red, and an agent's shell is a bad witness: it routinely runs with policies, permissions and paths no user has. A PowerShell script tested fine and would have shipped broken, because the agent's own shell had set `Process: Bypass` over the `RemoteSigned` a user actually has. A Defender false positive was declared cleared because a download succeeded, using a different client than the one still being blocked.
+
+**Name what would have to be true for the test to fail, and confirm that condition is present.** Print the setting the test depends on rather than inferring it from the outcome.
+
 ## Standards
 
 Two principles drive every standard below:

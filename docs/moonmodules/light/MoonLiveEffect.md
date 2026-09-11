@@ -1,6 +1,6 @@
 # MoonLive
 
-MoonLive is projectMM's **live-script engine** — author an effect as text and run it on a running device, compiled to native machine code so it executes at near-hand-written speed in the render hot path. The broader design lives in [livescripts-analysis-top-down.md](../../backlog/livescripts-analysis-top-down.md) (a backlog design study); this page documents the module.
+MoonLive is projectMM's **live-script engine**, author an effect as text and run it on a running device, compiled to native machine code so it executes at near-hand-written speed in the render hot path. The broader design lives in [livescripts-analysis-top-down.md](../../work/future/livescripts-analysis-top-down.md) (a backlog design study); this page documents the module.
 
 Scripts call the same [power functions](power-functions.md) compiled effects use, reached through the builtin table — so the vocabulary is shared, in its flat scalar form.
 
