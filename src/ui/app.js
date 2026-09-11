@@ -518,8 +518,9 @@ async function sendControl(moduleName, controlName, value) {
     // it writes the stale `state` value straight back into the field the user just changed (the value
     // "reverses"; a manual refresh shows the correct value because it refetches). The client knows what
     // it sent, so update `state` now; any later echo just confirms it.
-    if (state && Array.isArray(state.modules)) {
-        const mod = allModules().find(m => m.name === moduleName);
+    const mod = (state && Array.isArray(state.modules))
+        ? allModules().find(m => m.name === moduleName) : null;
+    if (mod) {
         const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
         // Siblings on the same target move with it. The device already does this (followTargets runs
@@ -553,6 +554,23 @@ async function sendControl(moduleName, controlName, value) {
         // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
         // is interacting, and operating this select is exactly that.
         else if (moduleName === "Firmware" && controlName === "image") refetchState();
+        // MoonCloud: saying yes sends a report, and typing a message posts it, so in both cases the
+        // thing the card DISPLAYS changed on the server as a result of the write. Refetched after
+        // the POST for the same reason as `image` above: the new data only exists once the device
+        // has acted on it. The cached aggregates are dropped first, since a fetch that returned the
+        // cache would show the state from before this device contributed to it.
+        // A MoonCloud write changes what the server holds, and the card shows the server. One
+        // rule for every member rather than a hook per control: a report goes out when consent is
+        // granted, a message when one settles, and a later member will have its own trigger.
+        //
+        // Re-checked a few times rather than once after a guessed delay, because the device acts on
+        // its own tick and how long that takes is not the browser's to know: a single timeout is a
+        // guess that is wrong as soon as a member's timing changes, which is exactly what happened
+        // when messages gained a settle window.
+        else if (["MoonStatsModule", "MoonTalkModule"].includes(mod?.type)) {
+            moonCloudStatsCache = null;
+            for (const delay of [800, 2000, 3500]) setTimeout(refetchState, delay);
+        }
     } catch (e) {
         console.warn(`[control] POST ${moduleName}.${controlName} failed (error=${e && e.message ? e.message : e})`);
     }
@@ -1929,6 +1947,19 @@ function createCard(mod, depth) {
     // no persisted control). Only the `show hidden` toggle renders as a raw control; the tree is the rest.
     if (mod.type === "FileManagerModule") {
         renderFileManager(mod, controlsHost);
+    }
+
+    // MoonCloud shows what everyone else reported, which is why the server has no dashboard of its
+    // own: contributing earns the answer back on the card that asked for consent. Reading the
+    // totals sends nothing about this device, so it runs whatever `consent` says.
+    if (mod.type === "MoonStatsModule") {
+        renderMoonCloudStats(controlsHost, mod);
+    }
+
+    // The board itself, under the controls that post to it: a message box with no way to read the
+    // replies is half a chat.
+    if (mod.type === "MoonTalkModule") {
+        renderMoonTalk(controlsHost, mod);
     }
 
     // FirmwareUpdate card hosts the shared install picker. Mount once per
@@ -5605,8 +5636,17 @@ function updateStatusBar() {
     // which is not useful from the UI and can be mistaken for a crash.
     const chipCtrl = ctrls.find(c => c.name === "chip");
     const rebootBtn = document.getElementById("reboot-btn");
-    if (rebootBtn && chipCtrl) {
-        rebootBtn.hidden = chipCtrl.value === "desktop";
+    if (rebootBtn) {
+        // Hidden on a desktop, where `reboot()` EXITS THE PROCESS and nothing restarts it. Keyed on
+        // `deviceModel`, which the desktop platform seeds with its own name (macos-arm64,
+        // linux-x64, windows-x64, docker) and a board leaves for tooling to fill from the catalog.
+        //
+        // NOT on `chip`: that used to read "desktop" and now reads the real architecture (arm64,
+        // x64), so the old test silently stopped matching and put a process-killing button on every
+        // desktop card.
+        const modelCtrl = ctrls.find(c => c.name === "deviceModel");
+        const model = String(modelCtrl?.value ?? "");
+        rebootBtn.hidden = /^(macos|linux|windows)-|^docker$/.test(model);
     }
 
     // bootReason → crashed-state styling on reboot button
@@ -5937,6 +5977,274 @@ async function fmFetchDir(absPath, hidden) {
 // shape: an expanded folder's children are loaded from /api/dir), plus a toolbar (show
 // hidden, new folder, delete on the selected node). Filesystem ops go through the module's controls
 // (path/new folder/delete); browsing is pure UI over /api/dir, so the module stays minimal.
+// MoonCloud Stats: what everyone else reported, rendered on the card that asked for consent.
+//
+// THE REASON THE SERVER HAS NO DASHBOARD. A second web UI would be a second thing to build, host
+// and keep in sync with the schema, and it would put the answer somewhere other than where the
+// question was asked. Here, contributing earns the result back on the device you already own.
+//
+// Reads only: this sends no id, no report and no configuration, so it runs whatever `consent`
+// says, including for someone who declined. A failure leaves the section out rather than showing
+// an error, because the aggregate is a reward and not something the device needs to work.
+// The MoonCloud server is an API and nothing else: the device asks it for the aggregates and
+// draws them here. That is the whole reason it has no dashboard of its own, and why contributing
+// shows its result on the card that asked for consent rather than on a website somewhere.
+//
+// Reads only. No id, no report and no configuration leave the browser here, so this runs whatever
+// `consent` says, including for someone who answered Never. A failure leaves the section out
+// rather than showing an error: the aggregate is a reward, not something the device needs.
+// Where the aggregates come from: the SAME `server` / `serverPort` controls the firmware posts
+// its report to, read off the module rather than hardcoded here. One setting drives both
+// directions, so pointing a device at a local or self-hosted MoonCloud moves the fetch with it
+// instead of leaving the card looking at somewhere else.
+// THE MoonCloud address, the same constant the firmware compiles in. Not read from a control:
+// there is one MoonCloud, and moving it is a release rather than a setting somebody can mistype.
+const kMoonCloudUrl = "https://stats.moonmodules.org";
+
+let moonCloudStatsCache = null;
+
+const kMoonCloudColors = ["#4a9eff", "#ff8c42", "#3ecf8e", "#e8618c", "#a78bfa",
+                          "#f6c445", "#4dd0e1", "#9aa5b1"];
+
+// An SVG arc from one angle to another. The whole-circle case is separate because an arc whose
+// start and end coincide draws NOTHING, so a single-slice pie would come out blank.
+function moonCloudArc(cx, cy, r, a0, a1) {
+    if (a1 - a0 >= Math.PI * 2 - 1e-9) {
+        return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.001} ${cy - r} Z`;
+    }
+    const x0 = cx + r * Math.sin(a0), y0 = cy - r * Math.cos(a0);
+    const x1 = cx + r * Math.sin(a1), y1 = cy - r * Math.cos(a1);
+    return `M ${cx} ${cy} L ${x0} ${y0} ` +
+           `A ${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1} ${y1} Z`;
+}
+
+// Past the 7th slice everything becomes one "other" wedge: a pie with twenty slivers reads as
+// noise, and the exact tail is a question for the raw API rather than a card.
+function moonCloudTopSlices(rows, keep = 7) {
+    if (!rows || rows.length <= keep) return rows || [];
+    const head = rows.slice(0, keep);
+    const tail = rows.slice(keep).reduce((sum, r) => sum + r.count, 0);
+    return tail ? head.concat([{ name: "other", count: tail }]) : head;
+}
+
+function moonCloudPie(rows) {
+    const NS = "http://www.w3.org/2000/svg";
+    const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 200 200");
+    svg.setAttribute("class", "mooncloud-pie");
+
+    let angle = 0;
+    rows.forEach((r, i) => {
+        const next = angle + (r.count / total) * Math.PI * 2;
+        const path = document.createElementNS(NS, "path");
+        path.setAttribute("d", moonCloudArc(100, 100, 92, angle, next));
+        path.setAttribute("fill", kMoonCloudColors[i % kMoonCloudColors.length]);
+        path.setAttribute("class", "mooncloud-slice");
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${r.name}: ${r.count} (${Math.round((r.count / total) * 100)}%)`;
+        path.appendChild(title);
+        svg.appendChild(path);
+        angle = next;
+    });
+    return svg;
+}
+
+function moonCloudLegend(rows) {
+    const box = document.createElement("div");
+    box.className = "mooncloud-legend";
+    rows.forEach((r, i) => {
+        const line = document.createElement("div");
+        const swatch = document.createElement("span");
+        swatch.className = "mooncloud-swatch";
+        swatch.style.background = kMoonCloudColors[i % kMoonCloudColors.length];
+        const name = document.createElement("span");
+        name.className = "mooncloud-legend-name";
+        name.textContent = r.name || "unknown";
+        const count = document.createElement("span");
+        count.className = "mooncloud-legend-count";
+        count.textContent = String(r.count);
+        line.append(swatch, name, count);
+        box.appendChild(line);
+    });
+    return box;
+}
+
+// What the consent control is asking, in one line above it.
+//
+// NOT a prompt with its own Yes/Not now/Never buttons: the `consent` dropdown already offers
+// exactly those, so a button row beside it is the same choice rendered twice and costs a block of
+// the card to say nothing new. What the dropdown cannot carry is WHY, so that is what stays.
+//
+// Shown only while the question is unanswered, so a card whose owner has decided is not still
+// explaining itself.
+function renderMoonCloudConsent(host, mod) {
+    const consent = (mod?.controls || []).find(c => c.name === "consent");
+    if (!consent || Number(consent.value) !== 0) return;   // 0 = Not answered
+
+    const box = document.createElement("div");
+    box.className = "mooncloud-consent";
+    box.textContent = "Share what hardware you run, so development goes where the users are? " +
+                      "One report per install or upgrade: chip, board, and which modules are on. " +
+                      "No device name, no addresses, no credentials. ";
+
+    const link = document.createElement("a");
+    link.href = "https://moonmodules.org/projectMM/privacy-policy.html";
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = "Details";
+    box.appendChild(link);
+
+    host.appendChild(box);
+}
+
+function renderMoonCloudStats(host, mod) {
+    renderMoonCloudConsent(host, mod);
+    const section = document.createElement("div");
+    section.className = "mooncloud-stats";
+    host.appendChild(section);
+
+    const draw = (stats) => {
+        section.textContent = "";
+        if (!stats || !stats.installations) return;
+
+        const title = document.createElement("div");
+        title.className = "mooncloud-stats-title";
+        title.textContent =
+            `What everyone else is running: ${stats.installations} installations`;
+
+        section.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "mooncloud-charts";
+
+        // The four the server aggregates. Country is included even though a device never reports
+        // it (the edge derives it from the connection): withholding it here while serving it to
+        // anyone who calls /api/stats would be a distinction without a difference, and a
+        // country-level count is the same coarse figure every comparable dashboard shows.
+        for (const [label, rows] of [["Version", stats.versions],
+                                     ["Chip", stats.chips],
+                                     ["Board", stats.deviceModels],
+                                     ["Flash", stats.flash],
+                                     ["PSRAM", stats.psram],
+                                     ["SDK", stats.sdk],
+                                     ["Install or upgrade", stats.events],
+                                     ["Upgraded from", stats.previousVersions],
+                                     ["Modules", stats.modules],
+                                     ["Build", stats.builds],
+                                     ["Country", stats.countries]]) {
+            const shown = moonCloudTopSlices(rows);
+            if (!shown.length) continue;
+            const chart = document.createElement("div");
+            chart.className = "mooncloud-chart";
+            const heading = document.createElement("div");
+            heading.className = "mooncloud-chart-title";
+            heading.textContent = label;
+            chart.append(heading, moonCloudPie(shown), moonCloudLegend(shown));
+            grid.appendChild(chart);
+        }
+        section.appendChild(grid);
+    };
+
+    // Cached for the session: these numbers move on the scale of days, and a card rebuild happens
+    // on every unrelated state push.
+    if (moonCloudStatsCache) { draw(moonCloudStatsCache); return; }
+
+    fetch(kMoonCloudUrl + "/api/stats", { cache: "no-store" })
+        .then(r => r.ok ? r.json() : null)
+        .then(stats => { moonCloudStatsCache = stats; draw(stats); })
+        .catch(() => { /* no section: the card is complete without it */ });
+}
+
+// MoonTalk: the public board, read straight onto the card that posts to it.
+//
+// Reading sends NOTHING about this device: no id, no name, no consent involved. That is why this
+// renders whatever `consent` says, including for someone who answered Never: the board is public,
+// and refusing to publish is not a reason to be unable to read.
+//
+// Polled on card build rather than streamed. A chat wants to feel live, but a device UI rebuilds
+// this card on every unrelated state push, so a socket per card would be a connection per render.
+// The refresh button is the honest version until MoonCloud Sync brings a real transport.
+function renderMoonTalk(host, mod) {
+    const section = document.createElement("div");
+    section.className = "moontalk";
+    host.appendChild(section);
+
+    const header = document.createElement("div");
+    header.className = "moontalk-header";
+    const title = document.createElement("span");
+    title.textContent = "Messages";
+    const refresh = document.createElement("button");
+    refresh.className = "moontalk-refresh";
+    refresh.textContent = "\u21bb";
+    refresh.title = "Refresh";
+    header.append(title, refresh);
+
+    const list = document.createElement("div");
+    list.className = "moontalk-list";
+    section.append(header, list);
+
+    const draw = (messages) => {
+        list.textContent = "";
+        if (!messages || !messages.length) {
+            const empty = document.createElement("div");
+            empty.className = "moontalk-empty";
+            empty.textContent = "No messages yet.";
+            list.appendChild(empty);
+            return;
+        }
+        // Oldest at the top, like every chat: the API returns newest first for paging.
+        for (const m of messages.slice().reverse()) {
+            const row = document.createElement("div");
+            row.className = "moontalk-message";
+
+            const who = document.createElement("span");
+            // `named` says whether the sender consented to share a device name. Without it the
+            // server sends the first 8 characters of the installation id, shown in a monospace
+            // face so it reads as an identifier rather than as somebody's name.
+            who.className = m.named ? "moontalk-from" : "moontalk-from moontalk-from-id";
+            who.textContent = m.from;
+            // A named sender keeps its id in brackets: a device name is whatever someone typed, so
+            // two devices can share one, and the id is what tells them apart.
+            if (m.named && m.senderId) {
+                const id = document.createElement("span");
+                id.className = "moontalk-from-id";
+                id.textContent = `(${m.senderId})`;
+                who.appendChild(document.createTextNode(" "));
+                who.appendChild(id);
+            }
+
+            const text = document.createElement("span");
+            text.className = "moontalk-text";
+            text.textContent = m.text;   // textContent, never innerHTML: this is a stranger's text
+
+            const when = document.createElement("span");
+            when.className = "moontalk-when";
+            when.textContent = new Date(m.sentAt).toLocaleTimeString([], {
+                hour: "2-digit", minute: "2-digit",
+            });
+            when.title = new Date(m.sentAt).toLocaleString();
+
+            row.append(who, text, when);
+            list.appendChild(row);
+        }
+    };
+
+    // Incremental: ask only for what this browser has not seen, and keep what it has. A card is
+    // rebuilt on every unrelated state push, so re-fetching the whole board each time costs 6 KB a
+    // rebuild on a device serving its own UI, where an empty answer costs 15 bytes.
+    //
+    // The cache is per session and per board, so switching servers starts clean.
+    const load = () => {
+        fetch(kMoonCloudUrl + "/api/talk", { cache: "no-store" })
+            .then(r => r.ok ? r.json() : null)
+            .then(d => draw(d?.messages))
+            .catch(() => draw(null));
+    };
+    refresh.addEventListener("click", load);
+    load();
+}
+
 function renderFileManager(mod, host) {
     const ctrl = (n) => (mod.controls || []).find(c => c.name === n);
     const st = fmState(mod);

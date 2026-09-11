@@ -1791,3 +1791,22 @@ The fix has to keep the value readable by another image (that is why it is persi
 making the compile-time constant win: re-assert `kFirmwareName` after the config load rather than
 only at `defineControls()`, and pin it with a test that loads a config naming a DIFFERENT variant
 and checks the control still reads the compiled one.
+
+## A MoonCloud card cannot tell "unreachable" from "nothing there" (2026-09-11)
+
+Both MoonCloud readers in `src/ui/app.js` swallow every failure into the empty state. `renderMoonTalk`'s loader is the clearest case:
+
+```js
+fetch(kMoonCloudUrl + "/api/talk", { cache: "no-store" })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => draw(d?.messages))
+    .catch(() => draw(null));
+```
+
+A DNS failure, a dead network, a 500, and a genuinely empty message list all reach `draw(null)` and render the same nothing. `renderMoonCloudStats` fails even more quietly: its `.catch` drops the section entirely, so an unreachable server and a server with no reports both render a card with no statistics on it. The Worker's own dev page (`mooncloud/worker.js`) does the third variant, printing `"No data yet."` on any failure, which states as fact something it has no evidence for.
+
+Found on the bench: with `kMoonCloudUrl` freshly switched to `stats.moonmodules.org`, a stale negative DNS entry on the local network made the name unresolvable to the browser while the firmware's own POSTs kept succeeding. Messages were arriving on the server and the log stayed empty, with nothing on screen to say why. The device looked broken and was not.
+
+The fix is to distinguish the cases the promise already separates: a rejected fetch is unreachable, `!r.ok` is a server error, and a parsed empty array is genuinely empty. Only the last one may claim there is no data. A card that cannot reach MoonCloud should say so, because the user's next action differs completely: check the network, versus wait for someone to post.
+
+Worth pairing with the request-storm item in the same area: `renderMoonTalk` fetches uncached on every `createCard`, so a failing endpoint is also retried far more often than it needs to be.

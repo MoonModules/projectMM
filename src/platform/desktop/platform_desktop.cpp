@@ -11,6 +11,9 @@
 #include <cstring>
 #include <random>      // the stored identity is generated once, see getMacAddress
 #include <fstream>
+#ifdef MM_HAVE_CURL
+#include <curl/curl.h>   // https POST: the OS's own TLS, nothing vendored
+#endif
 #include <filesystem>
 #include <string>
 #ifndef _WIN32
@@ -514,7 +517,111 @@ const char* macString() {
 }
 
 const char* chipModel() {
-    return "desktop";
+    // The real instruction set, not the word "desktop". On a device this control names the silicon
+    // (ESP32-S3, ESP32-P4), so a host that answers "desktop" is naming its category instead, and
+    // the MoonCloud chip breakdown could not tell an Apple Silicon Mac from an x86 mini PC. The
+    // architecture is what carries the same meaning here: it is what a build targets and what a
+    // performance number belongs to.
+    //
+    // Compile-time, because the answer cannot change at run time: a binary is built for one ISA.
+    // (Rosetta reports the EMULATED one, which is the truthful answer for the code that is running.)
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+    return "x64";
+#elif defined(__arm__) || defined(_M_ARM)
+    return "arm32";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "x86";
+#else
+    return "desktop";   // an architecture nobody has built for yet; better vague than wrong
+#endif
+}
+
+bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
+#ifdef MM_HAVE_CURL
+    if (!url || !*url) return false;
+
+    // curl_global_init is NOT thread-safe and must run once before any easy handle. Doing it in a
+    // function-local static makes the first call initialize it and every later call skip, which is
+    // thread-safe since C++11 and needs no explicit teardown: the process exiting is the teardown.
+    static const bool inited = (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK);
+    if (!inited) return false;
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body ? body : "");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(timeoutMs));
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(timeoutMs));
+    // VERIFYPEER and VERIFYHOST are curl's defaults; set explicitly so a future edit cannot turn
+    // them off without saying so out loud. Without them TLS proves nothing about who answered.
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    // No redirect following: the one endpoint is ours and answers directly. Following one would
+    // let a server move a POST body somewhere the caller never named.
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);   // no SIGALRM in a threaded process
+
+    struct curl_slist* headers = curl_slist_append(nullptr, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    // Discard the body rather than buffer it: nothing reads it, and a write callback that returns
+    // the full size is how curl is told the data was consumed.
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+                     +[](char*, size_t size, size_t nmemb, void*) -> size_t { return size * nmemb; });
+
+    const CURLcode rc = curl_easy_perform(curl);
+    long status = 0;
+    if (rc == CURLE_OK) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return rc == CURLE_OK && status >= 200 && status < 300;
+#else
+    // Built without libcurl: the caller degrades visibly rather than pretending it sent something.
+    (void)url; (void)body; (void)timeoutMs;
+    return false;
+#endif
+}
+
+const char* hostPlatform() {
+    // The same names the release packaging uses (package_desktop.py: macos-arm64, windows-x64,
+    // linux-x64), so a MoonCloud board breakdown lines up with the downloads it came from rather
+    // than inventing a second vocabulary for the same thing.
+    //
+    // A container reports "docker" rather than its host OS: what matters about a container is that
+    // it IS one (no display, a mounted volume, an identity that dies without it), and its Linux
+    // underneath is already visible in the chip field.
+#if defined(__linux__)
+    // /.dockerenv is what Docker itself creates in every container it builds. Checked ONCE, since
+    // a process cannot move in or out of a container while it runs.
+    static const bool inContainer = std::filesystem::exists("/.dockerenv");
+    if (inContainer) return "docker";
+  #if defined(__aarch64__)
+    // A Raspberry Pi and every other arm64 SBC lands here, and the board breakdown exists to find
+    // out how many there are: answering "linux-x64" would report every one of them as a PC.
+    return "linux-arm64";
+  #else
+    return "linux-x64";
+  #endif
+#elif defined(__APPLE__)
+  #if defined(__aarch64__)
+    return "macos-arm64";
+  #else
+    return "macos-x64";
+  #endif
+#elif defined(_WIN32)
+  #if defined(_M_ARM64)
+    return "windows-arm64";
+  #else
+    return "windows-x64";
+  #endif
+#else
+    return "";
+#endif
 }
 
 uint8_t currentCore() { return 0; }

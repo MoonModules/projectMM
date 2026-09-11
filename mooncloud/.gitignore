@@ -1,0 +1,5 @@
+# wrangler's local runtime state: the on-disk D1 database, the bundler's temp output and its cache.
+# Created by `wrangler dev` (moondeck/run/run_mooncloud.py) and rebuilt from scratch on demand, so
+# it is machine-local scratch rather than anything to share. Several megabytes, and it holds the
+# LOCAL test rows, which are not data anyone else wants.
+.wrangler/

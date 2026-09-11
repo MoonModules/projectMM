@@ -128,6 +128,7 @@ add_library(mm_core STATIC
     src/core/FilesystemModule.cpp
     src/core/FileManagerModule.cpp
     src/core/MqttModule.cpp
+    src/core/sha256.cpp
     src/core/Scheduler.cpp
     src/core/moonlive/MoonLive.cpp
     src/core/moonlive/MoonLiveCompiler.cpp
@@ -175,6 +176,23 @@ target_link_libraries(mm_platform PUBLIC $<$<PLATFORM_ID:Windows>:ws2_32> $<$<PL
 # link line until the symbols resolve. Apple's linker and MSVC search archives repeatedly and
 # never noticed; GNU ld makes ONE left-to-right pass, so the reference from mm_platform back into
 # mm_core is unresolved unless the cycle is declared.
+# libcurl for the one outbound HTTPS call (MoonCloud Stats). The OS's own TLS rather than a
+# vendored stack: present on macOS and every Linux distribution, and carrying its own certificate
+# verification, so nothing about TLS lives in this repository.
+#
+# OPTIONAL on purpose. A machine without it still builds and MM_HAVE_CURL stays undefined, in which
+# case httpsPost returns false and a report is simply not sent: a build must never fail over an
+# opt-in statistic. The build prints which way it went, since "why did my device never report"
+# would otherwise be invisible.
+find_package(CURL QUIET)
+if(CURL_FOUND)
+    message(STATUS "libcurl ${CURL_VERSION_STRING}: MoonCloud reporting enabled")
+    target_compile_definitions(mm_platform PRIVATE MM_HAVE_CURL)
+    target_link_libraries(mm_platform PUBLIC CURL::libcurl)
+else()
+    message(STATUS "libcurl not found: MoonCloud reporting disabled (install libcurl to enable)")
+endif()
+
 target_link_libraries(mm_platform PUBLIC mm_core)
 set_target_properties(mm_core     PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)
 set_target_properties(mm_platform PROPERTIES LINK_INTERFACE_MULTIPLICITY 3)

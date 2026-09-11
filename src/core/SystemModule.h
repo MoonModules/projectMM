@@ -169,6 +169,12 @@ public:
         // checks it in the backend, wherever the write comes from. Display-only in
         // the UI (pushed, never user-typed); bound as Text — not ReadOnly — because Text is
         // auto-persisted and the readonly flag is only a UI-render hint.
+        // Seeded from the platform when it can answer for itself and nothing was persisted: a
+        // desktop knows its own OS and whether it is a container, where a board does not and waits
+        // for tooling. Only when EMPTY, so an injected catalog name is never overwritten.
+        if (deviceModel_[0] == 0) {
+            std::snprintf(deviceModel_, sizeof(deviceModel_), "%s", platform::hostPlatform());
+        }
         controls_.addText("deviceModel", deviceModel_, sizeof(deviceModel_), validateDeviceModel);
 
         // firmware: the build variant this image is (`esp32s3-zero`), written from kFirmwareName

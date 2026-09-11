@@ -2146,3 +2146,39 @@ body.assign-mode .control-encoder input { cursor: pointer; }
 /* One row per bank, whatever the width: without this the strips are inline-flex siblings that wrap
    as soon as eight of them do not fit. */
 .card:has(.control-display-strip) .surface-break { break-after: always; }
+
+/* MoonCloud Stats: the aggregates, drawn as pie charts on the card that asked for consent. Plain
+   SVG arcs rather than a charting library: three pies do not earn a dependency, and the device
+   serves its own UI with no build step to tree-shake one. */
+.mooncloud-stats { margin-top: 12px; }
+.mooncloud-stats-title { font-size: 0.85em; opacity: 0.75; margin-bottom: 10px; }
+.mooncloud-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 16px; }
+.mooncloud-chart { text-align: center; }
+.mooncloud-chart-title { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.55; margin-bottom: 6px; }
+.mooncloud-pie { width: 100%; max-width: 8rem; height: auto; }
+.mooncloud-slice { stroke: var(--card-bg, #1b1b1b); stroke-width: 1.5; }
+.mooncloud-legend { display: inline-block; text-align: left; margin-top: 6px; font-size: 0.75em; }
+.mooncloud-legend div { display: flex; align-items: center; gap: 5px; line-height: 1.6; }
+.mooncloud-swatch { width: 0.6rem; height: 0.6rem; border-radius: 2px; flex: 0 0 auto; }
+.mooncloud-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mooncloud-legend-count { margin-left: auto; opacity: 0.6; padding-left: 8px; font-variant-numeric: tabular-nums; }
+
+/* MoonTalk: the public board on the card that posts to it. Rows rather than bubbles: this is a
+   device panel, not a phone, and a sender plus a line of text is the whole content. */
+.moontalk { margin-top: 12px; }
+.moontalk-header { display: flex; align-items: center; font-size: 0.85em; opacity: 0.75; margin-bottom: 6px; }
+.moontalk-refresh { margin-left: auto; background: none; border: none; color: inherit; cursor: pointer; font-size: 1.1em; opacity: 0.6; padding: 0 4px; }
+.moontalk-refresh:hover { opacity: 1; }
+.moontalk-list { max-height: 15rem; overflow-y: auto; }
+.moontalk-message { display: flex; align-items: baseline; gap: 6px; font-size: 0.8em; line-height: 1.8; }
+.moontalk-from { flex: 0 0 auto; font-weight: 600; opacity: 0.9; }
+/* An unnamed sender is an id, so it reads as one rather than as somebody's name. */
+.moontalk-from-id { font-family: ui-monospace, monospace; font-weight: 400; opacity: 0.55; }
+.moontalk-text { flex: 1 1 auto; overflow-wrap: anywhere; }
+.moontalk-when { flex: 0 0 auto; opacity: 0.45; font-variant-numeric: tabular-nums; }
+.moontalk-empty { opacity: 0.5; font-size: 0.8em; }
+
+/* What the MoonCloud consent control is asking, one line above it. No buttons: the `consent`
+   dropdown already offers the same choices, and rendering them twice costs card space to say
+   nothing new. */
+.mooncloud-consent { margin: 6px 0 10px; font-size: 0.8em; line-height: 1.6; opacity: 0.8; }

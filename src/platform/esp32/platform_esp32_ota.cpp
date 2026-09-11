@@ -747,4 +747,28 @@ bool moonbaseStageInstallUrl(const char* url) {
     return ok;
 }
 
+
+bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
+    if (!url || !*url) return false;
+
+    esp_http_client_config_t cfg = {};
+    cfg.url = url;
+    cfg.method = HTTP_METHOD_POST;
+    cfg.timeout_ms = static_cast<int>(timeoutMs);
+    // The SAME trust-anchor bundle the OTA path uses: IDF's built-in root certificates, so this
+    // verifies a public server without us shipping or maintaining a CA store.
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) return false;
+
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_post_field(client, body ? body : "", body ? std::strlen(body) : 0);
+
+    const esp_err_t err = esp_http_client_perform(client);
+    const int status = (err == ESP_OK) ? esp_http_client_get_status_code(client) : 0;
+    esp_http_client_cleanup(client);
+    return err == ESP_OK && status >= 200 && status < 300;
+}
+
 } // namespace mm::platform

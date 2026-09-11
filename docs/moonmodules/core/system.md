@@ -114,6 +114,47 @@ Detail: [technical](moxygen/FirmwareUpdateModule.md)
 
 [Tests](../../tests/unit-tests.md#firmwareupdatemodule)
 
+<a id="mooncloud"></a>
+
+### MoonCloud
+
+The container for everything projectMM does with a server MoonModules runs. It holds no settings of its own: each thing MoonCloud does is a child with its own consent, because a user who wants one has not thereby agreed to the other.
+
+- **Stats**, below: one opt-in report per install or upgrade, and the totals back.
+- **Talk**, below: a public message board between devices.
+- **Sync** (planned): device to device over the internet, a joint show across houses. Not built on Stats; they share this container and the installation id, nothing else.
+
+<a id="mooncloud-stats"></a>
+
+#### Stats
+
+One opt-in report about this install, sent once when the firmware is installed or upgraded, so development effort goes where the users are. Off until you answer yes. Everything it sends, and the reasoning behind the identifier, is in the [privacy policy](../../privacy-policy.md).
+
+- `consent`: **Not answered** / **Yes** / **Not now** / **Never**. Nothing is sent, and no identifier is computed, until this reads Yes. **Never** is remembered forever; **Not now** defers, so the question returns after the next upgrade rather than never.
+- read-only: `version` (what is running) and `reportedVersion` (what last produced a report). They differ exactly when a report is due, which is what makes one upgrade send one report and a reboot send nothing.
+
+The report carries hardware and configuration: chip, flash, PSRAM, SDK, device model, and which modules are enabled. It carries no device name, no addresses, no credentials and no text you typed, and a unit test asserts those cannot appear in it.
+
+The card also shows the totals everyone else reported, which is why there is no separate public dashboard: contributing earns the answer back where you already are. Reading them sends nothing about you and works whether or not you consented.
+
+**MoonCloud** is the family name for anything projectMM does with a server we run. Stats and Talk are its members today; device-to-device sync over the internet is planned as a third, with its own consent.
+
+Detail: [technical](moxygen/MoonStatsModule.md)
+
+<a id="mooncloud-talk"></a>
+
+#### Talk
+
+A public message board between projectMM devices, in the shape Meshtastic's channel chat has. Off until you turn it on, and a message is sent because you typed one: nothing posts on its own.
+
+- `consent`: **Not answered** / **Yes** / **Never**. Nothing is published until this reads Yes.
+- `shareName`: whether your device name rides along, **off by default and a separate decision**. A device name is the one field here that identifies a person rather than a machine, and "Ewoud's bedroom" says a great deal more than "MM-A094". Without it your messages show the first 8 characters of your installation id, which groups them together without naming you.
+- `message`: what to say. Cleared after sending.
+
+**Everything sent is public and permanent**: there is no private message, no recipient and no delete. Reading the board sends nothing about your device and needs no consent.
+
+**There is no authentication**, so a sender id can be fabricated by anyone posting by hand. That is acceptable for a board where nothing is gated on identity, and it is said here rather than left to be discovered.
+
 <a id="file-manager"></a>
 
 ### File Manager
