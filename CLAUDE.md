@@ -98,7 +98,9 @@ product owner triggers it; say in one line what was picked and why.
 
 Docs land with the code, not at merge time: the module's spec and catalog card describe what actually shipped ([coding-standards § Documentation model](docs/coding-standards.md#documentation-model)); a breaking change gets its entry in [docs/MIGRATING.md](docs/MIGRATING.md); a shipped backlog item or spec draft is deleted. The merge gate only verifies this happened.
 
-**How the writing looks: American spelling, no em-dashes.** `color`, `serialize`, `behavior`, `analyze`; a comma, colon or full stop where an em-dash wants to go. In comments, docs, commit messages and chat replies alike. Both rules are enforced mechanically by `check_prose.py` (a write-time hook, and again at the commit gate), because they are exactly the kind of habit that stays invisible to its own author. Full rationale: [coding-standards § Writing](docs/coding-standards.md).
+**How the writing looks: American spelling, no em-dashes.** `color`, `serialize`, `behavior`, `analyze`; a comma, colon or full stop where an em-dash wants to go. In comments, docs, commit messages and chat replies alike. Both rules are enforced mechanically by `check_prose.py` (a write-time hook, and again at the commit gate), because they are exactly the kind of habit that stays invisible to its own author.
+
+**And how much of it there is: minimal, dense, straight to the point.** A comment or a doc paragraph says what the code cannot (the reason, the constraint, the failure it prevents) in the fewest words that carry it. Restating the code is noise; so is a paragraph where a clause would do. Nothing is stripped wholesale, and a reason still true is shortened rather than dropped: **condense, don't delete**. No check catches this one, so it is judgment, applied when writing and again when reviewing. Full rationale: [coding-standards § Conventions](docs/coding-standards.md#conventions).
 
 ### Commit
 

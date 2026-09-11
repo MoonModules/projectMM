@@ -283,6 +283,13 @@ void getMacAddress(uint8_t mac[6]);
 // return static strings; a ReadOnly control binds straight to these, storing nothing per-module.)
 const char* macString();
 const char* chipModel();
+
+// The hardware this installation runs on, when the platform can answer it for itself. Empty on a
+// DEVICE, where the board cannot self-identify and tooling injects `deviceModel` from the catalog.
+// A desktop CAN answer: the OS is known at compile time and a container announces itself, so this
+// returns the same vocabulary the release packaging uses ("macos-arm64", "linux-x64", "docker"),
+// which keeps a MoonCloud board breakdown comparable with the downloads it came from.
+const char* hostPlatform();
 const char* sdkVersion();
 
 // CPU frequency + core count as one short static string ("240 MHz, 2 cores"), read from the RUNNING
@@ -844,6 +851,29 @@ void moonbaseClearStagedUrl();
 // fetch / the old mDNS browse). Built on raw sockets, same primitives as the HTTP server.
 int httpRequest(const char* method, const char* host, uint16_t port, const char* path,
                 const char* reqBody, uint32_t timeoutMs, char* body, size_t bodyLen);
+
+// One HTTPS POST to a public server, bounded by `timeoutMs`. Returns the HTTP status, or 0 on
+// DNS/connect/TLS/timeout failure. `url` is a full https:// URL: unlike httpRequest above this
+// resolves names, so a hostname works.
+//
+// SEPARATE from httpRequest rather than a flag on it, because they are different jobs with
+// different implementations. httpRequest is a hand-rolled socket for the LAN (Philips Hue), where
+// cleartext is allowed and a dotted-quad IP is the input. This one crosses the public internet, so
+// it needs TLS, certificate verification and DNS, none of which we should be writing ourselves.
+//
+// Each platform uses the TLS ITS OS ALREADY SHIPS, so nothing is vendored: `esp_http_client` with
+// `esp_crt_bundle` on ESP32 (the same pair the OTA path uses), and libcurl on desktop, which is
+// present on macOS and every Linux distribution and carries its own certificate handling.
+//
+// Response body is discarded: the one caller (MoonCloud Stats) has nothing to do with it, and
+// buffering a reply from an untrusted server is a risk with no benefit. Blocking, so callers run
+// it off the render path.
+bool httpsPost(const char* url, const char* body, uint32_t timeoutMs);
+
+/// Whether this build can make an outbound HTTPS request at all. False only on a desktop build
+/// compiled without libcurl, where `httpsPost` always returns false: a structural inability rather
+/// than a failed attempt, which a caller must be able to tell apart from network loss.
+bool httpsAvailable() MM_NONBLOCKING;
 
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs

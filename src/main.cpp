@@ -159,6 +159,9 @@
 #include "core/MoonLiveService.h"
 #include "core/FileManagerModule.h"
 #include "core/FirmwareUpdateModule.h"
+#include "core/MoonCloudModule.h"
+#include "core/MoonStatsModule.h"
+#include "core/MoonTalkModule.h"
 #include "core/ImprovProvisioningModule.h"
 #include "core/MqttModule.h"
 #include "core/DevicesModule.h"
@@ -335,6 +338,9 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::MoonLiveService>("MoonLiveService", "core/services.md#moonliveservice");
     mm::ModuleFactory::registerType<mm::FileManagerModule>("FileManagerModule", "core/system.md#file-manager");
     mm::ModuleFactory::registerType<mm::FirmwareUpdateModule>("FirmwareUpdateModule", "core/system.md#firmware-update");
+    mm::ModuleFactory::registerType<mm::MoonCloudModule>("MoonCloudModule", "core/system.md#mooncloud");
+    mm::ModuleFactory::registerType<mm::MoonStatsModule>("MoonStatsModule", "core/system.md#mooncloud-stats");
+    mm::ModuleFactory::registerType<mm::MoonTalkModule>("MoonTalkModule", "core/system.md#mooncloud-talk");
     mm::ModuleFactory::registerType<mm::ImprovProvisioningModule>("ImprovProvisioningModule", "core/system.md#improv-provisioning");
     mm::ModuleFactory::registerType<mm::MqttModule>("MqttModule", "core/system.md#mqtt");
     mm::ModuleFactory::registerType<mm::DevicesModule>("DevicesModule", "core/system.md#devices");
@@ -445,6 +451,27 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
         mm::ModuleFactory::create("FirmwareUpdateModule"));
     firmwareUpdateModule->setName("Firmware");
+
+    // MoonCloud: the container for everything that talks to a server we run. Stats is its first
+    // child and Sync will be its second, each with its own consent, because a user who wants a
+    // joint lightshow has not thereby agreed to usage reporting.
+    //
+    // NOT a child of Firmware, which was the first shape tried: FirmwareUpdateModule overrides
+    // defineControls() without chaining to children, so anything parented there shows an empty
+    // card. MoonCloudModule chains, which is what makes Stats' controls appear.
+    auto* moonCloudModule = static_cast<mm::MoonCloudModule*>(
+        mm::ModuleFactory::create("MoonCloudModule"));
+    moonCloudModule->setName("MoonCloud");
+
+    auto* moonStatsModule = static_cast<mm::MoonStatsModule*>(
+        mm::ModuleFactory::create("MoonStatsModule"));
+    moonStatsModule->setName("Stats");
+
+    // MoonTalk: the public message board. A SECOND MoonCloud child with its own consent,
+    // because publishing a message and sharing a chip model are different decisions.
+    auto* moonTalkModule = static_cast<mm::MoonTalkModule*>(
+        mm::ModuleFactory::create("MoonTalkModule"));
+    moonTalkModule->setName("Talk");
 
     // Network (platform stubs return false on desktop — module is a no-op)
     auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
@@ -584,6 +611,13 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     scheduler.addModule(systemModule);
     scheduler.addModule(fileManagerModule);
     scheduler.addModule(firmwareUpdateModule);
+    // markWiredByCode: both are boot wiring, not user-added, so the persisted tree must not decide
+    // whether they exist. Without it a config written before a child was added drops that child on
+    // load, which is exactly what happened when Talk was introduced beside Stats: the file listed
+    // one child, so the tree came back with one.
+    moonStatsModule->markWiredByCode(); moonCloudModule->addChild(moonStatsModule);
+    moonTalkModule->markWiredByCode();  moonCloudModule->addChild(moonTalkModule);
+    scheduler.addModule(moonCloudModule);
     if (improvModule) networkModule->addChild(improvModule);
     if (mqttModule) networkModule->addChild(mqttModule);
     // Devices: discovers other devices on the LAN. Child of Network (discovery

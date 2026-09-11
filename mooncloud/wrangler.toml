@@ -1,0 +1,28 @@
+name = "mooncloud-stats"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Keep the workers.dev address alive: declaring any route disables it by default, and firmware built
+# before the Custom Domain existed compiled it in. Both addresses serve the same Worker.
+workers_dev = true
+
+# Runs the Worker near its backend rather than near the caller, which for a request that always
+# touches D1 is the shorter path. NOT a jurisdiction control: the data staying in Europe comes from
+# the database's region (WEUR), not from this.
+[placement]
+mode = "smart"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mooncloud-stats"
+database_id = "7966e8d7-1fdd-4231-b28d-9dfc08ea94b1"
+
+# No [limits] block: an explicit cpu_ms is a PAID-plan feature and the deploy is rejected without
+# one. The free plan already caps CPU per invocation and STOPS at its request ceiling rather than
+# billing, which is the protection that actually matters here.
+
+# The firmware hardcodes this address, so a move means a new release. Cloudflare owns the DNS record
+# and the certificate for a Custom Domain; the workers.dev address keeps working alongside it.
+[[routes]]
+pattern = "stats.moonmodules.org"
+custom_domain = true

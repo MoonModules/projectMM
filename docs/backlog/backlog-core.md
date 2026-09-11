@@ -1791,3 +1791,23 @@ The fix has to keep the value readable by another image (that is why it is persi
 making the compile-time constant win: re-assert `kFirmwareName` after the config load rather than
 only at `defineControls()`, and pin it with a test that loads a config naming a DIFFERENT variant
 and checks the control still reads the compiled one.
+
+## MoonCloud: share a MoonLive script over MoonTalk (2026-09-10)
+
+Sketched 2026-09-10 while Talk was built. **The unique feature nobody else has**: projectMM ships a scripting language whose programs are about a kilobyte of text, and a message board between devices. Together they mean a script someone wrote on their wall is one tap from running on yours.
+
+**What makes it plausible.** The scripts are tiny: the shipped `.mle` files run 780 to 1907 bytes and the whole library of twenty-odd is 36 KB. A script is self-contained by design, so the text is the artifact. And the device already compiles and runs arbitrary script text safely, which is the hard half and is done.
+
+**The design work is that a script is five to seven times a message.** Talk caps a message at 280 characters, deliberately: a chat message is a sentence, and one caller must not fill the table. Three options:
+
+- **A second endpoint** (`/api/script`) with its own size cap and table, and a message that references it by id. The chat table stays a chat table, a script is fetched when someone wants it, and a board read stays small. Most work, cleanest shape, and the recommendation.
+- **An attachment column on the message**, capped separately. One table and one post, at the cost of every board read carrying script text unless the query is careful.
+- **Share a URL.** A script already lives in the user's File Manager and a device could serve it over the LAN. Free, and limited to one network, which is the case that makes the feature interesting.
+
+**A shared script is code from a stranger**, in a way chat text is not. Three questions the design answers rather than discovers:
+
+1. **Loading is explicit and reversible.** A script arrives as something to look at, and taking it leaves what the user already has intact. `/moonlive` (user) shadowing `/.moonlive` (factory) is the existing trap.
+2. **The device is the sandbox.** MoonLive reaches no filesystem and no network, so the blast radius of a hostile script is the LEDs and the render budget. Worth confirming rather than assuming: a script that never yields is a watchdog reset, which is a denial of service on someone's wall.
+3. **Attribution and removal.** Any sender id can be claimed, and a message stays once posted. Fine for chat, weaker for code.
+
+Depends on Talk shipping and on the server being deployed.

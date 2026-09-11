@@ -300,6 +300,13 @@ const char* macString() {
     return buf;
 }
 
+const char* hostPlatform() {
+    // Empty on a device: a board cannot self-identify, so `deviceModel` is injected by tooling from
+    // the catalog (MoonDeck, or the web installer over serial). Answering something here would
+    // overwrite a real board name with a guess.
+    return "";
+}
+
 const char* chipModel() {
     esp_chip_info_t info;
     esp_chip_info(&info);

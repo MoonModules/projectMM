@@ -127,6 +127,7 @@ nav:
       # resource it is, rather than warning about an unresolvable absolute path.
       - Web installer: https://moonmodules.org/projectMM/install/
       - Log an issue: logging-an-issue.md
+      - MoonCloud: mooncloud.md
       - Privacy policy: privacy-policy.md
   # Tutorials: the guided path AFTER "Install & first light". Ordered as a reader
   # would walk them — concepts first, then the longer-form use cases (which predate

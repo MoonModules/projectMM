@@ -518,9 +518,10 @@ async function sendControl(moduleName, controlName, value) {
     // it writes the stale `state` value straight back into the field the user just changed (the value
     // "reverses"; a manual refresh shows the correct value because it refetches). The client knows what
     // it sent, so update `state` now; any later echo just confirms it.
-    if (state && Array.isArray(state.modules)) {
-        const mod = allModules().find(m => m.name === moduleName);
-        const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
+    const mod = (state && Array.isArray(state.modules))
+        ? allModules().find(m => m.name === moduleName) : null;
+    if (mod) {
+        const ctrl = Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
         // Siblings on the same target move with it. The device already does this (followTargets runs
         // on every surface write), but the browser would not see it until the next 1 Hz push, so a
@@ -553,6 +554,31 @@ async function sendControl(moduleName, controlName, value) {
         // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
         // is interacting, and operating this select is exactly that.
         else if (moduleName === "Firmware" && controlName === "image") refetchState();
+        // Three writes change what a MoonCloud card shows: pressing `send` publishes a message, and
+        // either member's `consent` decides whether that member reads at all. Typing in `message` or
+        // toggling `shareName` changes only the device, and re-reading after those showed exactly
+        // what was already on screen.
+        else if (mod?.type === "MoonTalkModule" ? (controlName === "send" || controlName === "consent")
+               : mod?.type === "MoonStatsModule" ? controlName === "consent"
+               : false) {
+            // Switching consent OFF changes nothing on the server (a report already sent stays
+            // sent), so the card rebuilds from what it has and nothing is re-read. The rebuild is
+            // what hides the data.
+            const turnedOn = Boolean(value);
+            if (!turnedOn) { moonCloudGeneration++; refetchState(); return; }
+
+            // Switching ON: ONE read, once. A Stats report leaves from tick1s rather than during
+            // this write, so reading immediately would show the totals without this device's own
+            // install, the one row the reader is looking for. A Talk message is sent inside the
+            // write, so its read needs no delay. An earlier shape read three times to cover the
+            // uncertainty and rebuilt the card three times with it.
+            moonCloudGeneration++;
+            setTimeout(() => {
+                moonCloudStatsCache.clear();
+                moonTalkCache = null;
+                refetchState();
+            }, mod?.type === "MoonStatsModule" && controlName === "consent" ? 2000 : 0);
+        }
     } catch (e) {
         console.warn(`[control] POST ${moduleName}.${controlName} failed (error=${e && e.message ? e.message : e})`);
     }
@@ -1931,12 +1957,38 @@ function createCard(mod, depth) {
         renderFileManager(mod, controlsHost);
     }
 
+    // Contributing earns the answer back on the card that asked for consent, so the charts render
+    // here rather than anywhere else. They are drawn empty until consent is on.
+    if (mod.type === "MoonStatsModule") {
+        renderMoonCloudStats(controlsHost, mod);
+    }
+
+    // The board itself, under the controls that post to it: a message box with no way to read the
+    // replies is half a chat.
+    if (mod.type === "MoonTalkModule") {
+        renderMoonTalk(controlsHost, mod);
+    }
+
     // FirmwareUpdate card hosts the shared install picker. Mount once per
     // card-build. The picker reads SystemModule.firmware (already in
     // /api/state) to filter to OTA-compatible releases. On install, the
     // device fetches the binary via /api/firmware/url: no browser CORS in
     // the data path. See docs/architecture.md § Firmware vs board.
     if (mod.type === "FirmwareUpdateModule") {
+        // A nudge where someone has just thought about versions, which is the moment the aggregate
+        // is worth something to them. Shown only while Stats consent is off, so it disappears the
+        // moment it is acted on. Both halves are named: reading it should not be how someone
+        // discovers that consenting also shares.
+        const statsConsent = allModules()
+            .find(m => m.type === "MoonStatsModule")?.controls
+            ?.find(c => c.name === "consent")?.value;
+        if (statsConsent === false) {
+            const nudge = document.createElement("div");
+            nudge.className = "mooncloud-nudge";
+            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running.";
+            host.appendChild(nudge);
+        }
+
         // TWO IMAGES, ONE PANEL. A device installs the app it runs and MoonBase the recovery
         // image, described by the same four controls and installed the same three ways (a
         // release, a URL, a file). The device's `image` control says which, and everything here
@@ -2770,6 +2822,26 @@ function createControl(moduleName, moduleType, ctrl) {
                     dragTs[key] = Date.now();
                     debounceSend(key, 500, () => sendControl(moduleName, ctrl.name, input.value));
                 });
+                // Enter presses the card's `send` button, where the module has one. Generic rather
+                // than a MoonTalk rule: any module pairing a text field with a send button gets it,
+                // and a module without one is unaffected.
+                //
+                // The write is FLUSHED first and awaited. Typing is debounced 500 ms, so Enter
+                // straight after the last keystroke would otherwise press send while the device
+                // still held the previous text, publishing the message a keystroke short.
+                input.addEventListener("keydown", async (e) => {
+                    if (e.key !== "Enter") return;
+                    // allModules() walks children: Talk is a MoonCloud child, so a flat lookup on
+                    // state.modules never finds it.
+                    const mod = allModules().find(m => m.name === moduleName);
+                    const send = (mod?.controls || [])
+                        .find(c => c.type === "button" && c.name === "send");
+                    if (!send) return;
+                    e.preventDefault();
+                    clearTimeout(dragTimers[key]);
+                    await sendControl(moduleName, ctrl.name, input.value);
+                    await sendControl(moduleName, "send", 1);
+                });
             }
             row.appendChild(input);
             break;
@@ -2990,7 +3062,13 @@ function createControl(moduleName, moduleType, ctrl) {
             const btn = document.createElement("button");
             btn.className = "action-btn";
             btn.textContent = ctrl.label || ctrl.name;
-            btn.addEventListener("click", () => sendControl(moduleName, ctrl.name, 1));
+            // Flush any pending debounced text write first, then act. Typing is debounced 500 ms,
+            // so a click inside that window sent the button while the device still held the text as
+            // it stood one keystroke ago: the Enter path already does this, and the two must agree.
+            btn.addEventListener("click", async () => {
+                await flushPendingControlWrites(moduleName);
+                sendControl(moduleName, ctrl.name, 1);
+            });
             row.appendChild(btn);
             break;
         }
@@ -4151,12 +4229,36 @@ function relativeAge(sec) {
     return `${Math.floor(sec / 86400)}d ago`;
 }
 
+/// Send any text control of this module whose debounced write is still pending, and wait for it.
+///
+/// Typing is debounced, so anything that ACTS on the typed value (Enter, a send button) has to land
+/// the text first or it acts on what the device held a keystroke ago.
+async function flushPendingControlWrites(moduleName) {
+    const mod = allModules().find(m => m.name === moduleName);
+    for (const ctrl of mod?.controls || []) {
+        const key = moduleName + ":" + ctrl.name;
+        if (!dragTimers[key]) continue;
+        clearTimeout(dragTimers[key]);
+        delete dragTimers[key];
+        // queryByName, not a bare querySelector: a CSS attribute match is case-insensitive, so
+        // `data-mid="talk"` would resolve to a module named `Talk`. See queryByName for the bench
+        // case that found it.
+        const input = queryByName(
+            `input[data-key="${cssEscape(ctrl.name)}"]`, "data-mid", moduleName);
+        if (input) await sendControl(moduleName, ctrl.name, input.value);
+    }
+}
+
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
     if (def === undefined || def === null) return;  // type not loaded yet or no default
     // A SURFACE control has no default worth restoring: its value belongs to whatever it drives, so
     // "reset" would drive that target to zero, which is a change rather than a reset. The row is
     // also 26px wide, and the button was taking space from the thing being operated.
-    if (ctrl.fader || ctrl.encoder || ctrl.switchRow) return;
+    //
+    // A CONSENT control is the same shape for a different reason: off is where it starts, so the
+    // button's only possible action is to withdraw consent, which is a decision rather than a
+    // reset. The checkbox already expresses both answers.
+    if (ctrl.fader || ctrl.encoder || ctrl.switchRow || ctrl.name === "consent") return;
     const btn = document.createElement("button");
     btn.className = "reset-btn";
     btn.type = "button";
@@ -5605,8 +5707,17 @@ function updateStatusBar() {
     // which is not useful from the UI and can be mistaken for a crash.
     const chipCtrl = ctrls.find(c => c.name === "chip");
     const rebootBtn = document.getElementById("reboot-btn");
-    if (rebootBtn && chipCtrl) {
-        rebootBtn.hidden = chipCtrl.value === "desktop";
+    if (rebootBtn) {
+        // Hidden on a desktop, where `reboot()` EXITS THE PROCESS and nothing restarts it. Keyed on
+        // `deviceModel`, which the desktop platform seeds with its own name (macos-arm64,
+        // linux-x64, windows-x64, docker) and a board leaves for tooling to fill from the catalog.
+        //
+        // NOT on `chip`: that used to read "desktop" and now reads the real architecture (arm64,
+        // x64), so the old test silently stopped matching and put a process-killing button on every
+        // desktop card.
+        const modelCtrl = ctrls.find(c => c.name === "deviceModel");
+        const model = String(modelCtrl?.value ?? "");
+        rebootBtn.hidden = /^(macos|linux|windows)-|^docker$/.test(model);
     }
 
     // bootReason → crashed-state styling on reboot button
@@ -5937,6 +6048,415 @@ async function fmFetchDir(absPath, hidden) {
 // shape: an expanded folder's children are loaded from /api/dir), plus a toolbar (show
 // hidden, new folder, delete on the selected node). Filesystem ops go through the module's controls
 // (path/new folder/delete); browsing is pure UI over /api/dir, so the module stays minimal.
+// MoonCloud Stats: what everyone else reported, rendered on the card that asked for consent.
+//
+// Reads only: no id, no report and no configuration leave the browser here. The charts are drawn
+// EMPTY until this member's consent is on, so what saying yes gets you is visible before you say
+// it, and a server that cannot be reached says so rather than rendering as an empty one.
+// Where the aggregates come from: the SAME `server` / `serverPort` controls the firmware posts
+// its report to, read off the module rather than hardcoded here. One setting drives both
+// directions, so pointing a device at a local or self-hosted MoonCloud moves the fetch with it
+// instead of leaving the card looking at somewhere else.
+// THE MoonCloud address, the same constant the firmware compiles in. Not read from a control:
+// there is one MoonCloud, and moving it is a release rather than a setting somebody can mistype.
+// Whether this member's own consent is on. The data a MoonCloud card shows is what contributing
+// earns back, so an unconsented card renders the same charts with nothing in them.
+function consented(mod) {
+    return Boolean((mod?.controls || []).find(c => c.name === "consent")?.value);
+}
+
+const kMoonCloudUrl = "https://mooncloud-stats.moonmodules.workers.dev";
+
+let moonCloudStatsCache = new Map();   // filter query -> stats, so switching back is free
+let moonCloudFilter = {};              // dimension -> value the reader chose
+let moonCloudGeneration = 0;           // bumped on a control write; older answers are dropped
+let moonTalkCache = null;
+
+const kMoonCloudColors = ["#4a9eff", "#ff8c42", "#3ecf8e", "#e8618c", "#a78bfa",
+                          "#f6c445", "#4dd0e1", "#9aa5b1"];
+
+// An SVG arc from one angle to another. The whole-circle case is separate because an arc whose
+// start and end coincide draws NOTHING, so a single-slice pie would come out blank.
+function moonCloudArc(cx, cy, r, a0, a1) {
+    if (a1 - a0 >= Math.PI * 2 - 1e-9) {
+        return `M ${cx} ${cy - r} A ${r} ${r} 0 1 1 ${cx - 0.001} ${cy - r} Z`;
+    }
+    const x0 = cx + r * Math.sin(a0), y0 = cy - r * Math.cos(a0);
+    const x1 = cx + r * Math.sin(a1), y1 = cy - r * Math.cos(a1);
+    return `M ${cx} ${cy} L ${x0} ${y0} ` +
+           `A ${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1} ${y1} Z`;
+}
+
+// Past the 7th slice everything becomes one "other" wedge: a pie with twenty slivers reads as
+// noise, and the exact tail is a question for the raw API rather than a card.
+function moonCloudTopSlices(rows, keep = 7) {
+    if (!rows || rows.length <= keep) return rows || [];
+    const head = rows.slice(0, keep);
+    const tail = rows.slice(keep).reduce((sum, r) => sum + r.count, 0);
+    return tail ? head.concat([{ name: "other", count: tail }]) : head;
+}
+
+function moonCloudPie(rows, onPick) {
+    const NS = "http://www.w3.org/2000/svg";
+    const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 200 200");
+    svg.setAttribute("class", "mooncloud-pie");
+
+    // No rows: one filled circle, so a placeholder reads as a pie waiting for data rather than as
+    // the blank sliver a zero-angle slice produces.
+    if (!rows.length) {
+        const disc = document.createElementNS(NS, "circle");
+        disc.setAttribute("cx", "100");
+        disc.setAttribute("cy", "100");
+        disc.setAttribute("r", "92");
+        disc.setAttribute("class", "mooncloud-pie-placeholder");
+        svg.appendChild(disc);
+        return svg;
+    }
+
+    let angle = 0;
+    rows.forEach((r, i) => {
+        const next = angle + (r.count / total) * Math.PI * 2;
+        const path = document.createElementNS(NS, "path");
+        path.setAttribute("d", moonCloudArc(100, 100, 92, angle, next));
+        path.setAttribute("fill", kMoonCloudColors[i % kMoonCloudColors.length]);
+        const pickable = onPick && r.name && r.name !== "other";
+        path.setAttribute("class", pickable ? "mooncloud-slice mooncloud-pickable" : "mooncloud-slice");
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${r.name}: ${r.count} (${Math.round((r.count / total) * 100)}%)`
+            + (pickable ? ", click to filter" : "");
+        path.appendChild(title);
+        if (pickable) {
+            path.addEventListener("click", () => onPick(r.name));
+            // Reachable without a mouse, the same way a collapsible card header is: a filter nobody
+            // can operate from the keyboard is a control only some people have.
+            path.setAttribute("tabindex", "0");
+            path.setAttribute("role", "button");
+            path.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.name); }
+            });
+        }
+        svg.appendChild(path);
+        angle = next;
+    });
+    return svg;
+}
+
+function moonCloudLegend(rows, onPick) {
+    const box = document.createElement("div");
+    box.className = "mooncloud-legend";
+    rows.forEach((r, i) => {
+        const line = document.createElement("div");
+        const swatch = document.createElement("span");
+        swatch.className = "mooncloud-swatch";
+        swatch.style.background = kMoonCloudColors[i % kMoonCloudColors.length];
+        const name = document.createElement("span");
+        name.className = "mooncloud-legend-name";
+        name.textContent = r.name || "unknown";
+        const count = document.createElement("span");
+        count.className = "mooncloud-legend-count";
+        count.textContent = String(r.count);
+        line.append(swatch, name, count);
+        // `other` is a bucket of everything past the top slices, so it names no value to filter by.
+        if (onPick && r.name && r.name !== "other") {
+            line.className = "mooncloud-pickable";
+            line.addEventListener("click", () => onPick(r.name));
+            line.tabIndex = 0;
+            line.setAttribute("role", "button");
+            line.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.name); }
+            });
+        }
+        box.appendChild(line);
+    });
+    return box;
+}
+
+function renderMoonCloudStats(host, mod) {
+    const section = document.createElement("div");
+    section.className = "mooncloud-stats";
+    host.appendChild(section);
+
+    // As in MoonTalk: `reached` separates "the server said there is nothing" from "the server never
+    // answered". Only the first may render as no statistics; the second says so.
+    const draw = (stats, reached = true) => {
+        section.textContent = "";
+        if (!reached) {
+            const failed = document.createElement("div");
+            failed.className = "mooncloud-stats-title mooncloud-unreachable";
+            failed.textContent = "Cannot reach the MoonCloud server.";
+            section.appendChild(failed);
+            return;
+        }
+        const head = document.createElement("div");
+        head.className = "mooncloud-stats-head";
+        const title = document.createElement("div");
+        title.className = "mooncloud-stats-title";
+        title.textContent = stats
+            ? `What everyone else is running: ${stats.installations} installations`
+            : "What everyone else is running";
+        head.appendChild(title);
+        // Fetched once per card build, so this is how to ask again without reloading. Only with
+        // consent: without it there is nothing to refresh, because nothing is fetched.
+        if (consented(mod)) {
+            const refresh = document.createElement("button");
+            refresh.className = "mooncloud-refresh";
+            refresh.textContent = "\u21bb";
+            refresh.title = "Refresh";
+            refresh.addEventListener("click", () => { moonCloudStatsCache.clear(); load(); });
+            head.appendChild(refresh);
+        }
+
+        section.appendChild(head);
+
+        // A filter is always something the reader chose, so it is stated plainly with a way back.
+        const active = stats ? Object.entries(moonCloudFilter) : [];
+        if (active.length) {
+            const bar = document.createElement("div");
+            bar.className = "mooncloud-filter";
+            const what = document.createElement("span");
+            // A bounds pair reads as one range, not two numbers: `lightCountMin` + `lightCountMax`
+            // came from a single slice and a reader thinks of it that way.
+            const seen = new Set();
+            const parts = [];
+            for (const [k, v] of active) {
+                if (k.endsWith("Label")) continue;   // display text for a bounds pair, not a filter
+                const base = k.replace(/(Min|Max)$/, "");
+                if (base !== k) {
+                    if (seen.has(base)) continue;
+                    seen.add(base);
+                    // The slice's own label, not the bounds: the reader clicked "64-128 KB" and
+                    // "65537 to 131072" is the same fact in a form nobody chose.
+                    parts.push(moonCloudFilter[`${base}Label`] ?? moonCloudFilter[`${base}Min`]);
+                    continue;
+                }
+                parts.push(k === "dev" ? (v === "1" ? "development" : "released") : v);
+            }
+            what.textContent = "Filtered to " + parts.join(", ");
+            const clear = document.createElement("button");
+            clear.className = "mooncloud-filter-clear";
+            clear.textContent = "Clear";
+            clear.addEventListener("click", () => { moonCloudFilter = {}; load(); });
+            bar.append(what, clear);
+            section.appendChild(bar);
+        }
+
+        const grid = document.createElement("div");
+        grid.className = "mooncloud-charts";
+
+        // The four the server aggregates. Country is included even though a device never reports
+        // it (the edge derives it from the connection): withholding it here while serving it to
+        // anyone who calls /api/stats would be a distinction without a difference, and a
+        // country-level count is the same coarse figure every comparable dashboard shows.
+        // Each chart names the query parameter its slices filter by, so clicking one re-counts
+        // every other chart within it. `Build` maps to `dev`, whose values are 0 and 1 rather than
+        // the labels shown.
+        // The list names a KEY, not a value: reading `stats.versions` here dereferenced a null
+        // answer while the array was built, which threw before any per-chart guard could run and
+        // took the whole card down with it.
+        for (const [label, key, param] of [["Version", "versions", "version"],
+                                           ["Chip", "chips", "chip"],
+                                           ["Board", "deviceModels", "deviceModel"],
+                                           ["Flash", "flash", "flash"],
+                                           ["PSRAM", "psram", "psram"],
+                                           ["SDK", "sdk", "sdk"],
+                                           ["Install or upgrade", "events", "event"],
+                                           ["Upgraded from", "previousVersions", "previousVersion"],
+                                           ["Drivers", "drivers", "driver"],
+                                           ["Services", "services", "service"],
+                                           ["Layouts", "layouts", "layout"],
+                                           ["Effects", "effects", "effect"],
+                                           ["Modifiers", "modifiers", "modifier"],
+                                           ["Lights", "lightCounts", "lightCount"],
+                                           ["Free memory", "freeMemory", "freeHeap"],
+                                           ["Total memory", "totalMemory", "totalHeap"],
+                                           ["Build", "builds", "dev"],
+                                           ["Country", "countries", "country"]]) {
+            // No stats: the heading over an empty circle, so the card shows what consent unlocks
+            // without naming a single value somebody else reported.
+            const shown = stats ? moonCloudTopSlices(stats[key]) : [];
+            if (stats && !shown.length) continue;
+            const chart = document.createElement("div");
+            chart.className = "mooncloud-chart";
+            const heading = document.createElement("div");
+            heading.className = "mooncloud-chart-title";
+            heading.textContent = label;
+            // A bucketed slice carries `min`/`max` rather than a value the column could equal, so
+            // it filters by BOUNDS: the label is a range, the column holds the raw number.
+            const bounded = shown.some(r => r.min !== undefined);
+            const pick = (name) => {
+                if (bounded) {
+                    const row = shown.find(r => r.name === name);
+                    if (!row) return;
+                    delete moonCloudFilter[`${param}Min`];
+                    delete moonCloudFilter[`${param}Max`];
+                    delete moonCloudFilter[`${param}Label`];
+                    if (row.min !== undefined) moonCloudFilter[`${param}Min`] = String(row.min);
+                    if (row.max !== undefined) moonCloudFilter[`${param}Max`] = String(row.max);
+                    moonCloudFilter[`${param}Label`] = name;   // what the reader actually clicked
+                } else {
+                    moonCloudFilter[param] = param === "dev"
+                        ? (name === "development" ? "1" : "0")
+                        : name;
+                }
+                load();
+            };
+            chart.append(heading, moonCloudPie(shown, pick), moonCloudLegend(shown, pick));
+            grid.appendChild(chart);
+        }
+        section.appendChild(grid);
+    };
+
+    // Cached per filter for the session: these numbers move on the scale of days, a card rebuild
+    // happens on every unrelated state push, and clicking back to a filter already read is free.
+    const load = () => {
+        // Without consent NOTHING is fetched: the headings are a constant in this file, so the card
+        // draws its own shape. A request would carry no identifier and still be a call to our server
+        // from a device whose owner said no.
+        if (!consented(mod)) { draw(null, true); return; }
+        // `*Label` is what the filter bar shows, not something the server knows: the bounds are the
+        // filter, and sending a label would be an unknown parameter.
+        const sent = Object.fromEntries(
+            Object.entries(moonCloudFilter).filter(([k]) => !k.endsWith("Label")));
+        const query = new URLSearchParams(sent).toString();
+        if (moonCloudStatsCache.has(query)) { draw(moonCloudStatsCache.get(query), true); return; }
+        const generation = moonCloudGeneration;
+        fetch(kMoonCloudUrl + "/api/stats" + (query ? `?${query}` : ""), { cache: "no-store" })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(stats => {
+                if (generation !== moonCloudGeneration) return;   // a newer write superseded this
+                moonCloudStatsCache.set(query, stats);
+                draw(stats, true);
+            })
+            // Not cached: a failure is a fact about right now, so the next card build retries.
+            .catch(() => draw(null, false));
+    };
+    load();
+}
+
+// MoonTalk: the public board, read straight onto the card that posts to it.
+//
+// Reading sends no identifier: no id, no name, nothing about this device. It still happens only
+// while consent is on, because a request from a device whose owner said no is still a request to
+// our server.
+//
+// Polled on card build rather than streamed. A chat wants to feel live, but a device UI rebuilds
+// this card on every unrelated state push, so a socket per card would be a connection per render.
+// The refresh button is the honest version until MoonCloud Sync brings a real transport.
+function renderMoonTalk(host, mod) {
+    const section = document.createElement("div");
+    section.className = "moontalk";
+    host.appendChild(section);
+
+    const header = document.createElement("div");
+    header.className = "moontalk-header";
+    const title = document.createElement("span");
+    title.textContent = "Messages";
+    header.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "moontalk-list";
+    section.append(header, list);
+
+    // `reached` says whether the server answered at all. An unreachable server and an empty board
+    // are different facts and lead to different actions (check the network, versus wait for
+    // someone to post), so they must not render as the same nothing.
+    const draw = (messages, reached = true, asked = true) => {
+        list.textContent = "";
+        if (!reached) {
+            const failed = document.createElement("div");
+            failed.className = "moontalk-empty moontalk-unreachable";
+            failed.textContent = "Cannot reach the MoonCloud server.";
+            list.appendChild(failed);
+            return;
+        }
+        if (!messages || !messages.length) {
+            const empty = document.createElement("div");
+            empty.className = "moontalk-empty";
+            // "No messages yet." is a claim about the board. Without consent it was never read, so
+            // the card says what is true instead: nothing was asked.
+            empty.textContent = asked ? "No messages yet."
+                                      : "Turn on consent to read the board.";
+            list.appendChild(empty);
+            return;
+        }
+        // Oldest at the top, like every chat: the API returns newest first for paging.
+        for (const m of messages.slice().reverse()) {
+            const row = document.createElement("div");
+            row.className = "moontalk-message";
+
+            const who = document.createElement("span");
+            // `named` says whether the sender consented to share a device name. Without it the
+            // server sends the first 8 characters of the installation id, shown in a monospace
+            // face so it reads as an identifier rather than as somebody's name.
+            who.className = m.named ? "moontalk-from" : "moontalk-from moontalk-from-id";
+            who.textContent = m.from;
+            // A named sender keeps its id in brackets: a device name is whatever someone typed, so
+            // two devices can share one, and the id is what tells them apart.
+            if (m.named && m.senderId) {
+                const id = document.createElement("span");
+                id.className = "moontalk-from-id";
+                id.textContent = `(${m.senderId})`;
+                who.appendChild(document.createTextNode(" "));
+                who.appendChild(id);
+            }
+
+            const text = document.createElement("span");
+            text.className = "moontalk-text";
+            text.textContent = m.text;   // textContent, never innerHTML: this is a stranger's text
+
+            const when = document.createElement("span");
+            when.className = "moontalk-when";
+            when.textContent = new Date(m.sentAt).toLocaleTimeString([], {
+                hour: "2-digit", minute: "2-digit",
+            });
+            when.title = new Date(m.sentAt).toLocaleString();
+
+            row.append(who, text, when);
+            list.appendChild(row);
+        }
+        // Oldest first means the newest is at the BOTTOM of a scrolling box, so a refresh that did
+        // not scroll left the message someone just sent out of sight.
+        list.scrollTop = list.scrollHeight;
+    };
+
+    // A card is rebuilt on every unrelated state push, so a fetch per build is a request storm
+    // against a device serving its own UI. Cached for the session like the stats are, and the
+    // refresh button forces a re-read: `force` is what tells the two apart.
+    const load = (force) => {
+        // Same rule as Stats: without consent the board is not fetched at all. The cache is CLEARED
+        // rather than left holding the empty draw, because a cached `[]` from an unconsented card is
+        // not an answer: consenting rebuilt the card, the cache hit below returned that empty array,
+        // and the board stayed blank until a manual refresh.
+        if (!consented(mod)) { moonTalkCache = null; draw([], true, false); return; }
+        if (!force && moonTalkCache) { draw(moonTalkCache, true); return; }
+        const generation = moonCloudGeneration;
+        fetch(kMoonCloudUrl + "/api/talk", { cache: "no-store" })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(d => {
+                if (generation !== moonCloudGeneration) return;   // a newer write superseded this
+                moonTalkCache = d?.messages ?? [];
+                draw(moonTalkCache, true);
+            })
+            // Not cached: a failure is a fact about right now, so the next build retries.
+            .catch(() => draw(null, false));
+    };
+    // Created AFTER `load`, which is a const arrow: a listener attached above its declaration
+    // throws on click rather than hoisting. Only with consent, since without it nothing is fetched
+    // and a button that does nothing is worse than none.
+    if (consented(mod)) {
+        const refresh = document.createElement("button");
+        refresh.className = "mooncloud-refresh";
+        refresh.textContent = "\u21bb";
+        refresh.title = "Refresh";
+        refresh.addEventListener("click", () => load(true));
+        header.appendChild(refresh);
+    }
+
+    load(false);
+}
+
 function renderFileManager(mod, host) {
     const ctrl = (n) => (mod.controls || []).find(c => c.name === n);
     const st = fmState(mod);
