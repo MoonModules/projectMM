@@ -6,29 +6,46 @@ Covers the projectMM software (firmware, desktop application and the web interfa
 
 ## The rule
 
-**projectMM sends nothing to us unless you switch it on.** Every feature that transmits anything is opt-in, off by default, and asks in plain words before its first transmission. Declining is one click, is remembered, and sends nothing at all: not even a record that you declined.
+**projectMM sends nothing to us unless you switch it on.** Every feature that transmits anything is opt-in, off by default, and asks in plain words before its first transmission. Declining is one click, is remembered, and sends nothing at all: not even a record that you declined. Some things do reach the internet without you switching anything on, and they are listed below: they go to GitHub, never to a server of ours.
 
 Everything else stays on the machine you run it on: your layouts, effects, drivers, pin assignments, device name, and any credentials you entered. `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, `$XDG_DATA_HOME/projectMM` on Linux, the device's own flash on a board. Nothing there is uploaded, synchronized or backed up by us.
 
-## What we never collect
-
 Whatever you switch on, projectMM does not transmit **your name, email or postal address, your Wi-Fi or MQTT credentials, your IP or MAC address, or the contents of files you made**.
+
+## What reaches the internet without you switching anything on
+
+Four things, each either something you asked for or something your browser does, and none of them reach a server of ours:
+
+- **The update check**: your browser asks GitHub's public release API whether a newer version exists.
+- **Downloading a MoonLive script**: your browser fetches it from `raw.githubusercontent.com`.
+- **A firmware update**: your device downloads it from GitHub, when you start one.
+- **The web installer**: served by GitHub Pages; flashing happens over USB, directly between your browser and the board.
+
+These go to GitHub under [its privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). This documentation site and the release downloads are hosted by GitHub too, which receives the requests your browser makes, including your IP address. We add no analytics, no cookies of our own and no tracking.
+
+## Your browser's local storage
+
+The web interface stores a few conveniences in your browser: a cached update-check result, the release you last selected. This never leaves your browser and holds nothing personal.
 
 ## What you can switch on
 
-Each of these is a separate choice with its own setting. Turning one on says nothing about the others.
+Everything here is off until you turn it on, and each thing is a separate choice with its own setting: turning one on says nothing about the others, and one is never turned on by another.
 
-### MoonCloud Stats
+**The device tells you what it will exchange, where you switch it on.** Each setting says on the card what it sends, and where that is a set of figures the card shows them, drawn empty until you agree. That is deliberate: the disclosure sits with the decision, on a device you own, rather than in a document you would have to come back and re-read.
 
-One report when the firmware is installed or upgraded, describing hardware and configuration: chip family, flash and PSRAM size, total and free memory, SDK version, board model, how many lights are driven, which drivers, services, layouts and effects you added, whether this is an install or an upgrade, the version running and the one it replaced, and whether the firmware was built locally rather than released. Plus an installation id (below) and a country derived from the connection.
+Whatever the feature, now or later, these rules hold.
 
-The report carries no device name, no addresses, no credentials and no text you typed. A unit test asserts those cannot appear in it.
+**Nothing is transmitted, and nothing is received, until you switch it on.** No identifier leaves the device and no request is made to a server we run, so nothing comes back either.
 
-### MoonCloud Talk
+**It exchanges facts about the device, never about you.** What it runs on, what you configured it to do, and what you deliberately publish.
 
-A public message board between devices. Messages you send are readable by anyone, permanently, and cannot be withdrawn. Sharing your device name alongside them is a **separate setting, off by default**; without it your messages show the first 8 characters of your installation id.
+**These never leave your network, whatever is switched on**: the passwords and keys you entered (WiFi, MQTT, any service you connected), the addresses of things on your own network, and the contents of files on the device.
 
-Reading the board transmits nothing about your device.
+**You can turn it off again at any time.** Nothing further is sent, and what was already published stays published: a message on a public board cannot be recalled, and a report already counted cannot be withdrawn. So the honest advice is the simple one: leave it off if you are unsure, turn it on when you want to take part, and turn it off if you change your mind.
+
+**MoonCloud** is the name for anything projectMM does with a server we run, and it is one self-contained part of the software rather than something woven through it. It sits on its own card, its members are the only code that talks to a server of ours, and nothing else in projectMM goes through it. So this is not a promise about scattered behavior you would have to take on trust: it is one place, and you can switch off what is in it.
+
+Each member is a separate setting on that card, off by default, and each says on the card what it exchanges. Members are added over time; the rules above apply to every one of them, including any added after you read this.
 
 ## The installation id
 
@@ -47,22 +64,7 @@ What follows from it being stable:
 
 ## The IP address
 
-Any server receiving a request sees the address it came from. Ours derives a country from it at the network edge and **never writes the address to storage**. What is stored is a country name beside a chip family and a version number.
-
-## What reaches the internet without you switching anything on
-
-Four things, each either something you asked for or something your browser does, and none of them reach a server of ours:
-
-- **The update check**: your browser asks GitHub's public release API whether a newer version exists.
-- **Downloading a MoonLive script**: your browser fetches it from `raw.githubusercontent.com`.
-- **A firmware update**: your device downloads it from GitHub, when you start one.
-- **The web installer**: served by GitHub Pages; flashing happens over USB, directly between your browser and the board.
-
-These go to GitHub under [its privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). This documentation site and the release downloads are hosted by GitHub too, which receives the requests your browser makes, including your IP address. We add no analytics, no cookies of our own and no tracking.
-
-## Your browser's local storage
-
-The web interface stores a few conveniences in your browser: a cached update-check result, the release you last selected. This never leaves your browser and holds nothing personal.
+Any server receiving a request sees the address it came from. Ours derives a country from it at the network edge and **never writes the address to storage**. What is stored is a country, never an address: beside the figures a report contributes, or beside the text of a message and the time it was sent.
 
 ## Systems you connect projectMM to
 

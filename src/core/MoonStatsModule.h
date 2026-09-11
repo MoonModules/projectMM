@@ -62,7 +62,8 @@ inline bool readControl(const MoonModule* mod, const char* name, JsonSink& out) 
     return false;
 }
 
-/// Find a module by name anywhere in the tree, depth first.
+/// Find a module by name among the roots and their direct children, which is as deep as the one
+/// caller needs (the top-level `System`).
 inline const MoonModule* findModule(MoonModule* const* root, uint8_t count, const char* name) {
     for (uint8_t i = 0; i < count; i++) {
         const MoonModule* m = root[i];
@@ -99,12 +100,6 @@ inline void field(JsonSink& sink, const MoonModule* mod, const char* control, co
 /// separately: one list in one column, four charts out of it. `ModuleRole` already exists on every
 /// module, so nothing new is invented and nothing a user typed is sent: both halves come from the
 /// catalog's fixed vocabulary.
-///
-/// Wired-by-code modules are the boot tree every device shares, so they are skipped: counting them
-/// made every slice read "N of N devices", which says only that they all booted. Their CHILDREN are
-/// still walked, because a user's effect hangs under the Effects module main.cpp wired. The two
-/// filters agree in practice: a wired container is `generic`, and what hangs under it carries a
-/// real role.
 inline void reportModules(JsonSink& sink, const MoonModule* const* mods, uint8_t count,
                           bool& first) {
     for (uint8_t i = 0; i < count; i++) {
@@ -139,7 +134,8 @@ inline void buildMoonStatsReport(JsonSink& sink,
                           const char* installationId,
                           const char* version,
                           const char* previousVersion,
-                          uint32_t lightCount = 0) {
+                          uint32_t lightCount = 0,
+                          uint32_t totalHeap = 0, uint32_t freeHeap = 0) {
     const MoonModule* system = findModule(root, moduleCount, "System");
 
     sink.append("{");
@@ -176,9 +172,11 @@ inline void buildMoonStatsReport(JsonSink& sink,
     // Memory and light count as RAW numbers, bucketed into ranges by the server. Bucketing here
     // would freeze every stored row at today's boundaries: a range that turns out wrong could never
     // be re-cut, which is the same trap as a field that was never collected.
+    // Passed in, not read here: the builder is a pure function over its arguments everywhere else,
+    // and reading the platform mid-serialize would make these two fields untestable.
     sink.appendf(",\"totalHeap\":%u,\"freeHeap\":%u,\"lightCount\":%u",
-                 static_cast<unsigned>(platform::totalHeap()),
-                 static_cast<unsigned>(platform::freeHeap()),
+                 static_cast<unsigned>(totalHeap),
+                 static_cast<unsigned>(freeHeap),
                  static_cast<unsigned>(lightCount));
 
     // Facts about the board, not the person. `deviceName` and `mac` sit in the same control list
@@ -189,16 +187,8 @@ inline void buildMoonStatsReport(JsonSink& sink,
     field(sink, system, "sdk", "sdk", first);
     field(sink, system, "deviceModel", "deviceModel", first);
 
-    // What the user CHOSE to run, by name: a fixed vocabulary from the catalog, never anything a
-    // user typed.
-    //
-    // Modules wired by main.cpp are skipped. Every device has them, so counting them said only
-    // "these two devices both booted": every slice read 2 of 2, and the interesting modules were
-    // buried in an `other` bucket. What varies between installations is what someone ADDED, and
-    // `isWiredByCode()` is exactly that line, drawn where the knowledge lives.
-    //
-    // Children are walked, because a user's additions hang off a parent (an effect under Effects, a
-    // driver under Drivers) while the boot wiring is what sits at the top.
+    // What the user CHOSE to run, by name and role: see reportModules for which modules count and
+    // why. A fixed vocabulary from the catalog, never anything a user typed.
     sink.append(",\"modules\":[");
     bool firstModule = true;
     reportModules(sink, root, moduleCount, firstModule);
@@ -213,13 +203,27 @@ class MoonStatsModule : public MoonModule {
 public:
     void setup() override {
         std::snprintf(runningVersion_, sizeof(runningVersion_), "%s", kVersion);
+        refreshStatus();
         MoonModule::setup();
+    }
+
+    /// What this setting exchanges, on the module's own status slot rather than a control of its
+    /// own: the standard place for a line of explanation. The privacy policy points here rather than
+    /// carrying a list that dates the moment a field changes, and the charts are the detail, so the
+    /// line names them instead of repeating them.
+    void refreshStatus() {
+        if (consent_) clearStatus();
+        else setStatus("Off. Switch on to share what hardware you run, once per install or upgrade: "
+                       "the empty charts below are exactly what it contributes to, and what you get "
+                       "back. No device name, no addresses, no credentials.");
+    }
+
+    void onControlChanged(const char* name) override {
+        if (name && std::strcmp(name, "consent") == 0) refreshStatus();
     }
 
     void defineControls() override {
         controls_.clear();
-        // A select rather than a bool: collapsing "not now" and "never" would either nag someone
-        // who declined or silence someone who only deferred.
         // A checkbox, not a four-option select: "not now" and "never" both mean nothing is sent,
         // and telling them apart cost a persisted version and a branch in setup() to express a
         // distinction nobody asked for.
@@ -276,7 +280,7 @@ public:
     }
 
     /// Record the user's answer, the same way a control write does.
-    void setConsent(bool yes) { consent_ = yes; markDirty(); }
+    void setConsent(bool yes) { consent_ = yes; markDirty(); refreshStatus(); }
 
     bool consent() const { return consent_; }
 
@@ -301,6 +305,10 @@ public:
     void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
         if (!reportDue()) return;
+        // A build without an HTTPS client can never send, so there is nothing to hand off and
+        // nothing to mark. Distinct from a failed attempt: retrying costs nothing when no request is
+        // ever made, where re-sending after network loss would turn one report into a heartbeat.
+        if (!platform::httpsAvailable()) return;
         if (!platform::networkReady()) return;   // nothing to do yet; try again next second
         // Serving our own AP means no route out, so a send would fail and mark itself reported.
         if (inApMode()) return;
@@ -333,7 +341,9 @@ private:
         const LightSummary* lights = Drivers::latestSummary();
         buildMoonStatsReport(body, tree, count,
                              dueEvent(), id, runningVersion_, previousVersion(),
-                             lights ? lights->lightCount : 0);
+                             lights ? lights->lightCount : 0,
+                             static_cast<uint32_t>(platform::totalHeap()),
+                             static_cast<uint32_t>(platform::freeHeap()));
 
         // Sent through the container, which owns the address. The response is discarded.
         if (auto* cloud = static_cast<const MoonCloudModule*>(parent())) {

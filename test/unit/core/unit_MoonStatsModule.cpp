@@ -27,27 +27,10 @@ TEST_CASE("a report is due only after the user consents") {
     stats.setConsent(false);
     CHECK_FALSE(stats.reportDue());
 
-    stats.setConsent(false);
-    CHECK_FALSE(stats.reportDue());
-
     stats.setConsent(true);
     CHECK(stats.reportDue());
 }
 
-/// The prompt appears once and stops as soon as the question is answered, whichever way.
-///
-/// The UI asks on `consent == Unanswered` and nothing else (app.js), so that state IS the prompt:
-/// an earlier helper duplicated that rule in C++ where nothing called it.
-TEST_CASE("the prompt appears only while the question is unanswered") {
-    mm::MoonStatsModule stats;
-    stats.setup();
-    stats.defineControls();
-
-    CHECK_FALSE(stats.consent());
-
-    stats.setConsent(true);
-    CHECK(stats.consent());
-}
 
 /// A device serving its own access point sends nothing.
 ///
@@ -185,20 +168,36 @@ TEST_CASE("an upgrade sends one report, and the boot after it sends none") {
 /// in setup(). What remains is the contract that matters: off sends nothing, and a firmware change
 /// does not quietly turn it back on.
 TEST_CASE("declining survives a reboot and an upgrade") {
+    // A REAL round trip through the control: calling setup() again reloads nothing, so a case that
+    // reused one instance could only have failed if setup() itself flipped the bool. The value has
+    // to travel the way a config load moves it, or the case proves nothing about a reboot.
     mm::MoonStatsModule declined;
     declined.setup();
     declined.defineControls();
+    declined.setConsent(true);              // on first, so `false` is a WITHDRAWAL, not a default
     declined.setConsent(false);
     CHECK_FALSE(declined.reportDue());
 
-    declined.setup();                       // a reboot
-    CHECK_FALSE(declined.consent());
-    CHECK_FALSE(declined.reportDue());
+    const mm::ControlList& ctrls = declined.controls();
+    uint8_t idx = ctrls.count();
+    for (uint8_t i = 0; i < ctrls.count(); i++)
+        if (ctrls[i].name && std::strcmp(ctrls[i].name, "consent") == 0) idx = i;
+    REQUIRE(idx < ctrls.count());
+    REQUIRE(mm::isPersistable(ctrls[idx]));
 
-    declined.setRunningVersionForTest("9.9.9");   // and an upgrade under it
-    declined.setup();
-    CHECK_FALSE(declined.consent());
-    CHECK_FALSE(declined.reportDue());
+    mm::MoonStatsModule rebooted;
+    rebooted.defineControls();
+    REQUIRE(mm::applyControlValue(rebooted.controls()[idx], "{\"consent\":false}", "consent",
+                                  mm::ApplyPolicy::Clamp) == mm::ApplyResult::Ok);
+    rebooted.setup();
+    CHECK_FALSE(rebooted.consent());
+    CHECK_FALSE(rebooted.reportDue());
+
+    // And an upgrade under it does not reopen the question.
+    rebooted.setRunningVersionForTest("9.9.9");
+    rebooted.setup();
+    CHECK_FALSE(rebooted.consent());
+    CHECK_FALSE(rebooted.reportDue());
 }
 
 /// Consent withdrawn after reporting stops the next one.
@@ -314,4 +313,26 @@ TEST_CASE("a report schedules the save that records it") {
 
     mm::platform::fsSetRoot("");
     std::filesystem::remove_all(tmpRoot);
+}
+
+
+/// The explanation lives on the module's status slot, and follows the answer.
+///
+/// The privacy policy states rules and points at the device for the detail, so this line is the
+/// disclosure: it must be there while the setting is off, and gone once it is on. An earlier shape
+/// hand-rolled an element in the UI, which put the text somewhere the module could not keep true.
+TEST_CASE("the consent explanation is a status that follows the answer") {
+    mm::MoonStatsModule stats;
+    stats.setup();
+    stats.defineControls();
+
+    REQUIRE_FALSE(stats.consent());
+    REQUIRE(stats.status() != nullptr);
+    CHECK(std::string(stats.status()).find("Switch on") != std::string::npos);
+
+    stats.setConsent(true);
+    CHECK(stats.status() == nullptr);      // answered: nothing left to explain
+
+    stats.setConsent(false);
+    REQUIRE(stats.status() != nullptr);    // and it comes back if they change their mind
 }

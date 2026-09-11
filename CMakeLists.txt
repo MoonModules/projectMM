@@ -189,6 +189,14 @@ if(CURL_FOUND)
     message(STATUS "libcurl ${CURL_VERSION_STRING}: MoonCloud reporting enabled")
     target_compile_definitions(mm_platform PRIVATE MM_HAVE_CURL)
     target_link_libraries(mm_platform PUBLIC CURL::libcurl)
+elseif(DEFINED ENV{MM_RELEASE})
+    # A RELEASE build is the one case where absent is not acceptable: the binary would ask for
+    # consent and then be structurally unable to honor it, and nobody would find out. Optional
+    # stays optional for a contributor's machine; a published artifact must be able to report.
+    message(FATAL_ERROR
+        "libcurl not found, and MM_RELEASE is set. A released build with reporting compiled out "
+        "asks for consent it can never honor. Install libcurl (Windows: vcpkg install curl) or "
+        "unset MM_RELEASE for a local build.")
 else()
     message(STATUS "libcurl not found: MoonCloud reporting disabled (install libcurl to enable)")
 endif()
@@ -265,7 +273,7 @@ if(WIN32)
     add_custom_command(
         OUTPUT "${MM_ICON}"
         # `uv run <script>` rather than the usual `uv run python <script>`: make_ico.py declares
-        # Pillow inline (PEP 723), and only the script form makes uv honour that declaration.
+        # Pillow inline (PEP 723), and only the script form makes uv honor that declaration.
         COMMAND ${UV_EXECUTABLE} run "${CMAKE_SOURCE_DIR}/moondeck/ci/make_ico.py"
                 "${CMAKE_SOURCE_DIR}/mooninstaller/favicon.png" "${MM_ICON}"
         DEPENDS "${CMAKE_SOURCE_DIR}/mooninstaller/favicon.png"

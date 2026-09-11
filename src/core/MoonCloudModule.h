@@ -36,12 +36,7 @@ public:
         return platform::httpsPost(url, body, kTimeoutMs);
     }
 
-    void defineControls() override {
-        controls_.clear();
-        // Chain FIRST so children register before this module's own controls. Without it a child of
-        // a container shows an empty card.
-        MoonModule::defineControls();
-    }
+
 
 private:
     // Compiled in rather than configurable: a device that can be pointed elsewhere can be pointed

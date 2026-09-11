@@ -538,6 +538,14 @@ const char* chipModel() {
 #endif
 }
 
+bool httpsAvailable() MM_NONBLOCKING {
+#ifdef MM_HAVE_CURL
+    return true;
+#else
+    return false;   // built without libcurl: httpsPost can never succeed
+#endif
+}
+
 bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
 #ifdef MM_HAVE_CURL
     if (!url || !*url) return false;

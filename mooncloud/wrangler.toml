@@ -6,9 +6,9 @@ compatibility_date = "2026-09-01"
 # before the Custom Domain existed compiled it in. Both addresses serve the same Worker.
 workers_dev = true
 
-# EU only. The rows hold no address and no precise time, so this is belt and braces rather than the
-# thing that makes the feature lawful, but the data of European users staying in Europe is worth
-# the one line it costs.
+# Runs the Worker near its backend rather than near the caller, which for a request that always
+# touches D1 is the shorter path. NOT a jurisdiction control: the data staying in Europe comes from
+# the database's region (WEUR), not from this.
 [placement]
 mode = "smart"
 

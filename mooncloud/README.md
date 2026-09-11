@@ -33,7 +33,9 @@ uv run moondeck/run/run_mooncloud.py --seed     # --seed only the first time
 
 `wrangler dev` runs `worker.js` in workerd, the runtime Cloudflare uses, against a local D1 under `.wrangler/`. What you verify here is what deploys. It binds `0.0.0.0` because wrangler's default answers only the machine itself and refuses every board on the network.
 
-To point a device at it, change `kHost` in `src/core/MoonCloudModule.h` and `kMoonCloudUrl` in `src/ui/app.js` and rebuild. The address is compiled in rather than configurable, so one MoonCloud cannot be mistyped into another, and the two must change together: a device reporting to one address while the card reads another shows a user their own report missing. A device needs the machine's LAN address as a dotted quad, not `127.0.0.1` (which on a board means the board) and not a hostname (the plain-HTTP path does no name resolution).
+**A device cannot be pointed at this.** `MoonCloudModule::post` formats `https://` unconditionally, and `wrangler dev` serves plain HTTP, so changing `kHost` and rebuilding produces a TLS handshake against an HTTP port. Reporting is verified against the deployed Worker instead, which is what the firmware talks to anyway.
+
+The BROWSER half can be pointed here: change `kMoonCloudUrl` in `src/ui/app.js` and rebuild, and the card reads its aggregates from the local server while the device keeps reporting to the real one.
 
 ## Deploying
 
@@ -49,10 +51,13 @@ npx wrangler deploy
 **The firmware talks to the `workers.dev` address, and only that one.** A Custom Domain is optional, for people who want to read the aggregates without the app:
 
 ```toml
+# Top level, BEFORE any table header: declaring a route disables workers.dev by default, and that is
+# the address the firmware compiles in. Inside [[routes]] this would be a key of the route instead.
+workers_dev = true
+
 [[routes]]
 pattern = "stats.example.org"
 custom_domain = true
-workers_dev = true   # declaring ANY route disables workers.dev, which the firmware compiles in
 ```
 
 **Do not point the firmware at a Custom Domain without checking the issuer.** Cloudflare picks the CA, and the one it picked was absent from IDF's default `esp_crt_bundle`: every ESP32 handshake failed with "No matching trusted root certificate found" while desktop's system trust store accepted it, so devices went silent with nothing on screen to say why. The `workers.dev` certificate is one the bundle carries. Enabling `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL` would cover any issuer, at roughly 30 KB of flash on a board already at 81% of its app slot.

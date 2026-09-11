@@ -78,7 +78,9 @@ void sha256(const void* data, size_t len, uint8_t out[kSha256DigestSize]) {
     // Padding: the 0x80 terminator, zeroes, then the length in BITS as a big-endian 64-bit value.
     // Two blocks when the tail plus the terminator leaves no room for that length (FIPS 180-4 §5.1.1).
     uint8_t tail[128] = {};
-    std::memcpy(tail, p, remaining);
+    // Guarded: memcpy's src is `nonnull` even for a zero length, so sha256(nullptr, 0) is UB by the
+    // letter of the standard and UBSan reports it. Hashing nothing is a legal thing to ask for.
+    if (remaining) std::memcpy(tail, p, remaining);
     tail[remaining] = 0x80;
     const size_t tailLen = (remaining >= 56) ? 128 : 64;
 

@@ -748,6 +748,10 @@ bool moonbaseStageInstallUrl(const char* url) {
 }
 
 
+bool httpsAvailable() MM_NONBLOCKING {
+    return true;   // the TLS stack is linked for OTA, so an ESP32 build can always try
+}
+
 bool httpsPost(const char* url, const char* body, uint32_t timeoutMs) {
     if (!url || !*url) return false;
 

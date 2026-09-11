@@ -26,7 +26,7 @@ A public message board between devices, in the shape Meshtastic's channel chat h
 
 Two consents: `consent` allows posting, and `shareName` (off by default) allows the device name to ride along. A device name is the one field here that identifies a person rather than a machine, so sharing it is its own decision. Without it a message shows the first 8 characters of the installation id, which groups one device's messages while leaving the sender unnamed.
 
-Reading the board needs no consent and sends nothing: it is public, and refusing to publish still leaves you able to read.
+Reading sends no identifier, and happens only while consent is on: a device whose owner said no makes no request to our server at all.
 
 ### Sync
 
@@ -62,7 +62,7 @@ The first member, and the one that proves the plumbing every later one uses.
 
 ### 1. The report builder, as a pure function (DONE)
 
-`src/core/MoonStatsReport.h`: one function from the live module tree to a JSON string, with no network, consent or persistence involved. It reads what is already in memory: `chip`, `flash`, `psramType`, `sdk` and `deviceModel` from SystemModule, `version` from FirmwareUpdateModule, and the enabled module names from the tree.
+`buildMoonStatsReport` in `src/core/MoonStatsModule.h`: one function from the live module tree to a JSON string, with no network, consent or persistence involved. It reads what is already in memory: `chip`, `flash`, `psramType`, `sdk` and `deviceModel` from SystemModule, `version` from FirmwareUpdateModule, and the modules a user ADDED, each tagged by its role, from the tree.
 
 **Fields are named one at a time and copied by name**, which is the design rather than an implementation detail: `deviceName`, `mac`, `ssid` and `password` are live controls sitting beside `chip` and `flash`, so a builder that emitted what it found would leak on its first run.
 
@@ -70,7 +70,7 @@ The first member, and the one that proves the plumbing every later one uses.
 
 ### 2. The installation id (DONE)
 
-`src/core/sha256.{h,cpp}` plus `src/core/InstallationId.{h,cpp}`, implementing the scheme above.
+`src/core/sha256.{h,cpp}` plus `installationId()` in `src/core/MoonCloudModule.h`, implementing the scheme above.
 
 **SHA-256 is vendored, about 150 lines.** ESP-IDF ships mbedtls and the desktop would link something else, so a library means two implementations of one function that must agree byte for byte, where a divergence produces ids that silently differ between platforms. One file is the smaller thing to own, the algorithm is frozen, and `unit_sha256.cpp` pins it against the published FIPS 180-4 vectors (verified independently against Python's `hashlib` before being trusted), including the 55/56/64-byte cases where padding bugs hide.
 
@@ -78,13 +78,13 @@ The id is gated on consent: `Never` yields an empty string, so a user who declin
 
 ### 3. Consent, and the one-time trigger (DONE)
 
-`src/core/MoonStatsModule.h`: `consent` (Not answered / Yes / Not now / Never) and `reportedVersion`, both persisted like any other control. `reportDue()` is true when consent is Yes and the running version differs from the recorded one, so a reboot sends nothing and an upgrade sends exactly one report. Not-now is a deferral, so a busy user is asked again after the next upgrade.
+`src/core/MoonStatsModule.h`: `consent` (a checkbox, off by default) and `reportedVersion`, both persisted like any other control. `reportDue()` is true when consent is on and the running version differs from the recorded one, so a reboot sends nothing and an upgrade sends exactly one report.
 
 Install and upgrade are told apart by `reportedVersion` alone: empty means this install has never reported. **Control-checked by sabotage**: removing the consent gate fails the test.
 
 `MoonCloudModule` is the container, with Stats and Talk as children, and both are marked `markWiredByCode()` so the tree comes from the code rather than from whatever the config file last recorded.
 
-**Still to build here**: the first-boot prompt, and `setApMode()`. That last one is how NetworkModule tells Stats the device is serving its own access point, so the prompt waits until the device is on a real network and the user is past provisioning. It is defined and unused today.
+The card explains what consent buys above the checkbox, and `inApMode()` asks the platform directly rather than having NetworkModule push the fact in: a copy nothing updates is worse than no copy.
 
 ### 4. The send (DONE)
 
@@ -144,6 +144,6 @@ The address is compiled in (`kHost` in `MoonCloudModule.h`, `kMoonCloudUrl` in `
 
 **ewowi owns the Cloudflare account** (settled 2026-09-10). That was the last open question and the one that kept this feature in the backlog: the code was never the blocker, a person willing to hold the account was. Stats and Talk run on Workers plus D1, both free tier; Sync would need Durable Objects, which are paid, so it is also the point where MoonCloud starts costing money.
 
-What ownership means in practice: the login that deploys, the address that gets the alerts, and the person who notices when it breaks. [mooncloud/README.md](../../../mooncloud/README.md) is the sequence, and three of its steps need that account rather than any automation: `wrangler login`, the Cloudflare account itself, and the decision to flip the firmware default.
+What ownership means in practice: the login that deploys, the address that gets the alerts, and the person who notices when it breaks. [mooncloud/README.md](https://github.com/MoonModules/projectMM/blob/main/mooncloud/README.md) is the sequence, and three of its steps need that account rather than any automation: `wrangler login`, the Cloudflare account itself, and the decision to flip the firmware default.
 
 **The firmware default is the last step and the one with no recovery.** `MoonCloudModule.h` ships pointing at the `workers.dev` address. A Custom Domain was tried and reverted: Cloudflare issued its certificate from Google Trust Services, which is not in IDF's default root bundle, so every ESP32 handshake failed while desktop's system trust store accepted it. The address is compiled in and hidden, so a prettier one buys nothing a device can use. Changed before an address answers, every device in the wild sends one report into nothing and never retries, because a failed report is deliberately not queued.

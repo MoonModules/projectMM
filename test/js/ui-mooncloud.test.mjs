@@ -1,6 +1,6 @@
 // MoonCloud card contracts, pinned in the source the way ui-visibility does.
 //
-// Every MoonCloud bug found by hand tonight lived in app.js, not in the firmware: the C++ tests
+// Every MoonCloud bug found by hand lived in app.js, not in the firmware: the C++ tests
 // were right that the device posted the message and cleared its control, while the browser showed
 // stale text and a stale board. That is the class these pin.
 //
@@ -86,17 +86,6 @@ test("both MoonCloud fetches use one compiled-in address", () => {
     assert.ok(!app.includes("moonTalkUrl("), "the per-child resolver is gone");
 });
 
-test("consent is asked once, above the control, with no duplicate buttons", () => {
-    // The checkbox IS the choice, so a button row beside it renders the same decision twice and
-    // costs a block of the card to say nothing new.
-    const i = app.indexOf("function renderMoonCloudConsent(");
-    assert.ok(i > 0, "no consent renderer");
-    const fn = app.slice(i, app.indexOf("\n}", i) + 2);
-    assert.match(fn, /if \(!consent \|\| consent\.value\) return;/,
-                 "the explanation shows only while consent is off");
-    assert.ok(!fn.includes("mooncloud-consent-buttons"),
-              "no second set of consent buttons beside the checkbox");
-});
 
 test("a card that cannot reach MoonCloud says so", () => {
     // Found on the bench: a stale negative DNS entry made the host unresolvable to the browser
@@ -222,4 +211,16 @@ test("without consent the board says it was not read, not that it is empty", () 
     // triggers, the cache hit returned it, and the board stayed blank until a manual refresh.
     assert.match(fn, /if \(!consented\(mod\)\) \{ moonTalkCache = null;/,
                  "an empty draw from an unconsented card is not an answer to remember");
+});
+
+
+test("the consent explanation is a module status, not a bespoke UI block", () => {
+    // Every module already has a status slot and the card already renders it, so a hand-rolled
+    // element beside the checkbox was a second mechanism for a job the first one does. The text
+    // lives with the module that knows what it exchanges, which is also what the privacy policy
+    // points at instead of carrying a list.
+    assert.ok(!app.includes("renderMoonCloudConsent"),
+              "no bespoke consent renderer: the status row shows it");
+    assert.ok(!app.includes("mooncloud-consent"),
+              "and no bespoke element for it either");
 });

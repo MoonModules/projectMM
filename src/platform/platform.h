@@ -870,6 +870,11 @@ int httpRequest(const char* method, const char* host, uint16_t port, const char*
 // it off the render path.
 bool httpsPost(const char* url, const char* body, uint32_t timeoutMs);
 
+/// Whether this build can make an outbound HTTPS request at all. False only on a desktop build
+/// compiled without libcurl, where `httpsPost` always returns false: a structural inability rather
+/// than a failed attempt, which a caller must be able to tell apart from network loss.
+bool httpsAvailable() MM_NONBLOCKING;
+
 // Improv WiFi provisioning over UART0.
 // ESP32 only; desktop stub returns false. Spawns a FreeRTOS task that installs
 // a UART driver on UART_NUM_0 (the same channel ESP-IDF logging writes to;

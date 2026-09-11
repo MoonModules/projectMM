@@ -521,7 +521,7 @@ async function sendControl(moduleName, controlName, value) {
     const mod = (state && Array.isArray(state.modules))
         ? allModules().find(m => m.name === moduleName) : null;
     if (mod) {
-        const ctrl = mod && Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
+        const ctrl = Array.isArray(mod.controls) && mod.controls.find(c => c.name === controlName);
         if (ctrl) ctrl.value = value;
         // Siblings on the same target move with it. The device already does this (followTargets runs
         // on every surface write), but the browser would not see it until the next 1 Hz push, so a
@@ -554,20 +554,6 @@ async function sendControl(moduleName, controlName, value) {
         // switched. The routine WS push cannot carry it: renderCards is suppressed while the user
         // is interacting, and operating this select is exactly that.
         else if (moduleName === "Firmware" && controlName === "image") refetchState();
-        // MoonCloud: a write that changes what the SERVER holds, and the card shows the server.
-        //
-        // Only those writes: pressing `send` publishes a message, and answering `consent` with Yes
-        // sends a report. Typing in `message` or toggling `shareName` changes nothing on the server,
-        // so refreshing after them re-fetched the board to show exactly what it already showed.
-        //
-        // A message is sent INSIDE the write (MoonTalk::onControlChanged calls send()), so a 200
-        // means the board already has it and one refetch is right.
-        //
-        // A report is not: MoonStats sends from tick1s once networkReady(), up to a second or more
-        // after the consent write returns. So the consent branch retries, and the message branch
-        // does not. An earlier shape retried both three times, which re-fetched the board twice for
-        // nothing; a later one refetched both once, and a user who said Yes did not see their own
-        // install until they reloaded.
         // Three writes change what a MoonCloud card shows: pressing `send` publishes a message, and
         // either member's `consent` decides whether that member reads at all. Typing in `message` or
         // toggling `shareName` changes only the device, and re-reading after those showed exactly
@@ -3076,7 +3062,13 @@ function createControl(moduleName, moduleType, ctrl) {
             const btn = document.createElement("button");
             btn.className = "action-btn";
             btn.textContent = ctrl.label || ctrl.name;
-            btn.addEventListener("click", () => sendControl(moduleName, ctrl.name, 1));
+            // Flush any pending debounced text write first, then act. Typing is debounced 500 ms,
+            // so a click inside that window sent the button while the device still held the text as
+            // it stood one keystroke ago: the Enter path already does this, and the two must agree.
+            btn.addEventListener("click", async () => {
+                await flushPendingControlWrites(moduleName);
+                sendControl(moduleName, ctrl.name, 1);
+            });
             row.appendChild(btn);
             break;
         }
@@ -4235,6 +4227,26 @@ function relativeAge(sec) {
     if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
     if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
     return `${Math.floor(sec / 86400)}d ago`;
+}
+
+/// Send any text control of this module whose debounced write is still pending, and wait for it.
+///
+/// Typing is debounced, so anything that ACTS on the typed value (Enter, a send button) has to land
+/// the text first or it acts on what the device held a keystroke ago.
+async function flushPendingControlWrites(moduleName) {
+    const mod = allModules().find(m => m.name === moduleName);
+    for (const ctrl of mod?.controls || []) {
+        const key = moduleName + ":" + ctrl.name;
+        if (!dragTimers[key]) continue;
+        clearTimeout(dragTimers[key]);
+        delete dragTimers[key];
+        // queryByName, not a bare querySelector: a CSS attribute match is case-insensitive, so
+        // `data-mid="talk"` would resolve to a module named `Talk`. See queryByName for the bench
+        // case that found it.
+        const input = queryByName(
+            `input[data-key="${cssEscape(ctrl.name)}"]`, "data-mid", moduleName);
+        if (input) await sendControl(moduleName, ctrl.name, input.value);
+    }
 }
 
 function appendResetButton(row, moduleName, ctrl, def, applyVisually) {
@@ -6115,7 +6127,16 @@ function moonCloudPie(rows, onPick) {
         title.textContent = `${r.name}: ${r.count} (${Math.round((r.count / total) * 100)}%)`
             + (pickable ? ", click to filter" : "");
         path.appendChild(title);
-        if (pickable) path.addEventListener("click", () => onPick(r.name));
+        if (pickable) {
+            path.addEventListener("click", () => onPick(r.name));
+            // Reachable without a mouse, the same way a collapsible card header is: a filter nobody
+            // can operate from the keyboard is a control only some people have.
+            path.setAttribute("tabindex", "0");
+            path.setAttribute("role", "button");
+            path.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.name); }
+            });
+        }
         svg.appendChild(path);
         angle = next;
     });
@@ -6141,41 +6162,18 @@ function moonCloudLegend(rows, onPick) {
         if (onPick && r.name && r.name !== "other") {
             line.className = "mooncloud-pickable";
             line.addEventListener("click", () => onPick(r.name));
+            line.tabIndex = 0;
+            line.setAttribute("role", "button");
+            line.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(r.name); }
+            });
         }
         box.appendChild(line);
     });
     return box;
 }
 
-// What the consent checkbox is asking, in one line above it.
-//
-// NOT a prompt with its own buttons: the checkbox already IS the choice, so a button row beside it
-// renders the same decision twice. What a checkbox cannot carry is WHY, so that is what stays.
-//
-// Shown only while consent is off, so a card whose owner has said yes is not still explaining
-// itself.
-function renderMoonCloudConsent(host, mod) {
-    const consent = (mod?.controls || []).find(c => c.name === "consent");
-    if (!consent || consent.value) return;
-
-    const box = document.createElement("div");
-    box.className = "mooncloud-consent";
-    box.textContent = "Share what hardware you run, so development goes where the users are? " +
-                      "One report per install or upgrade: chip, board, and which modules are on. " +
-                      "No device name, no addresses, no credentials. ";
-
-    const link = document.createElement("a");
-    link.href = "https://moonmodules.org/projectMM/privacy-policy.html";
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.textContent = "Details";
-    box.appendChild(link);
-
-    host.appendChild(box);
-}
-
 function renderMoonCloudStats(host, mod) {
-    renderMoonCloudConsent(host, mod);
     const section = document.createElement("div");
     section.className = "mooncloud-stats";
     host.appendChild(section);
@@ -6203,7 +6201,7 @@ function renderMoonCloudStats(host, mod) {
         // consent: without it there is nothing to refresh, because nothing is fetched.
         if (consented(mod)) {
             const refresh = document.createElement("button");
-            refresh.className = "moontalk-refresh";
+            refresh.className = "mooncloud-refresh";
             refresh.textContent = "\u21bb";
             refresh.title = "Refresh";
             refresh.addEventListener("click", () => { moonCloudStatsCache.clear(); load(); });
@@ -6223,6 +6221,7 @@ function renderMoonCloudStats(host, mod) {
             const seen = new Set();
             const parts = [];
             for (const [k, v] of active) {
+                if (k.endsWith("Label")) continue;   // display text for a bounds pair, not a filter
                 const base = k.replace(/(Min|Max)$/, "");
                 if (base !== k) {
                     if (seen.has(base)) continue;
@@ -6338,9 +6337,9 @@ function renderMoonCloudStats(host, mod) {
 
 // MoonTalk: the public board, read straight onto the card that posts to it.
 //
-// Reading sends NOTHING about this device: no id, no name, no consent involved. That is why this
-// renders whatever `consent` says, including for someone who answered Never: the board is public,
-// and refusing to publish is not a reason to be unable to read.
+// Reading sends no identifier: no id, no name, nothing about this device. It still happens only
+// while consent is on, because a request from a device whose owner said no is still a request to
+// our server.
 //
 // Polled on card build rather than streamed. A chat wants to feel live, but a device UI rebuilds
 // this card on every unrelated state push, so a socket per card would be a connection per render.
@@ -6448,7 +6447,7 @@ function renderMoonTalk(host, mod) {
     // and a button that does nothing is worse than none.
     if (consented(mod)) {
         const refresh = document.createElement("button");
-        refresh.className = "moontalk-refresh";
+        refresh.className = "mooncloud-refresh";
         refresh.textContent = "\u21bb";
         refresh.title = "Refresh";
         refresh.addEventListener("click", () => load(true));

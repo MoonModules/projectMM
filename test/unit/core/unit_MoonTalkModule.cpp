@@ -99,10 +99,10 @@ TEST_CASE("a message is published by the send button, not by typing") {
     talk.onControlChanged("shareName");
     CHECK(std::string(talk.message()) == "hello");
 
-    // Send empties the box. There is no MoonCloud parent here, so the post is a no-op and this
-    // pins the TRIGGER rather than the transport.
+    // Pressing send with no MoonCloud parent publishes nothing, and the text SURVIVES: clearing on
+    // a failed hand-off threw away what somebody typed at the moment they would most want to retry.
     talk.onControlChanged("send");
-    CHECK(std::string(talk.message()).empty());
+    CHECK(std::string(talk.message()) == "hello");
 }
 
 /// Consent still gates publishing, and a refused send leaves the text alone rather than discarding
@@ -129,4 +129,19 @@ TEST_CASE("send with an empty message does nothing") {
 
     talk.onControlChanged("send");
     CHECK(std::string(talk.message()).empty());
+}
+
+
+/// Talk carries its own explanation, because what it exchanges is nothing like a report.
+TEST_CASE("the talk consent explanation is a status that follows the answer") {
+    mm::MoonTalkModule talk;
+    talk.setup();
+    talk.defineControls();
+
+    REQUIRE_FALSE(talk.consent());
+    REQUIRE(talk.status() != nullptr);
+    CHECK(std::string(talk.status()).find("public board") != std::string::npos);
+
+    talk.setConsentForTest(true);
+    CHECK(talk.status() == nullptr);
 }

@@ -131,14 +131,16 @@ TEST_CASE("the report carries memory and light count as numbers") {
     mm::MoonModule* tree[] = {&system};
     mm::JsonSink sink;
     mm::buildMoonStatsReport(sink, tree, 1, mm::MoonStatsEvent::Install,
-                             nullptr, "1.0.0", nullptr, 256);
+                             nullptr, "1.0.0", nullptr, 256, 282152, 84788);
     const std::string json = sink.data();
 
     CHECK(json.find("\"lightCount\":256") != std::string::npos);
     // Unquoted: a JSON number, not a string, which is what the server's numeric branch accepts.
     CHECK(json.find("\"lightCount\":\"") == std::string::npos);
-    CHECK(json.find("\"totalHeap\":") != std::string::npos);
-    CHECK(json.find("\"freeHeap\":") != std::string::npos);
+    // The VALUES, unquoted: the server's numeric branch accepts a JSON number and its generic
+    // string test drops anything else, which is how three zeros were stored for every device.
+    CHECK(json.find("\"totalHeap\":282152") != std::string::npos);
+    CHECK(json.find("\"freeHeap\":84788") != std::string::npos);
 }
 
 /// The report names what the user ADDED, not the boot tree every device shares.

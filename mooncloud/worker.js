@@ -197,12 +197,10 @@ async function handleStats(env, url) {
   const releasedOnly = url?.searchParams.get("dev") === "0";
   if (releasedOnly) where.push("dev = 0");
   else if (url?.searchParams.get("dev") === "1") where.push("dev = 1");
-  // `modules` is a comma-joined list, so membership is a LIKE against the delimited form rather
-  // than equality. Bounded by the same allowlist idea: the value is bound, never interpolated.
   // One filter per role, matching the charts: `?driver=Preview`, `?effect=Lissajous`. Entries are
   // stored as `role:name` in one comma-joined column, so membership is a LIKE against the delimited
-  // form. `?module=` still works for a report from before the role split, whose entries carry no
-  // prefix. Role names come from this table, never the query string; values are bound.
+  // form rather than equality. Role names come from this table, never the query string; values are
+  // bound.
   for (const role of ["driver", "service", "layout", "effect", "modifier"]) {
     const value = url?.searchParams.get(role);
     if (!value) continue;
@@ -238,8 +236,7 @@ async function handleStats(env, url) {
   // effects are, and one combined pie buried the first under the second.
   //
   // Counted over DISTINCT installations, like every other figure: a device that reported twice does
-  // not count twice. An entry without a role prefix is from a device older than this split and is
-  // counted under `modules`, so old rows still say something rather than vanishing.
+  // not count twice.
   const moduleCountsByRole = async () => {
     const { results } = await env.DB.prepare(
       `SELECT DISTINCT installationId, modules FROM reports WHERE modules != ''${filter}`
@@ -588,6 +585,7 @@ fetch("/api/stats").then(r => r.json()).then(d => {
                                ["Services", d.services],
                                ["Layouts", d.layouts],
                                ["Effects", d.effects],
+                               ["Modifiers", d.modifiers],
                                ["Lights", d.lightCounts],
                                ["Free memory", d.freeMemory],
                                ["Total memory", d.totalMemory],

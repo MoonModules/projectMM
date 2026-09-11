@@ -28,9 +28,9 @@ const ALLOWED = JSON.parse(
     .replace(/\/\/.*$/gm, "")
 );
 const clean = new Function(
-  "ALLOWED", "MAX_STRING", "MAX_MODULES",
+  "ALLOWED", "MAX_STRING", "MAX_MODULES", "MAX_NUMBER",
   `${cleanSource}; return clean;`
-)(ALLOWED, 64, 64);
+)(ALLOWED, 64, 64, 2147483647);
 
 test("a report cannot smuggle a field the firmware never sends", () => {
   const row = clean(
@@ -131,4 +131,32 @@ test("a message from a device is accepted, and a malformed sender is not", () =>
     // protect: stored in full, published at 8.
     assert.match(source, /m\.sender\.slice\(0, SENDER_CHARS\)/,
                  "a published message must carry only the id prefix");
+});
+
+// The numeric fields arrive as JSON NUMBERS, and every other allowlisted field is a string. The
+// generic `typeof value !== "string"` test dropped them silently, so three zeros were stored for
+// every device until a branch of their own was added. Nothing pinned it: the harness could not even
+// run a numeric case, because it never passed MAX_NUMBER into the extracted clean().
+test("memory and light counts are stored as numbers, not dropped", () => {
+  const row = clean(
+    { installationId: "c26086e8da9b6fb2d4b81e4ca71f97e5",
+      totalHeap: 282152, freeHeap: 84788, lightCount: 256 },
+    "NL"
+  );
+  assert.equal(row.totalHeap, 282152);
+  assert.equal(row.freeHeap, 84788);
+  assert.equal(row.lightCount, 256);
+});
+
+test("a numeric field that is not a number stores zero rather than text", () => {
+  // The endpoint is open, so its input is untrusted: a string, a negative, or a float must not
+  // reach an INTEGER column as-is.
+  const row = clean(
+    { installationId: "c26086e8da9b6fb2d4b81e4ca71f97e5",
+      totalHeap: "abc", freeHeap: -5, lightCount: 12.7 },
+    "NL"
+  );
+  assert.equal(row.totalHeap, 0);
+  assert.equal(row.freeHeap, 0);
+  assert.equal(row.lightCount, 12);   // floored, not rejected: a count is a count
 });
