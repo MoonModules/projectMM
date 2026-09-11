@@ -3,9 +3,7 @@
 // MoonCloud Stats: the whole server.
 //
 // Two endpoints and one table. POST /api/report takes one report from a device that consented;
-// GET /api/stats hands back the aggregates, which is what the device's own card renders. There is
-// no dashboard here on purpose: the card is the UI, so there is no second front end to keep in
-// sync with this schema.
+// GET /api/stats hands back the aggregates, which is what the device's own card renders.
 //
 // Cloudflare Workers rather than a box we own, for one specific reason: `request.cf.country`
 // resolves the country at the EDGE, so the privacy policy's promise that the IP address is never
@@ -29,6 +27,9 @@ const ALLOWED = [
   "sdk",
   "deviceModel",
   "modules",
+  "totalHeap",
+  "freeHeap",
+  "lightCount",
   "dev",
 ];
 
@@ -36,6 +37,7 @@ const ALLOWED = [
 // bounding what reaches storage rather than deciding what is true.
 const MAX_STRING = 64;
 const MAX_MODULES = 64;
+const MAX_NUMBER = 2147483647;   // a device fact, not a size to trust: bounded like every string
 
 function clean(report, country) {
   const row = {};
@@ -55,6 +57,14 @@ function clean(report, country) {
     // local build. Stored as 0/1 because the column is an INTEGER and SQLite has no bool.
     if (key === "dev") {
       row.dev = value === true || value === "true" ? 1 : 0;
+      continue;
+    }
+    // The numeric fields arrive as JSON NUMBERS, so the string test below would drop them: every
+    // other allowlisted field is text, and only `modules` and `dev` had branches of their own.
+    // Bounded and floored at 0, because a report is untrusted input from an open endpoint.
+    if (key === "totalHeap" || key === "freeHeap" || key === "lightCount") {
+      const n = typeof value === "number" ? value : Number(value);
+      row[key] = Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), MAX_NUMBER) : 0;
       continue;
     }
     if (typeof value !== "string") continue;
@@ -100,8 +110,8 @@ async function handleReport(request, env) {
   // double-counting, which is what makes the totals a count of installations.
   await env.DB.prepare(
     `INSERT INTO reports
-       (installationId, event, version, previousVersion, chip, flash, psram, sdk, deviceModel, modules, country, receivedAt, dev)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (installationId, event, version, previousVersion, chip, flash, psram, sdk, deviceModel, modules, country, receivedAt, totalHeap, freeHeap, lightCount, dev)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(installationId, version) DO UPDATE SET
        event = excluded.event,
        previousVersion = excluded.previousVersion,
@@ -113,6 +123,9 @@ async function handleReport(request, env) {
        modules = excluded.modules,
        country = excluded.country,
        receivedAt = excluded.receivedAt,
+       totalHeap = excluded.totalHeap,
+       freeHeap = excluded.freeHeap,
+       lightCount = excluded.lightCount,
        dev = excluded.dev`
   )
     .bind(
@@ -128,6 +141,9 @@ async function handleReport(request, env) {
       row.modules ?? "",
       row.country,
       row.receivedAt,
+      row.totalHeap ?? 0,
+      row.freeHeap ?? 0,
+      row.lightCount ?? 0,
       row.dev ?? 0
     )
     .run();
@@ -159,15 +175,57 @@ async function handleStats(env, url) {
   // headline number smaller with nothing saying why, and it hid a developer's own bench boards from
   // the card running ON one of them, which reads as a report that never arrived.
   //
-  // `?dev=0` still narrows to released installs for a caller that wants only those.
+  // A caller narrows any dimension by naming it: `?chip=ESP32`, `?country=NL`, `?dev=0`. Every chart
+  // then re-counts within that population, which is what makes a slice clickable in the UI.
+  //
+  // The filter is a CHOICE, never a default: the charts count everything until a reader asks
+  // otherwise, so a narrowed total is always something they did rather than something hidden.
+  //
+  // Column names come from this table, never from the query string, so a parameter cannot reach the
+  // SQL. Values are bound.
+  const FILTERABLE = ["version", "previousVersion", "chip", "flash", "psram", "sdk",
+                      "deviceModel", "country", "event"];
+  const where = [];
+  const binds = [];
+  for (const column of FILTERABLE) {
+    const value = url?.searchParams.get(column);
+    if (value === null || value === undefined || value === "") continue;
+    where.push(`${column} = ?`);
+    binds.push(value);
+  }
+  // `dev` is an integer flag rather than a string column, and `?dev=0` predates the general form.
   const releasedOnly = url?.searchParams.get("dev") === "0";
-  const devFilter = releasedOnly ? " AND dev = 0" : "";
+  if (releasedOnly) where.push("dev = 0");
+  else if (url?.searchParams.get("dev") === "1") where.push("dev = 1");
+  // `modules` is a comma-joined list, so membership is a LIKE against the delimited form rather
+  // than equality. Bounded by the same allowlist idea: the value is bound, never interpolated.
+  // One filter per role, matching the charts: `?driver=Preview`, `?effect=Lissajous`. Entries are
+  // stored as `role:name` in one comma-joined column, so membership is a LIKE against the delimited
+  // form. `?module=` still works for a report from before the role split, whose entries carry no
+  // prefix. Role names come from this table, never the query string; values are bound.
+  for (const role of ["driver", "service", "layout", "effect", "modifier"]) {
+    const value = url?.searchParams.get(role);
+    if (!value) continue;
+    where.push("(',' || modules || ',') LIKE ?");
+    binds.push(`%,${role}:${value},%`);
+  }
+  // A bucketed chart filters by BOUNDS: its slices name ranges ("64-128 KB"), and the column holds
+  // the raw number, so there is no value to match on. `?freeHeapMin=65536&freeHeapMax=131072`.
+  for (const column of ["totalHeap", "freeHeap", "lightCount"]) {
+    const min = Number(url?.searchParams.get(`${column}Min`));
+    const max = Number(url?.searchParams.get(`${column}Max`));
+    if (Number.isFinite(min) && min > 0) { where.push(`${column} >= ?`); binds.push(min); }
+    if (Number.isFinite(max) && max > 0) { where.push(`${column} <= ?`); binds.push(max); }
+  }
+
+  const filter = where.length ? ` AND ${where.join(" AND ")}` : "";
+  const filtered = where.length > 0;
 
   const counts = async (column) => {
     const { results } = await env.DB.prepare(
       `SELECT ${column} AS name, COUNT(DISTINCT installationId) AS count
-         FROM reports WHERE ${column} != ''${devFilter} GROUP BY ${column} ORDER BY count DESC LIMIT 40`
-    ).all();
+         FROM reports WHERE ${column} != ''${filter} GROUP BY ${column} ORDER BY count DESC LIMIT 40`
+    ).bind(...binds).all();
     return results ?? [];
   };
 
@@ -175,56 +233,129 @@ async function handleStats(env, url) {
   // rather than a GROUP BY: a module is present on an installation, and an installation appears
   // once. Counted over DISTINCT installations for the same reason every other figure is, so a
   // device that reported twice does not count twice.
-  const moduleCounts = async () => {
+  // Modules arrive as `role:name` (driver:Preview, effect:Lissajous), so one column yields a chart
+  // per kind: which drivers and services are actually used is a different question from which
+  // effects are, and one combined pie buried the first under the second.
+  //
+  // Counted over DISTINCT installations, like every other figure: a device that reported twice does
+  // not count twice. An entry without a role prefix is from a device older than this split and is
+  // counted under `modules`, so old rows still say something rather than vanishing.
+  const moduleCountsByRole = async () => {
     const { results } = await env.DB.prepare(
-      `SELECT DISTINCT installationId, modules FROM reports WHERE modules != ''${devFilter}`
-    ).all();
-    const seen = new Map();   // module -> Set of installation ids
+      `SELECT DISTINCT installationId, modules FROM reports WHERE modules != ''${filter}`
+    ).bind(...binds).all();
+
+    const byRole = new Map();   // role -> Map(name -> Set of installation ids)
     for (const row of results ?? []) {
-      for (const name of String(row.modules).split(",")) {
-        const m = name.trim();
-        if (!m) continue;
-        if (!seen.has(m)) seen.set(m, new Set());
-        seen.get(m).add(row.installationId);
+      for (const entry of String(row.modules).split(",")) {
+        const text = entry.trim();
+        if (!text) continue;
+        const cut = text.indexOf(":");
+        // Every entry carries its role: a report predating the split cannot reach this, because the
+        // tables are emptied before ship (ADR-0013: no migration code, documented breaks).
+        if (cut <= 0) continue;
+        const role = text.slice(0, cut);
+        const name = text.slice(cut + 1);
+        if (!name) continue;
+        if (!byRole.has(role)) byRole.set(role, new Map());
+        const names = byRole.get(role);
+        if (!names.has(name)) names.set(name, new Set());
+        names.get(name).add(row.installationId);
       }
     }
-    return [...seen.entries()]
-      .map(([name, ids]) => ({ name, count: ids.size }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 40);
+
+    const out = {};
+    for (const [role, names] of byRole) {
+      out[role] = [...names.entries()]
+        .map(([name, ids]) => ({ name, count: ids.size }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 40);
+    }
+    return out;
   };
 
   // Install versus upgrade. The one figure counted over REPORTS rather than installations: it
   // describes events, and an installation that upgraded three times is three upgrade events.
   const eventCounts = async () => {
     const { results } = await env.DB.prepare(
-      `SELECT event AS name, COUNT(*) AS count FROM reports WHERE event != ''${devFilter}
+      `SELECT event AS name, COUNT(*) AS count FROM reports WHERE event != ''${filter}
         GROUP BY event ORDER BY count DESC`
-    ).all();
+    ).bind(...binds).all();
     return results ?? [];
   };
 
   // Released against development, and the ONE figure that ignores the dev filter: a pie whose job
   // is to show the split cannot be drawn from a query that already removed one side of it.
   const buildCounts = async () => {
+    // Every filter EXCEPT dev: a pie whose job is to show the released-against-development split
+    // cannot be drawn from a query that already removed one side of it. The other dimensions still
+    // apply, so clicking `NL` narrows this pie to the Netherlands rather than leaving it global.
+    const noDev = where.filter(c => c !== "dev = 0" && c !== "dev = 1");
+    const devless = noDev.length ? ` WHERE ${noDev.join(" AND ")}` : "";
     const { results } = await env.DB.prepare(
       `SELECT CASE dev WHEN 1 THEN 'development' ELSE 'released' END AS name,
               COUNT(DISTINCT installationId) AS count
-         FROM reports GROUP BY dev ORDER BY count DESC`
-    ).all();
+         FROM reports${devless} GROUP BY dev ORDER BY count DESC`
+    ).bind(...binds).all();
     return results ?? [];
   };
 
+  // Bucketed on READ rather than at the device, so a range that turns out wrong can be re-cut
+  // against rows already stored. Raw values would give one slice per device and say nothing.
+  const bucketed = async (column, buckets) => {
+    const { results } = await env.DB.prepare(
+      `SELECT DISTINCT installationId, ${column} AS v FROM reports WHERE ${column} > 0${filter}`
+    ).bind(...binds).all();
+    const counts = new Map();
+    for (const row of results ?? []) {
+      const label = buckets.find(b => row.v <= b.max)?.name ?? buckets[buckets.length - 1].name;
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    // Bucket ORDER, not count order: a range chart reads as a scale, so the slices follow the
+    // ranges rather than sorting the biggest first.
+    // `min`/`max` ride along so a clicked slice can filter by bounds. `max` is omitted for the
+    // open-ended top bucket, where Infinity has no JSON form.
+    return buckets.map((b, i) => ({
+      name: b.name,
+      count: counts.get(b.name) ?? 0,
+      min: i === 0 ? 1 : buckets[i - 1].max + 1,
+      ...(Number.isFinite(b.max) ? { max: b.max } : {}),
+    })).filter(r => r.count > 0);
+  };
+
+  // LED strips cluster at powers of two, so the ranges follow that rather than decades: a 60-light
+  // strip and a 300-light strip are different installations in a way "10-100" and "100-1000" blur.
+  const kLightBuckets = [
+    { name: "1-64", max: 64 }, { name: "65-256", max: 256 },
+    { name: "257-1024", max: 1024 }, { name: "1025-4096", max: 4096 },
+    { name: "4097+", max: Infinity },
+  ];
+  // Decades would put every ESP32 in one bucket. These separate a struggling classic from an S3.
+  const kFreeBuckets = [
+    { name: "<32 KB", max: 32 * 1024 }, { name: "32-64 KB", max: 64 * 1024 },
+    { name: "64-128 KB", max: 128 * 1024 }, { name: "128-256 KB", max: 256 * 1024 },
+    { name: "256 KB+", max: Infinity },
+  ];
+  const kTotalBuckets = [
+    { name: "<128 KB", max: 128 * 1024 }, { name: "128-256 KB", max: 256 * 1024 },
+    { name: "256-512 KB", max: 512 * 1024 }, { name: "512 KB-4 MB", max: 4 * 1024 * 1024 },
+    { name: "4 MB+", max: Infinity },
+  ];
+
+  const moduleRoles = await moduleCountsByRole();
+
   const { results: totals } = await env.DB.prepare(
     `SELECT COUNT(DISTINCT installationId) AS installations, COUNT(*) AS reports
-       FROM reports WHERE 1=1${devFilter}`
-  ).all();
+       FROM reports WHERE 1=1${filter}`
+  ).bind(...binds).all();
 
   return json({
     installations: totals?.[0]?.installations ?? 0,
     reports: totals?.[0]?.reports ?? 0,
     // Says which population these figures describe, so a dashboard never has to guess.
     includesDevelopmentInstalls: !releasedOnly,
+    // What the reader narrowed to, so the card can show it and offer a way back.
+    filtered,
     versions: await counts("version"),
     chips: await counts("chip"),
     deviceModels: await counts("deviceModel"),
@@ -234,8 +365,22 @@ async function handleStats(env, url) {
     psram: await counts("psram"),
     sdk: await counts("sdk"),
     previousVersions: await counts("previousVersion"),
+    lightCounts: await bucketed("lightCount", kLightBuckets),
+    freeMemory: await bucketed("freeHeap", kFreeBuckets),
+    totalMemory: await bucketed("totalHeap", kTotalBuckets),
     events: await eventCounts(),
-    modules: await moduleCounts(),
+    ...(() => {
+      // Spread as `drivers`, `services`, `layouts`, `effects`, … so a new role needs no server
+      // change: whatever devices report becomes a chart the UI can render.
+      const byRole = moduleRoles;
+      return {
+        drivers: byRole.driver ?? [],
+        services: byRole.service ?? [],
+        layouts: byRole.layout ?? [],
+        effects: byRole.effect ?? [],
+        modifiers: byRole.modifier ?? [],
+      };
+    })(),
     builds: await buildCounts(),
     updated: new Date().toISOString(),
   });
@@ -251,6 +396,7 @@ async function handleStats(env, url) {
 // There is NO AUTHENTICATION, so a sender id can be fabricated by anyone who wants to. That is
 // acceptable for a hobby board where nothing is gated on identity, and it is stated in the privacy
 // policy rather than left to be discovered.
+const SENDER_CHARS = 8;    // how much of the sender id a message publishes; the row keeps all 32
 const MAX_MESSAGE = 280;   // a message, not a document: bounded so one caller cannot fill the table
 const MAX_NAME = 32;
 const PAGE_SIZE = 50;
@@ -264,6 +410,9 @@ async function handleTalkPost(request, env) {
   }
   if (typeof msg !== "object" || msg === null) return json({ error: "not an object" }, 400);
 
+  // The FULL id is stored and validated; only the first SENDER_CHARS are ever published (see
+  // handleTalkGet). Truncating here instead looked like storing less, and broke every post: the
+  // length check below rejects anything that is not a whole installation id.
   const sender = typeof msg.sender === "string" ? msg.sender.slice(0, 32) : "";
   const text = typeof msg.text === "string" ? msg.text.trim() : "";
   // The name is OPTIONAL by design: a device shares it only when its own consent control says so,
@@ -289,20 +438,26 @@ async function handleTalkGet(request, env) {
   // `since` lets a device poll for what it has not seen instead of re-reading the board.
   const since = Number(url.searchParams.get("since") || 0) || 0;
 
+  // An incremental read walks FORWARD from `since`, so a caller that missed more than one page gets
+  // the oldest unseen first and can page again. Ordering DESC here would hand back the newest 50 and
+  // silently drop everything between, which a caller cannot detect.
   const { results } = await env.DB.prepare(
-    `SELECT id, sender, name, text, country, sentAt FROM messages
-      WHERE id > ? ORDER BY id DESC LIMIT ?`
+    since
+      ? `SELECT id, sender, name, text, country, sentAt FROM messages
+          WHERE id > ? ORDER BY id ASC LIMIT ?`
+      : `SELECT id, sender, name, text, country, sentAt FROM messages
+          WHERE id > ? ORDER BY id DESC LIMIT ?`
   ).bind(since, PAGE_SIZE).all();
 
   // The full sender id is NOT published: a caller gets the first 8 characters, which is enough to
   // group one device's messages together and not enough to match against a Stats row.
   const messages = (results ?? []).map((m) => ({
     id: m.id,
-    from: m.name || m.sender.slice(0, 8),
+    from: m.name || m.sender.slice(0, SENDER_CHARS),
     // The id prefix travels alongside a shared name rather than instead of it, so a named sender
     // is still identifiable as one device: two people can pick the same device name, and without
     // this their messages would be indistinguishable.
-    senderId: m.sender.slice(0, 8),
+    senderId: m.sender.slice(0, SENDER_CHARS),
     named: Boolean(m.name),
     text: m.text,
     country: m.country,
@@ -429,7 +584,13 @@ fetch("/api/stats").then(r => r.json()).then(d => {
                                ["PSRAM", d.psram], ["SDK", d.sdk],
                                ["Install or upgrade", d.events],
                                ["Upgraded from", d.previousVersions],
-                               ["Modules", d.modules],
+                               ["Drivers", d.drivers],
+                               ["Services", d.services],
+                               ["Layouts", d.layouts],
+                               ["Effects", d.effects],
+                               ["Lights", d.lightCounts],
+                               ["Free memory", d.freeMemory],
+                               ["Total memory", d.totalMemory],
                                ["Build", d.builds], ["Country", d.countries]]) {
     const shown = topSlices(rows);
     if (!shown.length) continue;
@@ -441,7 +602,11 @@ fetch("/api/stats").then(r => r.json()).then(d => {
     section.append(title, pie(shown), legend(shown));
     out.appendChild(section);
   }
-}).catch(() => { document.getElementById("sub").textContent = "No data yet."; });
+}).catch(() => {
+  // An unreachable server is not an empty one: saying "No data yet." on a failed fetch states as
+  // fact something this page has no evidence for.
+  document.getElementById("sub").textContent = "Cannot reach the server.";
+});
 </script>`;
 
 function json(body, status = 200) {

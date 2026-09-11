@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS reports (
   -- cannot classify rows already stored.
   dev             INTEGER NOT NULL DEFAULT 0,
 
+  -- Raw numbers, bucketed into ranges by the server on read: storing a bucket would freeze every
+  -- row at today's boundaries, and a range that turns out wrong could never be re-cut.
+  totalHeap       INTEGER NOT NULL DEFAULT 0,   -- internal + PSRAM capacity
+  freeHeap        INTEGER NOT NULL DEFAULT 0,   -- free at report time
+  lightCount      INTEGER NOT NULL DEFAULT 0,   -- physical lights driven (Layer::physicalLightCount)
+
   -- One row per installation per version. A device that re-reports the same upgrade overwrites its
   -- row rather than adding one, so a count of rows is a count of installations rather than of
   -- retries.

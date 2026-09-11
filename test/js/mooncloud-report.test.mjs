@@ -110,3 +110,25 @@ test("the stats endpoint selects only aggregates, never a row", () => {
   assert.ok(!/SELECT\s+installationId/i.test(stats));
   assert.ok(!/SELECT\s+\*/i.test(stats));
 });
+
+// MoonTalk post validation: the shape a device actually sends must be ACCEPTED.
+//
+// Written after a change truncated the sender to 8 characters at storage while the validator still
+// required 32, so every message a device sent was rejected with 400 and the board silently stopped
+// receiving anything. Nothing caught it: the device cleared its box, the UI showed no error, and no
+// test covered the post path at all. These pin both halves of that contract.
+test("a message from a device is accepted, and a malformed sender is not", () => {
+    // The validator's length check and what the handler stores must agree. A slice narrower than
+    // the check means nothing can ever pass it.
+    const stored = source.match(/const sender = typeof msg\.sender === "string" \? msg\.sender\.slice\(0, (\d+)\)/);
+    assert.ok(stored, "the talk handler must derive `sender` from the request");
+    const check = source.match(/sender\.length !== (\d+)\)/);
+    assert.ok(check, "the talk handler must validate the sender length");
+    assert.equal(stored[1], check[1],
+                 "the stored sender and the validated length must match, or every post is rejected");
+
+    // And the published form is the SHORT one, which is the property the truncation was meant to
+    // protect: stored in full, published at 8.
+    assert.match(source, /m\.sender\.slice\(0, SENDER_CHARS\)/,
+                 "a published message must carry only the id prefix");
+});

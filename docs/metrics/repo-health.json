@@ -1,9 +1,9 @@
 {
-  "commit": "38f66d7b",
+  "commit": "a0e56b40",
   "flash": {
     "esp32s3-n16r8": 2103024,
-    "desktop": 1933496,
-    "esp32": 2073632,
+    "desktop": 1933048,
+    "esp32": 2076368,
     "esp32p4rev1-eth": 1997440,
     "esp32p4rev1-eth-wifi": 2284640,
     "esp32s3-n8r8": 2087168,
@@ -31,8 +31,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 127,
-      "fps": 7874,
+      "tick_us": 132,
+      "fps": 7575,
       "scenario_p50": {
         "Layer_base_pipeline": {
           "p50": 69,
@@ -55,7 +55,7 @@
     "scenario_matrix": {
       "MoonModule_control_change": {
         "desktop-macos": {
-          "p50": 124,
+          "p50": 125,
           "p95": 246,
           "n": 32,
           "last": "2026-09-11"
@@ -197,7 +197,7 @@
       },
       "Aurora_fps": {
         "desktop-macos": {
-          "p50": 1564,
+          "p50": 1573,
           "p95": 2013,
           "n": 32,
           "last": "2026-09-11"
@@ -245,7 +245,7 @@
       },
       "Fields_polar_lut": {
         "desktop-macos": {
-          "p50": 1269,
+          "p50": 1271,
           "p95": 1892,
           "n": 32,
           "last": "2026-09-11"
@@ -253,7 +253,7 @@
       },
       "Fluid_solver": {
         "desktop-macos": {
-          "p50": 226,
+          "p50": 222,
           "p95": 265,
           "n": 32,
           "last": "2026-09-11"
@@ -262,7 +262,7 @@
       "GridBlacks_blackpixel": {
         "desktop-macos": {
           "p50": 2,
-          "p95": 3,
+          "p95": 2,
           "n": 32,
           "last": "2026-09-11"
         },
@@ -360,7 +360,7 @@
       "Layouts_mutation": {
         "desktop-macos": {
           "p50": 94,
-          "p95": 156,
+          "p95": 121,
           "n": 32,
           "last": "2026-09-11"
         },
@@ -413,7 +413,7 @@
         "desktop-macos": {
           "p50": 6,
           "p95": 8,
-          "n": 28,
+          "n": 31,
           "last": "2026-09-11"
         },
         "esp32s3-n16r8": {
@@ -511,7 +511,7 @@
       },
       "modifier_chain": {
         "desktop-macos": {
-          "p50": 43,
+          "p50": 44,
           "p95": 48,
           "n": 32,
           "last": "2026-09-11"
@@ -531,8 +531,8 @@
       },
       "modifier_swap": {
         "desktop-macos": {
-          "p50": 21,
-          "p95": 25,
+          "p50": 22,
+          "p95": 24,
           "n": 32,
           "last": "2026-09-11"
         },
@@ -569,7 +569,7 @@
       },
       "perf_full": {
         "desktop-macos": {
-          "p50": 264,
+          "p50": 259,
           "p95": 301,
           "n": 32,
           "last": "2026-09-11"
@@ -645,7 +645,7 @@
           "last": "2026-07-25"
         },
         "desktop-macos": {
-          "p50": 264,
+          "p50": 260,
           "p95": 813,
           "n": 32,
           "last": "2026-09-11"
@@ -698,17 +698,17 @@
     }
   },
   "loc": {
-    "core": 27044,
+    "core": 26963,
     "light": 35665,
     "platform": 18948,
-    "ui": 10971,
-    "test": 58444,
-    "moondeck": 23112
+    "ui": 11121,
+    "test": 58697,
+    "moondeck": 23122
   },
   "comments": {
     "core": {
-      "lines": 10868,
-      "ratio": 0.435
+      "lines": 10779,
+      "ratio": 0.432
     },
     "light": {
       "lines": 13554,
@@ -719,33 +719,33 @@
       "ratio": 0.387
     },
     "ui": {
-      "lines": 3279,
-      "ratio": 0.316
+      "lines": 3301,
+      "ratio": 0.314
     },
     "test": {
-      "lines": 10999,
+      "lines": 11058,
       "ratio": 0.216
     },
     "moondeck": {
-      "lines": 3737,
+      "lines": 3739,
       "ratio": 0.185
     }
   },
   "tests": {
-    "cases": 2030,
+    "cases": 2037,
     "scenarios": 27
   },
   "docs": {
     "md_files": 224,
-    "md_lines": 38096,
+    "md_lines": 38088,
     "plans_files": 119,
-    "backlog_lines": 7224,
+    "backlog_lines": 7244,
     "lessons_lines": 705,
-    "claude_md_lines": 259
+    "claude_md_lines": 261
   },
   "complexity": {
-    "functions": 3548,
-    "over_threshold": 254,
+    "functions": 3552,
+    "over_threshold": 253,
     "worst_ccn": 128
   }
 }

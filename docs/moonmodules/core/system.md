@@ -130,12 +130,12 @@ The container for everything projectMM does with a server MoonModules runs. It h
 
 One opt-in report about this install, sent once when the firmware is installed or upgraded, so development effort goes where the users are. Off until you answer yes. Everything it sends, and the reasoning behind the identifier, is in the [privacy policy](../../privacy-policy.md).
 
-- `consent`: **Not answered** / **Yes** / **Not now** / **Never**. Nothing is sent, and no identifier is computed, until this reads Yes. **Never** is remembered forever; **Not now** defers, so the question returns after the next upgrade rather than never.
+- `consent`: a checkbox, off by default. Nothing is sent, and no identifier is computed, while it is off.
 - read-only: `version` (what is running) and `reportedVersion` (what last produced a report). They differ exactly when a report is due, which is what makes one upgrade send one report and a reboot send nothing.
 
 The report carries hardware and configuration: chip, flash, PSRAM, SDK, device model, and which modules are enabled. It carries no device name, no addresses, no credentials and no text you typed, and a unit test asserts those cannot appear in it.
 
-The card also shows the totals everyone else reported, which is why there is no separate public dashboard: contributing earns the answer back where you already are. Reading them sends nothing about you and works whether or not you consented.
+The card also shows the totals everyone else reported: contributing earns the answer back where you already are. The charts are drawn empty until consent is on, so what saying yes gets you is visible before you say it.
 
 **MoonCloud** is the family name for anything projectMM does with a server we run. Stats and Talk are its members today; device-to-device sync over the internet is planned as a third, with its own consent.
 

@@ -2151,17 +2151,35 @@ body.assign-mode .control-encoder input { cursor: pointer; }
    SVG arcs rather than a charting library: three pies do not earn a dependency, and the device
    serves its own UI with no build step to tree-shake one. */
 .mooncloud-stats { margin-top: 12px; }
+.mooncloud-stats-head { display: flex; align-items: center; margin-bottom: 10px; }
+.mooncloud-stats-head .mooncloud-stats-title { margin-bottom: 0; }
+.mooncloud-stats-head .moontalk-refresh { margin-left: auto; }
 .mooncloud-stats-title { font-size: 0.85em; opacity: 0.75; margin-bottom: 10px; }
 .mooncloud-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 16px; }
-.mooncloud-chart { text-align: center; }
+/* Title, pie and legend are ONE centered column, so they cannot drift apart: centering each of them
+   separately let a long legend entry (a board name) center on a different width than the pie. */
+.mooncloud-chart { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; }
 .mooncloud-chart-title { font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.55; margin-bottom: 6px; }
-.mooncloud-pie { width: 100%; max-width: 8rem; height: auto; }
+.mooncloud-pie { width: 8rem; max-width: 100%; height: auto; }
 .mooncloud-slice { stroke: var(--card-bg, #1b1b1b); stroke-width: 1.5; }
-.mooncloud-legend { display: inline-block; text-align: left; margin-top: 6px; font-size: 0.75em; }
+/* A chart with no data yet: a muted disc, not a filled slice. */
+.mooncloud-pie-placeholder { fill: currentColor; opacity: 0.10; }
+/* Matches the pie's width rather than shrink-wrapping its own content, so the counts line up under
+   the pie instead of at the right edge of the longest name. */
+.mooncloud-legend { width: 8rem; max-width: 100%; text-align: left; margin-top: 6px; font-size: 0.75em; }
 .mooncloud-legend div { display: flex; align-items: center; gap: 5px; line-height: 1.6; }
 .mooncloud-swatch { width: 0.6rem; height: 0.6rem; border-radius: 2px; flex: 0 0 auto; }
-.mooncloud-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* min-width:0 is what lets a flex item actually shrink: without it the name keeps its full
+   intrinsic width, overflows the legend, and drags the auto-margined count along with it. */
+.mooncloud-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .mooncloud-legend-count { margin-left: auto; opacity: 0.6; padding-left: 8px; font-variant-numeric: tabular-nums; }
+/* A slice or legend row that names a value can be clicked to narrow every chart to it. */
+.mooncloud-pickable { cursor: pointer; }
+.mooncloud-slice.mooncloud-pickable:hover { opacity: 0.75; }
+.mooncloud-legend div.mooncloud-pickable:hover .mooncloud-legend-name { text-decoration: underline; }
+.mooncloud-filter { display: flex; align-items: center; gap: 8px; font-size: 0.8em; margin-bottom: 10px; }
+.mooncloud-filter-clear { background: none; border: 1px solid currentColor; border-radius: 3px; color: inherit; cursor: pointer; font: inherit; opacity: 0.7; padding: 1px 7px; }
+.mooncloud-filter-clear:hover { opacity: 1; }
 
 /* MoonTalk: the public board on the card that posts to it. Rows rather than bubbles: this is a
    device panel, not a phone, and a sender plus a line of text is the whole content. */
@@ -2177,8 +2195,12 @@ body.assign-mode .control-encoder input { cursor: pointer; }
 .moontalk-text { flex: 1 1 auto; overflow-wrap: anywhere; }
 .moontalk-when { flex: 0 0 auto; opacity: 0.45; font-variant-numeric: tabular-nums; }
 .moontalk-empty { opacity: 0.5; font-size: 0.8em; }
+/* An unreachable server is a different fact from an empty board, so it does not read as absence. */
+.moontalk-unreachable, .mooncloud-unreachable { color: var(--fg-muted); opacity: 0.9; }
 
 /* What the MoonCloud consent control is asking, one line above it. No buttons: the `consent`
    dropdown already offers the same choices, and rendering them twice costs card space to say
    nothing new. */
 .mooncloud-consent { margin: 6px 0 10px; font-size: 0.8em; line-height: 1.6; opacity: 0.8; }
+/* One line on the Firmware card, only while stats consent is off. */
+.mooncloud-nudge { margin: 8px 0 0; font-size: 0.8em; line-height: 1.6; opacity: 0.7; }

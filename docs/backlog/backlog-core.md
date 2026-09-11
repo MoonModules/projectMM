@@ -1792,21 +1792,22 @@ making the compile-time constant win: re-assert `kFirmwareName` after the config
 only at `defineControls()`, and pin it with a test that loads a config naming a DIFFERENT variant
 and checks the control still reads the compiled one.
 
-## A MoonCloud card cannot tell "unreachable" from "nothing there" (2026-09-11)
+## MoonCloud: share a MoonLive script over MoonTalk (2026-09-10)
 
-Both MoonCloud readers in `src/ui/app.js` swallow every failure into the empty state. `renderMoonTalk`'s loader is the clearest case:
+Sketched 2026-09-10 while Talk was built. **The unique feature nobody else has**: projectMM ships a scripting language whose programs are about a kilobyte of text, and a message board between devices. Together they mean a script someone wrote on their wall is one tap from running on yours.
 
-```js
-fetch(kMoonCloudUrl + "/api/talk", { cache: "no-store" })
-    .then(r => r.ok ? r.json() : null)
-    .then(d => draw(d?.messages))
-    .catch(() => draw(null));
-```
+**What makes it plausible.** The scripts are tiny: the shipped `.mle` files run 780 to 1907 bytes and the whole library of twenty-odd is 36 KB. A script is self-contained by design, so the text is the artifact. And the device already compiles and runs arbitrary script text safely, which is the hard half and is done.
 
-A DNS failure, a dead network, a 500, and a genuinely empty message list all reach `draw(null)` and render the same nothing. `renderMoonCloudStats` fails even more quietly: its `.catch` drops the section entirely, so an unreachable server and a server with no reports both render a card with no statistics on it. The Worker's own dev page (`mooncloud/worker.js`) does the third variant, printing `"No data yet."` on any failure, which states as fact something it has no evidence for.
+**The design work is that a script is five to seven times a message.** Talk caps a message at 280 characters, deliberately: a chat message is a sentence, and one caller must not fill the table. Three options:
 
-Found on the bench: with `kMoonCloudUrl` freshly switched to `stats.moonmodules.org`, a stale negative DNS entry on the local network made the name unresolvable to the browser while the firmware's own POSTs kept succeeding. Messages were arriving on the server and the log stayed empty, with nothing on screen to say why. The device looked broken and was not.
+- **A second endpoint** (`/api/script`) with its own size cap and table, and a message that references it by id. The chat table stays a chat table, a script is fetched when someone wants it, and a board read stays small. Most work, cleanest shape, and the recommendation.
+- **An attachment column on the message**, capped separately. One table and one post, at the cost of every board read carrying script text unless the query is careful.
+- **Share a URL.** A script already lives in the user's File Manager and a device could serve it over the LAN. Free, and limited to one network, which is the case that makes the feature interesting.
 
-The fix is to distinguish the cases the promise already separates: a rejected fetch is unreachable, `!r.ok` is a server error, and a parsed empty array is genuinely empty. Only the last one may claim there is no data. A card that cannot reach MoonCloud should say so, because the user's next action differs completely: check the network, versus wait for someone to post.
+**A shared script is code from a stranger**, in a way chat text is not. Three questions the design answers rather than discovers:
 
-Worth pairing with the request-storm item in the same area: `renderMoonTalk` fetches uncached on every `createCard`, so a failing endpoint is also retried far more often than it needs to be.
+1. **Loading is explicit and reversible.** A script arrives as something to look at, and taking it leaves what the user already has intact. `/moonlive` (user) shadowing `/.moonlive` (factory) is the existing trap.
+2. **The device is the sandbox.** MoonLive reaches no filesystem and no network, so the blast radius of a hostile script is the LEDs and the render budget. Worth confirming rather than assuming: a script that never yields is a watchdog reset, which is a denial of service on someone's wall.
+3. **Attribution and removal.** Any sender id can be claimed, and a message stays once posted. Fine for chat, weaker for code.
+
+Depends on Talk shipping and on the server being deployed.

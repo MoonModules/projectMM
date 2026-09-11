@@ -1,10 +1,8 @@
 # MoonCloud
 
-The server behind the MoonCloud card, and the only one projectMM talks to. **Stats** takes a report and hands back the aggregates; **Talk** is a public message board between devices. One Worker, one database, one deploy. Published here for the same reason the firmware is, so that "the deployed code is the published code" is checkable rather than taken on trust.
+The server behind the MoonCloud card, and the only one projectMM talks to. **Stats** takes a report and hands back the aggregates; **Talk** is a public message board between devices. One Worker, one database, one deploy. Published here so that "the deployed code is the published code" is checkable rather than taken on trust.
 
-What it stores, and what it deliberately does not, is in [privacy-policy.md](../docs/privacy-policy.md). The design and the reasoning behind the installation id are in [the MoonCloud plan](../docs/history/plans/Plan-20260910%20-%20MoonCloud.md).
-
-## The whole thing
+What it stores, and what it deliberately does not, is in [privacy-policy.md](../docs/privacy-policy.md).
 
 | File | |
 |---|---|
@@ -15,13 +13,17 @@ What it stores, and what it deliberately does not, is in [privacy-policy.md](../
 
 ## Endpoints
 
-**`POST /api/report`** takes one JSON report. Fields outside the allowlist are dropped rather than stored. A report with no installation id is accepted and discarded, since without one it cannot be counted as an installation. Returns `{"ok": true}`.
+**`POST /api/report`** takes one JSON report. Fields outside the allowlist are dropped rather than rejected, so an old device sending an old shape still counts. Returns `{"ok": true}`.
 
-**`GET /api/stats`** returns the aggregates the device card renders: installation and report totals, plus counts by version, chip, device model and country. Readable by anyone, so it carries only aggregates and never a row.
+**`GET /api/stats`** returns aggregates only, never a row: totals plus counts by version, chip, device model, country, and by role for what a user added (drivers, services, layouts, effects, modifiers).
 
-**`POST /api/talk`** posts one message to the public board: a sender (the installation id), the text, and a device name ONLY when that device's own consent said to share it. Bounded at 280 characters.
+Any dimension narrows the whole answer, which is what makes a chart slice clickable: `?version=`, `?chip=`, `?deviceModel=`, `?flash=`, `?psram=`, `?sdk=`, `?country=`, `?event=`, `?driver=`, `?service=`, `?layout=`, `?effect=`, `?modifier=`, and `?dev=0|1`. Memory and light counts are stored as raw numbers and bucketed into ranges on read, so they filter by bounds instead: `?lightCountMin=1&lightCountMax=64`, likewise `totalHeap` and `freeHeap`. The answer carries `filtered: true` when any of them applied.
 
-**`GET /api/talk`** returns the newest 50 messages, `?since=<id>` for what a caller has not seen. The full sender id is never published: a message carries the device name if one was shared, else the first 8 characters of the id, which groups one device's messages without naming anyone.
+Column names come from an allowlist in the Worker, never from the query string, and values are bound.
+
+**`POST /api/talk`** posts one message, bounded at 280 characters, carrying a device name only when that device's consent said to share it.
+
+**`GET /api/talk`** returns the newest 50, `?since=<id>` for what a caller has not seen. The full sender id is never published: a message shows the shared name, else the first 8 characters of the id.
 
 ## Running it locally
 
@@ -29,81 +31,78 @@ What it stores, and what it deliberately does not, is in [privacy-policy.md](../
 uv run moondeck/run/run_mooncloud.py --seed     # --seed only the first time
 ```
 
-`wrangler dev` runs `worker.js` in **workerd, the same runtime Cloudflare uses**, against a local D1 (SQLite under `.wrangler/`). So this is not a stand-in that approximates the server: it is the server, with a local database and a localhost address, and what you verify here is what deploys.
+`wrangler dev` runs `worker.js` in workerd, the runtime Cloudflare uses, against a local D1 under `.wrangler/`. What you verify here is what deploys. It binds `0.0.0.0` because wrangler's default answers only the machine itself and refuses every board on the network.
 
-Point a device at it by changing `kMoonCloudUrl` in `src/ui/app.js` and `kHost` in `src/core/MoonCloudModule.h`, which is a rebuild: the address is compiled in rather than configurable, so that one MoonCloud cannot be mistyped into another.
-
-## Pointing a device somewhere else
-
-`server` and `serverPort` are controls on the **MoonCloud** card, so any device can be aimed at any MoonCloud without a rebuild. The port picks the transport: **443 or empty means HTTPS**, anything else means plain HTTP.
-
-Three cases this exists for, and only one of them is development:
-
-**Self-hosting.** The server is published here precisely so someone can run their own. Set `server` to their host and `serverPort` to 443, and that device reports to them instead. Nothing about MoonCloud assumes the address is ours.
-
-**A local server while changing `worker.js`.** Set `server` to the machine's LAN address and `serverPort` to `8787`:
-
-```sh
-uv run moondeck/run/run_mooncloud.py --seed
-```
-
-That runs the Worker under workerd, the same runtime Cloudflare uses, against a local D1 under `.wrangler/`. **A DEVICE must be given the machine's LAN address, not `127.0.0.1`**, which on a board means the board itself. `httpRequest` also does no name resolution on the plain-HTTP path, so it has to be a dotted-quad IP rather than a hostname.
-
-The local server binds `0.0.0.0` for exactly this reason: wrangler's default is localhost, which answers from the machine and refuses every board on the network.
-
-**Moving to a new address.** The shipped default is a compile-time value in `MoonCloudModule.h`, and the controls are how a device already in the field follows a move without a firmware update.
+To point a device at it, change `kHost` in `src/core/MoonCloudModule.h` and `kMoonCloudUrl` in `src/ui/app.js` and rebuild. The address is compiled in rather than configurable, so one MoonCloud cannot be mistyped into another, and the two must change together: a device reporting to one address while the card reads another shows a user their own report missing. A device needs the machine's LAN address as a dotted quad, not `127.0.0.1` (which on a board means the board) and not a hostname (the plain-HTTP path does no name resolution).
 
 ## Deploying
 
+Needs the owner's Cloudflare login. Stats and Talk run on Workers plus D1, both free tier.
+
 ```sh
-npx wrangler d1 create mooncloud-stats          # then put the id in wrangler.toml
+npx wrangler login
+npx wrangler d1 create mooncloud-stats                              # put the id in wrangler.toml
 npx wrangler d1 execute mooncloud-stats --file=schema.sql --remote
 npx wrangler deploy
 ```
 
+**The firmware talks to the `workers.dev` address, and only that one.** A Custom Domain is optional, for people who want to read the aggregates without the app:
+
+```toml
+[[routes]]
+pattern = "stats.example.org"
+custom_domain = true
+workers_dev = true   # declaring ANY route disables workers.dev, which the firmware compiles in
+```
+
+**Do not point the firmware at a Custom Domain without checking the issuer.** Cloudflare picks the CA, and the one it picked was absent from IDF's default `esp_crt_bundle`: every ESP32 handshake failed with "No matching trusted root certificate found" while desktop's system trust store accepted it, so devices went silent with nothing on screen to say why. The `workers.dev` certificate is one the bundle carries. Enabling `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL` would cover any issuer, at roughly 30 KB of flash on a board already at 81% of its app slot.
+
+Point the firmware at a new address only once that address answers, and only after a real device has completed a TLS handshake with it: a failed report is never retried, so every device reporting into an unreachable name loses that report.
+
 ## Changing the schema
 
-Nothing here is fixed. All four were tested against a real D1, and `wrangler d1 execute` is the tool for each: add `--remote` for the deployed database, leave it off for the local one.
+`wrangler d1 execute` does all of it, `--remote` for the deployed database:
 
 ```sh
 npx wrangler d1 execute mooncloud-stats --remote --command="ALTER TABLE reports ADD COLUMN cpu TEXT NOT NULL DEFAULT ''"
-npx wrangler d1 execute mooncloud-stats --remote --command="ALTER TABLE reports DROP COLUMN psram"
-npx wrangler d1 execute mooncloud-stats --remote --command="ALTER TABLE reports RENAME COLUMN sdk TO sdkVersion"
-npx wrangler d1 execute mooncloud-stats --remote --command="UPDATE reports SET chip='ESP32-S3' WHERE chip='esp32s3'"
 ```
 
-Deleting rows has its own script, because it is the one operation that cannot be undone by waiting: `moondeck/run/purge_mooncloud.py`, which asks for the row count before touching the deployed database.
+**Adding a field needs three edits in order**: the column, then `ALLOWED` in `worker.js` so it is no longer dropped on arrival, then the report builder in `MoonStatsModule.h`. Reversed, devices send a field the server discards.
 
-**Adding a field needs three edits, and the order matters.** The column first, then `ALLOWED` in `worker.js` so the field is no longer dropped on arrival, then the report builder in `MoonStatsModule.h`. Reversed, devices send a field the server discards.
+`schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so re-running it changes nothing; a new column needs `ALTER TABLE` and an edit to the file so a fresh deployment gets it too.
 
-**`schema.sql` uses `CREATE TABLE IF NOT EXISTS`**, so re-running it on an existing database changes nothing. A new column has to be said out loud with `ALTER TABLE`, and the file updated to match so a fresh deployment gets it too.
+**A field that was never collected cannot be filled in later.** That is why the `events` table and the `dev` flag exist now rather than when they are needed.
 
-**An old device keeps sending the old shape.** A dropped column means its value is discarded, a renamed one means it arrives under a name nothing reads. Neither breaks the device: an unknown field is ignored, and a missing one is simply absent from the row. That is why the allowlist drops rather than rejects.
-
-**What cannot be changed retroactively is a field that was never collected.** A column added in six months is empty for every row before it, and nothing can fill it in. That is the reasoning behind the `events` table and the `dev` flag: both exist now because history cannot be reconstructed later.
+Deleting rows has its own script, because it is the one operation waiting cannot undo: `moondeck/run/purge_mooncloud.py` asks for the row count first.
 
 ## Moving to another host
 
-Nothing here is Cloudflare-specific except the deployment itself. **The data is plain SQLite** and comes out in one command:
+The data is plain SQLite and comes out in one command, worth running before any schema change regardless:
 
 ```sh
 npx wrangler d1 export mooncloud-stats --remote --output=mooncloud-backup.sql
 ```
 
-That file is `CREATE TABLE` plus `INSERT` statements, which any SQLite, Postgres or MySQL will take with minor dialect edits. Worth running before any schema change, and worth running periodically regardless.
+`worker.js` is the only thing to rewrite, and three parts of it are Workers-specific: `env.DB.prepare(...)` (any SQL library replaces it), the `fetch(request, env)` entry point (every serverless runtime has one), and `request.cf.country`. That last one is genuinely lost: elsewhere the country comes from a GeoIP lookup on the IP address, which means handling an address the privacy policy promises not to store.
 
-**What would have to be rewritten** is `worker.js`, and it is about 300 lines of routing, an allowlist and four aggregate queries. The Workers-specific parts are three:
+Keep both addresses answering until the fleet has moved, since a report is sent once and never retried.
 
-- `env.DB.prepare(...).bind(...).all()`, which is D1's client. Any SQL library replaces it.
-- `request.cf.country`, the edge-derived country. **This is the one thing genuinely lost**: elsewhere the country comes from a GeoIP lookup on the IP address, which means handling the address, which the privacy policy promises not to store. A different host means either dropping the country or rewriting that promise.
-- The `fetch(request, env)` entry point, which is a shape every serverless runtime has an equivalent of.
+## Two things that are not obvious
 
-**The device side needs no change at all.** `server` and `serverPort` are controls, so a device already in the field follows a move without a firmware update, and the default in `MoonCloudModule.h` is a one-line change for new ones.
+**The country never comes from an address we store.** Cloudflare resolves it at the edge as `request.cf.country`, so no code here sees an IP. The privacy policy's promise is structural rather than a discipline someone maintains in a log config.
 
-**What would break if the address moves without warning**: a report is sent once and never retried, so any device that reports while the old address is dead loses that report. Keep both answering until the fleet has moved.
+**The primary key is `(installationId, version)`.** A device re-reporting the same upgrade overwrites its row, so a row count counts installations rather than retries.
 
-## The two things that are not obvious
+## State outside this repository
 
-**The country never comes from an address we store.** Cloudflare resolves it at the edge and hands it over as `request.cf.country`, so no code here ever sees an IP. That is what makes the privacy policy's promise structural rather than a discipline someone has to maintain in a log config.
+`git revert` removes the code and leaves all of this exactly as it is.
 
-**The primary key is (installationId, version).** A device re-reporting the same upgrade overwrites its row, so a row count is a count of installations rather than of retries. It is also why the totals answer "how many installations are on 4.0.0" rather than only "how many upgrade events happened".
+- **A Cloudflare account** (moonmodules@icloud.com), Free plan, no payment method: free Workers stop at their limits rather than billing. Undo: delete the Worker and database in the dashboard.
+- **A D1 database** `mooncloud-stats`, id `7966e8d7-1fdd-4231-b28d-9dfc08ea94b1`, region WEUR. Undo: `npx wrangler d1 delete mooncloud-stats`.
+- **A deployed Worker**. Undo: `npx wrangler delete mooncloud-stats`.
+- **A `workers.dev` subdomain**, `moonmodules`, claimed on first deploy and never releasable, only left unused.
+- **The nameservers for moonmodules.org**, moved at Esmero to `imani`/`pablo.ns.cloudflare.com`. **The only change that can take the docs site offline.** Undo: put `ns3`/`ns4.esmero.nl` back; Esmero keeps its zone file, so it is a form submission and a wait. The zone is ten records, all DNS-only rather than proxied because GitHub Pages serves its own certificate and proxying causes redirect loops with it: four A and four AAAA at GitHub Pages, `www` CNAME to `moonmodules.github.io`, and a `_discord` TXT.
+
+## Cost on a device
+
++12,832 bytes of flash (+0.77%) and about 800 bytes of static RAM on a classic ESP32, measured by building the same tree with and without MoonCloud on one toolchain. The TLS stack was already linked for OTA, so `httpsPost` adds call-site code rather than a library.

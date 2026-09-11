@@ -20,7 +20,7 @@ Each of these is a separate choice with its own setting. Turning one on says not
 
 ### MoonCloud Stats
 
-One report when the firmware is installed or upgraded, describing hardware and configuration: chip family, flash and PSRAM size, SDK version, board model, which modules are enabled, whether this is an install or an upgrade, the version running and the one it replaced, and whether the firmware was built locally rather than released. Plus an installation id (below) and a country derived from the connection.
+One report when the firmware is installed or upgraded, describing hardware and configuration: chip family, flash and PSRAM size, total and free memory, SDK version, board model, how many lights are driven, which drivers, services, layouts and effects you added, whether this is an install or an upgrade, the version running and the one it replaced, and whether the firmware was built locally rather than released. Plus an installation id (below) and a country derived from the connection.
 
 The report carries no device name, no addresses, no credentials and no text you typed. A unit test asserts those cannot appear in it.
 

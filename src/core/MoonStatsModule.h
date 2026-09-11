@@ -4,27 +4,20 @@
 /// @file MoonStatsModule.h
 /// MoonStats: consent, and the once-per-install trigger.
 ///
-/// Owns the two things that decide whether a report is ever built: what the user answered, and
-/// whether the firmware version changed since the last time this ran. It does NOT build the report
-/// (that is [MoonStatsReport.h](MoonStatsReport.h), a pure function) and it does not send it.
+/// Owns what decides whether a report is built. It does not build one (that is
+/// `buildMoonStatsReport`, a pure function) and does not send it.
 ///
-/// **Consent is the gate, and declining is silent.** `consent` is Unanswered until the user picks.
-/// Never is remembered forever, and a device that never gets a Yes opens no connection and computes
-/// no identifier: there is no "declined" record, because sending one would be a report.
+/// **Consent is the gate, and declining is silent.** A device that never gets a Yes opens no
+/// connection and computes no identifier; there is no "declined" record, because sending one would
+/// be a report.
 ///
 /// **The trigger is a version comparison, not a timer.** `reportedVersion` persists the version that
-/// last produced a report. When the running version differs, one report is due; afterwards the two
-/// match and nothing is due until the next upgrade. So a reboot sends nothing, and an upgrade sends
-/// exactly one report. Whether that report says `install` or `upgrade` follows from the same field:
-/// an empty `reportedVersion` on a device that has never reported is a fresh install, a different
-/// one is an upgrade. No identifier is involved in telling those apart.
+/// last reported, so a reboot sends nothing and an upgrade sends exactly one. An empty value means a
+/// fresh install, a different one an upgrade: no identifier is involved in telling those apart.
 ///
-/// Suppressed in AP mode, where there is no route to the internet and the user is usually
-/// mid-provisioning: prompting there asks a question about data before the device can even reach
-/// the network.
+/// Suppressed in AP mode, where there is no route out and the user is mid-provisioning.
 ///
-/// See [privacy-policy.md](../../docs/privacy-policy.md) for what is promised, and
-/// [the MoonCloud plan](../../docs/history/plans/Plan-20260910 - MoonCloud.md) for the id.
+/// See [privacy-policy.md](../../docs/privacy-policy.md) for what is promised.
 
 #include <cstdint>
 #include <cstdio>
@@ -33,52 +26,29 @@
 #include "core/MoonModule.h"
 #include "core/MoonCloudModule.h"
 #include "core/Control.h"
+#include "core/FilesystemModule.h"   // noteDirty(): scheduling the save, not just marking it
 #include "core/JsonSink.h"
 #include "core/Scheduler.h"
 #include "core/build_info.h"
 #include "platform/platform.h"
+#include "core/LightSummary.h"          // lightCount: the POD the light domain publishes
+#include "light/drivers/Drivers.h"      // Drivers::latestSummary(): the real light total
 
 namespace mm {
 
-// -----------------------------------------------------------------------------------------------
-// The report itself: a pure function over the live module tree.
+// The report: a PURE FUNCTION over the live module tree. It opens no socket, reads no consent and
+// persists nothing, so a test can call it with a tree built by hand.
 //
-// MoonStats: the one report projectMM sends, and only after the user says yes.
-//
-// A PURE FUNCTION over the live module tree. It opens no socket, reads no consent, persists
-// nothing, and can be called from a test with a tree built by hand. Everything it reports is
-// already in memory as a control or a module name, so this is a serializer over known facts
-// rather than new instrumentation.
-//
-// **The allowlist is the design.** Fields are named one at a time and copied by name. A builder
-// that walked the tree and emitted what it found would leak on its first run: `deviceName` and
-// `mac` are live SystemModule controls sitting beside `chip` and `flash`, and the network SSID and
-// credentials are controls too. So there is no "emit everything except" path here, and
-// `unit_MoonStatsReport.cpp` asserts the forbidden names cannot appear whatever the tree holds.
-// See [privacy-policy.md](../../docs/privacy-policy.md), which is the promise this implements, and
-// [the MoonCloud plan](../../docs/history/plans/Plan-20260910 - MoonCloud.md) for the id.
+// **The allowlist is the design.** Fields are named one at a time and copied by name. A builder that
+// walked the tree and emitted what it found would leak on its first run: `deviceName`, `mac` and the
+// network credentials are live controls sitting beside `chip` and `flash`. `unit_MoonStatsReport.cpp`
+// asserts the forbidden names cannot appear whatever the tree holds.
 
-/// What the report says happened. The device knows which without an identifier: the trigger is a
-/// stored version file changing, so a report carrying a previous version is an upgrade and one
-/// without is a fresh install.
+/// What the report says happened.
 enum class MoonStatsEvent : uint8_t { Install, Upgrade };
 
-/// Serialize the report into `sink`.
-///
-/// @param sink        where the JSON object lands.
-/// @param root        the module tree to read (Scheduler's modules in production, a hand-built
-///                    tree in a test).
-/// @param moduleCount how many modules `root` holds.
-/// @param event       install or upgrade.
-/// @param installationId 32 hex characters from `platform::installationId()`, or nullptr to omit
-///                    it (which is what a test asserting the forbidden fields passes).
-/// @param version     the version now running.
-/// @param previousVersion the version it replaced, or nullptr on a fresh install.
-
-/// Read one control's value out of `mod` BY NAME, as a string, or return false when the module
-/// does not carry it. Named lookup rather than a cached descriptor: the report is built once per
-/// install, so a linear walk of ~20 controls costs nothing, and a control that gets renamed makes
-/// the field disappear rather than emitting whatever moved into its index.
+/// Read one control's value out of `mod` by name. Named lookup rather than an index: a renamed
+/// control makes the field disappear rather than emitting whatever moved into its slot.
 inline bool readControl(const MoonModule* mod, const char* name, JsonSink& out) {
     if (!mod) return false;
     auto& ctrls = mod->controls();
@@ -107,9 +77,8 @@ inline const MoonModule* findModule(MoonModule* const* root, uint8_t count, cons
     return nullptr;
 }
 
-/// Copy one named control into the report under the same key, or omit the key entirely when the
-/// control is absent. Omission rather than a null: an absent field costs no bytes and the server
-/// counts what it sees, where a null would need a rule about what it means.
+/// Copy one named control into the report, or omit the key when the control is absent. Omission
+/// rather than a null, which would need a rule about what it means.
 inline void field(JsonSink& sink, const MoonModule* mod, const char* control, const char* key,
            bool& first) {
     if (!mod) return;
@@ -124,19 +93,59 @@ inline void field(JsonSink& sink, const MoonModule* mod, const char* control, co
 }
 
 
+/// Append every user-added enabled module, depth first, each as `role:name`.
+///
+/// The role prefix is what lets the server aggregate drivers, layouts, effects and services
+/// separately: one list in one column, four charts out of it. `ModuleRole` already exists on every
+/// module, so nothing new is invented and nothing a user typed is sent: both halves come from the
+/// catalog's fixed vocabulary.
+///
+/// Wired-by-code modules are the boot tree every device shares, so they are skipped: counting them
+/// made every slice read "N of N devices", which says only that they all booted. Their CHILDREN are
+/// still walked, because a user's effect hangs under the Effects module main.cpp wired. The two
+/// filters agree in practice: a wired container is `generic`, and what hangs under it carries a
+/// real role.
+inline void reportModules(JsonSink& sink, const MoonModule* const* mods, uint8_t count,
+                          bool& first) {
+    for (uint8_t i = 0; i < count; i++) {
+        const MoonModule* m = mods[i];
+        if (!m || !m->enabled()) continue;
+        // ROLE decides, not `isWiredByCode()`. Only children are marked wired (main.cpp marks Tasks,
+        // Pins, Stats, Talk, Preview, ...); the twelve top-level modules are added with
+        // `scheduler.addModule()` and carry no marker, so a wired-by-code test reported every one of
+        // them as `generic:System`, `generic:Network` and so on.
+        //
+        // `Generic` means structural container, which is exactly what should not be counted, and
+        // `Layer` is structural too (it holds effects rather than being one a user picks). What
+        // remains is what somebody chose: drivers, services, layouts, effects, modifiers.
+        const ModuleRole role = m->role();
+        if (m->name() && role != ModuleRole::Generic && role != ModuleRole::Layer) {
+            char entry[80];
+            std::snprintf(entry, sizeof(entry), "%s:%s", roleName(role), m->name());
+            if (!first) sink.append(",");
+            first = false;
+            sink.writeJsonString(entry);
+        }
+        for (uint8_t c = 0; c < m->childCount(); c++) {
+            const MoonModule* child = m->child(c);
+            reportModules(sink, &child, 1, first);
+        }
+    }
+}
+
 inline void buildMoonStatsReport(JsonSink& sink,
                           MoonModule* const* root, uint8_t moduleCount,
                           MoonStatsEvent event,
                           const char* installationId,
                           const char* version,
-                          const char* previousVersion) {
+                          const char* previousVersion,
+                          uint32_t lightCount = 0) {
     const MoonModule* system = findModule(root, moduleCount, "System");
 
     sink.append("{");
     bool first = true;
 
-    // The installation id, when the caller has one. Omitted entirely by the test that asserts the
-    // forbidden fields, and by any caller that has not obtained consent.
+    // Omitted by any caller without consent, and by the test asserting the forbidden fields.
     if (installationId && *installationId) {
         sink.append("\"installationId\":");
         sink.writeJsonString(installationId);
@@ -153,15 +162,9 @@ inline void buildMoonStatsReport(JsonSink& sink,
         sink.writeJsonString(version);
     }
 
-    // Whether this firmware came from a release or somebody's laptop. `kRelease` is set by CI on a
-    // published build and EMPTY on a local one, so this needs no new plumbing and no question to the
-    // user: it describes the binary, not the person.
-    //
-    // Sent from the FIRST report rather than added when the noise becomes annoying, because a flag
-    // introduced later cannot classify rows already stored: every report before it exists is
-    // permanently unlabeled, and nothing afterwards can tell a developer's bench board from a
-    // user's shelf. One boolean now buys a dashboard that can say "excluding development installs"
-    // for its whole history.
+    // Release or somebody's laptop: `kRelease` is set by CI and empty on a local build, so it
+    // describes the binary, not the person. Sent from the FIRST report because a flag added later
+    // cannot classify rows already stored.
     sink.append(",\"dev\":");
     sink.writeBool(kRelease[0] == 0);
     // Present only on an upgrade, and it is what tells the server this was one.
@@ -170,26 +173,35 @@ inline void buildMoonStatsReport(JsonSink& sink,
         sink.writeJsonString(previousVersion);
     }
 
-    // Hardware, straight off the System module. Every one of these is a fact about the board, not
-    // about the person holding it. `deviceName` and `mac` sit in the same control list and are
-    // deliberately NOT here.
+    // Memory and light count as RAW numbers, bucketed into ranges by the server. Bucketing here
+    // would freeze every stored row at today's boundaries: a range that turns out wrong could never
+    // be re-cut, which is the same trap as a field that was never collected.
+    sink.appendf(",\"totalHeap\":%u,\"freeHeap\":%u,\"lightCount\":%u",
+                 static_cast<unsigned>(platform::totalHeap()),
+                 static_cast<unsigned>(platform::freeHeap()),
+                 static_cast<unsigned>(lightCount));
+
+    // Facts about the board, not the person. `deviceName` and `mac` sit in the same control list
+    // and are deliberately NOT here.
     field(sink, system, "chip", "chip", first);
     field(sink, system, "flash", "flash", first);
     field(sink, system, "psramType", "psram", first);
     field(sink, system, "sdk", "sdk", first);
     field(sink, system, "deviceModel", "deviceModel", first);
 
-    // Which modules are enabled, by name. The names are ours (a fixed vocabulary from the
-    // catalog), not anything a user typed.
+    // What the user CHOSE to run, by name: a fixed vocabulary from the catalog, never anything a
+    // user typed.
+    //
+    // Modules wired by main.cpp are skipped. Every device has them, so counting them said only
+    // "these two devices both booted": every slice read 2 of 2, and the interesting modules were
+    // buried in an `other` bucket. What varies between installations is what someone ADDED, and
+    // `isWiredByCode()` is exactly that line, drawn where the knowledge lives.
+    //
+    // Children are walked, because a user's additions hang off a parent (an effect under Effects, a
+    // driver under Drivers) while the boot wiring is what sits at the top.
     sink.append(",\"modules\":[");
     bool firstModule = true;
-    for (uint8_t i = 0; i < moduleCount; i++) {
-        const MoonModule* m = root[i];
-        if (!m || !m->enabled() || !m->name()) continue;
-        if (!firstModule) sink.append(",");
-        firstModule = false;
-        sink.writeJsonString(m->name());
-    }
+    reportModules(sink, root, moduleCount, firstModule);
     sink.append("]");
 
     sink.append("}");
@@ -199,13 +211,6 @@ inline void buildMoonStatsReport(JsonSink& sink,
 
 class MoonStatsModule : public MoonModule {
 public:
-    /// What the user answered. Persisted, so Never survives a reboot and an upgrade.
-    ///
-    /// Unanswered is the default and the only state that shows a prompt. NotNow exists so a user
-    /// who is busy is asked again after the NEXT upgrade rather than never: it is a deferral, where
-    /// Never is an answer.
-    enum Consent : uint8_t { Unanswered = 0, Yes = 1, NotNow = 2, Never = 3 };
-
     void setup() override {
         std::snprintf(runningVersion_, sizeof(runningVersion_), "%s", kVersion);
         MoonModule::setup();
@@ -213,40 +218,38 @@ public:
 
     void defineControls() override {
         controls_.clear();
-        // The user's answer. A select rather than a bool: "not now" and "never" are different
-        // answers, and collapsing them would either nag someone who declined or silence someone
-        // who only deferred.
-        static const char* kConsentOptions[] = {"Not answered", "Yes", "Not now", "Never"};
-        controls_.addSelect("consent", consent_, kConsentOptions, 4);
+        // A select rather than a bool: collapsing "not now" and "never" would either nag someone
+        // who declined or silence someone who only deferred.
+        // A checkbox, not a four-option select: "not now" and "never" both mean nothing is sent,
+        // and telling them apart cost a persisted version and a branch in setup() to express a
+        // distinction nobody asked for.
+        controls_.addControl("consent", consent_);
 
-        // The version that last produced a report. Empty means none ever has, which is what makes
-        // the first report an `install`. Read-only in the UI: it is bookkeeping, and a user editing
-        // it would either re-send or silence a genuine upgrade.
-        controls_.addReadOnly("reportedVersion", reportedVersion_, sizeof(reportedVersion_));
+        // addText + the readonly FLAG, not addReadOnly: ControlType::ReadOnly is excluded from
+        // persistence (Control.cpp, isPersistable) and refused on load, so these two came back empty
+        // on every boot. reportedVersion empty means a report is due, so a consented device sent a
+        // fresh `install` on EVERY reboot: the reports row was overwritten by its primary key, which
+        // hid it, while the events table gained a row per boot and the install pie counted reboots.
+        //
+        // The flag keeps them display-only in the UI, which is the actual intent: bookkeeping a user
+        // would break by editing.
+        controls_.addText("reportedVersion", reportedVersion_, sizeof(reportedVersion_));
+        controls_.setReadOnly(controls_.count() - 1, true);
+
+        // The running version is derived at setup() from a compile-time constant, so it genuinely
+        // has nothing to persist.
         controls_.addReadOnly("version", runningVersion_, sizeof(runningVersion_));
 
-    }
-
-    /// True when the UI should ask. Only ever true before the user answers, and never while the
-    /// device is its own access point.
-    bool shouldPrompt() const {
-        if (consent_ != Unanswered) return false;
-        // Not while the device is its own access point: there is no route to the internet there,
-        // and the user is part-way through setting the device up. The question waits for a real
-        // network rather than interrupting provisioning.
-        if (inApMode()) return false;
-        return true;
     }
 
     /// True when a report is due: the user said yes, and the running version differs from the one
     /// that last reported.
     bool reportDue() const {
-        if (consent_ != Yes) return false;
+        if (!consent_) return false;
         return std::strcmp(reportedVersion_, runningVersion_) != 0;
     }
 
-    /// Which kind of report is due. An empty `reportedVersion` means this install has never
-    /// reported, so it is a fresh install; anything else means the firmware moved under it.
+    /// Which kind of report is due.
     MoonStatsEvent dueEvent() const {
         return reportedVersion_[0] == 0 ? MoonStatsEvent::Install : MoonStatsEvent::Upgrade;
     }
@@ -256,53 +259,45 @@ public:
         return reportedVersion_[0] == 0 ? nullptr : reportedVersion_;
     }
 
-    /// Record that a report was sent for the running version, so nothing further is due until the
-    /// next upgrade. Called after a send is HANDED OFF rather than after it succeeds: a failure is
-    /// not retried (a lost report costs one row in an aggregate), and marking only on success would
-    /// make an unreachable server re-send on every boot.
+    /// Record that a report was sent. Called on HAND-OFF rather than on success: a lost report
+    /// costs one row, where marking only on success would re-send on every boot.
     void markReported() {
         std::snprintf(reportedVersion_, sizeof(reportedVersion_), "%s", runningVersion_);
+        // markDirty() alone marks the MODULE dirty; it does not schedule a save. FilesystemModule's
+        // tick1s returns before flushing unless noteDirty() has set its pending flag, and nothing on
+        // the report path calls it: the pair is what a control write does (HttpServerModule).
+        //
+        // Without it an INSTALL usually still saved, riding along with the 2 s debounce the consent
+        // write left pending, while an UPGRADE boot (consent already on, no control written) left the
+        // new version in RAM only, so the next reboot reported the same upgrade again. That is the
+        // case this feature exists for.
         markDirty();
+        FilesystemModule::noteDirty();
     }
 
-    /// Record the user's answer.
-    void setConsent(Consent answer) {
-        consent_ = static_cast<uint8_t>(answer);
-        markDirty();
-    }
+    /// Record the user's answer, the same way a control write does.
+    void setConsent(bool yes) { consent_ = yes; markDirty(); }
 
-    Consent consent() const { return static_cast<Consent>(consent_); }
+    bool consent() const { return consent_; }
 
-    /// Pretend the firmware is a different version, so a test can exercise a real UPGRADE: the
-    /// running version changing under an install that already reported. Nothing else can produce
-    /// that state, since `setup()` reads a compile-time constant and a test cannot recompile.
+    /// Fake the running version so a test can exercise a real upgrade; `setup()` reads a
+    /// compile-time constant, which a test cannot change.
     void setRunningVersionForTest(const char* v) {
         std::snprintf(runningVersion_, sizeof(runningVersion_), "%s", v ? v : "");
     }
 
-    /// This installation's id, or an empty string when the user has not consented.
-    ///
-    /// Gated on consent rather than merely unused without it: the policy says nothing is generated
-    /// until you say yes, so a caller cannot obtain one to log or display either.
+    /// This installation's id, or empty without consent. Gated rather than merely unused, so no
+    /// caller can obtain one to log or display.
     void installationId(char* out) const {
         if (!out) return;
-        if (consent_ != Yes) { out[0] = 0; return; }
+        if (!consent_) { out[0] = 0; return; }
         mm::installationId(out);
     }
 
-    /// One bounded HTTP call per second at most, and only when a report is actually due, which is
-    /// once per install or upgrade in the life of a device. The same shape HueDriver uses for the
-    /// bridge poll: `tick1s` is not the render path, and a call that costs a second here costs
-    /// nothing a user can see.
-    // The send is a bounded blocking call, which is what `tick1s` is for: it is the 1 Hz
-    // housekeeping tick, not the per-frame render path, and it is where HueDriver polls its bridge
-    // and the OTA path fetches. `-Wfunction-effects` still warns, because the base declares the
-    // hook MM_NONBLOCKING for the per-frame case and an override cannot narrow that: the warning
-    // names a real property (this call blocks) rather than a mistake.
-    //
-    // What keeps it acceptable is frequency: at most one call, once per firmware install, for the
-    // life of the device. The guards below run first and cost nothing, so a device that has already
-    // reported never reaches the blocking part again.
+    /// A bounded blocking send on the 1 Hz housekeeping tick, the same shape HueDriver uses for its
+    /// bridge poll. `-Wfunction-effects` warns because the base declares the hook MM_NONBLOCKING for
+    /// the per-frame case; the warning names a real property rather than a mistake. At most one call
+    /// per firmware install, and the guards below return first once a device has reported.
     void tick1s() MM_NONBLOCKING override {
         MoonModule::tick1s();
         if (!reportDue()) return;
@@ -312,24 +307,20 @@ public:
         sendReport();
     }
 
-    /// Whether the device is currently serving its own access point, asked of the platform rather
-    /// than pushed in by NetworkModule. A setter would have meant one module reaching into another
-    /// to keep a copy of a fact the platform already answers, and a stale copy is a prompt that
+    /// Asked of the platform rather than pushed in by NetworkModule: a stale copy is a prompt that
     /// appears at the wrong moment.
     bool inApMode() const { return platform::wifiApConnected(); }
 
 private:
-    /// Build the report and POST it once. Marked reported on HAND-OFF rather than on success: a
-    /// failure costs one row in an aggregate, where re-sending on every boot until a server answers
-    /// would turn one report into a heartbeat, which is the one thing this feature promises never
-    /// to be.
+    /// Build the report and POST it once. Marked reported on hand-off: re-sending until a server
+    /// answers would turn one report into a heartbeat.
     void sendReport() {
         char id[kInstallationIdChars + 1] = {};
         installationId(id);
         if (!id[0]) return;   // no consent, no id, no report
 
-        // Scheduler exposes module(i) rather than the array, so the tree is gathered here. 32 is
-        // its own capacity, so this cannot truncate a tree the scheduler accepted.
+        // Scheduler exposes module(i) rather than the array. 32 is its own capacity, so this
+        // cannot truncate a tree it accepted.
         MoonModule* tree[32] = {};
         auto* sched = Scheduler::instance();
         if (!sched) return;
@@ -339,19 +330,19 @@ private:
         }
 
         JsonSink body;
+        const LightSummary* lights = Drivers::latestSummary();
         buildMoonStatsReport(body, tree, count,
-                             dueEvent(), id, runningVersion_, previousVersion());
+                             dueEvent(), id, runningVersion_, previousVersion(),
+                             lights ? lights->lightCount : 0);
 
-        // The response is discarded: the server answers {"ok":true} and there is nothing to do
-        // with it. A small buffer still has to exist because httpRequest reads into one.
-        // Sent through the container, which owns the address and the scheme choice.
+        // Sent through the container, which owns the address. The response is discarded.
         if (auto* cloud = static_cast<const MoonCloudModule*>(parent())) {
             (void)cloud->post("/api/report", body.data());
         }
         markReported();
     }
 
-    uint8_t consent_ = Unanswered;
+    bool consent_ = false;
     char reportedVersion_[32] = {};
     char runningVersion_[32] = {};
 };

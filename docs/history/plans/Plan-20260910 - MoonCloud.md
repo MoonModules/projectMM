@@ -116,37 +116,9 @@ The Stats card fetches `GET /api/stats` and renders what everyone reported as pi
 
 **The card is the UI, which is why the server is an API.** There is one place to build and keep in sync with the schema, contributing earns something visible in return, and a user sees the shape of the data their own report joined. `/api/stats` is readable by anyone, so it carries aggregates that are safe to show the world, which counts of chips and versions are.
 
-Fetched when the card is opened, and a failure leaves the card without the section: the aggregate is a reward rather than something the device needs.
+Fetched when the card is opened. A failure says so on the card ("Cannot reach the MoonCloud server.") rather than rendering as an empty section: an unreachable server and one with nothing in it lead a reader to different actions.
 
-`server` and `serverPort` are controls on the card, so one setting drives both the report and the fetch. Port 443 or none means the public server over HTTPS; anything else is a local or self-hosted MoonCloud over plain HTTP.
-
-## Next: filter the charts by clicking a slice
-
-Sketched 2026-09-10; nothing started. Every pie counts every report, and the `Build` pie shows the released-against-development split rather than the other charts pre-applying it. The natural next step is to make a slice a FILTER: click `development` and every other chart re-counts within it, click `NL` and the rest describe the Netherlands.
-
-That is why no chart filters by default. A default that quietly removed development installs was the first shape, and it made the headline number smaller with nothing saying why, while hiding a developer's own bench boards from the card running on one of them. Counting everything and showing the split is both honest and the thing cross-filtering builds on: a filter has to be something the reader chose, or it is just a hidden default with extra steps.
-
-The server already takes `?dev=0`, so the shape exists for one dimension. Generalising it means a filter parameter per dimension and one query builder rather than a special case per chart.
-
-## Next: share a MoonLive script over MoonTalk
-
-Sketched 2026-09-10 while Talk was built. **The unique feature nobody else has**: projectMM ships a scripting language whose programs are about a kilobyte of text, and a message board between devices. Together they mean a script someone wrote on their wall is one tap from running on yours.
-
-**What makes it plausible.** The scripts are tiny: the shipped `.mle` files run 780 to 1907 bytes and the whole library of twenty-odd is 36 KB. A script is self-contained by design, so the text is the artifact. And the device already compiles and runs arbitrary script text safely, which is the hard half and is done.
-
-**The design work is that a script is five to seven times a message.** Talk caps a message at 280 characters, deliberately: a chat message is a sentence, and one caller must not fill the table. Three options:
-
-- **A second endpoint** (`/api/script`) with its own size cap and table, and a message that references it by id. The chat table stays a chat table, a script is fetched when someone wants it, and a board read stays small. Most work, cleanest shape, and the recommendation.
-- **An attachment column on the message**, capped separately. One table and one post, at the cost of every board read carrying script text unless the query is careful.
-- **Share a URL.** A script already lives in the user's File Manager and a device could serve it over the LAN. Free, and limited to one network, which is the case that makes the feature interesting.
-
-**A shared script is code from a stranger**, in a way chat text is not. Three questions the design answers rather than discovers:
-
-1. **Loading is explicit and reversible.** A script arrives as something to look at, and taking it leaves what the user already has intact. `/moonlive` (user) shadowing `/.moonlive` (factory) is the existing trap.
-2. **The device is the sandbox.** MoonLive reaches no filesystem and no network, so the blast radius of a hostile script is the LEDs and the render budget. Worth confirming rather than assuming: a script that never yields is a watchdog reset, which is a denial of service on someone's wall.
-3. **Attribution and removal.** Any sender id can be claimed, and a message stays once posted. Fine for chat, weaker for code.
-
-Depends on Talk shipping and on the server being deployed.
+The address is compiled in (`kHost` in `MoonCloudModule.h`, `kMoonCloudUrl` in `src/ui/app.js`), so one constant drives both the report and the fetch. HTTPS only: there is one MoonCloud, and a device that could be pointed elsewhere could be pointed at nothing, where a failed report is never retried. Moving the server is a release.
 
 ## Scope
 
@@ -172,6 +144,6 @@ Depends on Talk shipping and on the server being deployed.
 
 **ewowi owns the Cloudflare account** (settled 2026-09-10). That was the last open question and the one that kept this feature in the backlog: the code was never the blocker, a person willing to hold the account was. Stats and Talk run on Workers plus D1, both free tier; Sync would need Durable Objects, which are paid, so it is also the point where MoonCloud starts costing money.
 
-What ownership means in practice: the login that deploys, the address that gets the alerts, and the person who notices when it breaks. [mooncloud/DEPLOY.md](../../../mooncloud/DEPLOY.md) is the sequence, and three of its steps need that account rather than any automation: `wrangler login`, the DNS record for `stats.moonmodules.org`, and the decision to flip the firmware default.
+What ownership means in practice: the login that deploys, the address that gets the alerts, and the person who notices when it breaks. [mooncloud/README.md](../../../mooncloud/README.md) is the sequence, and three of its steps need that account rather than any automation: `wrangler login`, the Cloudflare account itself, and the decision to flip the firmware default.
 
-**The firmware default is the last step and the one with no recovery.** `MoonCloudModule.h` ships pointing at `127.0.0.1:8787`, a local server for development. Changed before the domain answers, every device in the wild sends one report into nothing and never retries, because a failed report is deliberately not queued.
+**The firmware default is the last step and the one with no recovery.** `MoonCloudModule.h` ships pointing at the `workers.dev` address. A Custom Domain was tried and reverted: Cloudflare issued its certificate from Google Trust Services, which is not in IDF's default root bundle, so every ESP32 handshake failed while desktop's system trust store accepted it. The address is compiled in and hidden, so a prettier one buys nothing a device can use. Changed before an address answers, every device in the wild sends one report into nothing and never retries, because a failed report is deliberately not queued.

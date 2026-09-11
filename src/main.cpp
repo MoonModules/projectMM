@@ -615,8 +615,8 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // whether they exist. Without it a config written before a child was added drops that child on
     // load, which is exactly what happened when Talk was introduced beside Stats: the file listed
     // one child, so the tree came back with one.
-    if (moonStatsModule) { moonStatsModule->markWiredByCode(); moonCloudModule->addChild(moonStatsModule); }
-    if (moonTalkModule)  { moonTalkModule->markWiredByCode();  moonCloudModule->addChild(moonTalkModule); }
+    moonStatsModule->markWiredByCode(); moonCloudModule->addChild(moonStatsModule);
+    moonTalkModule->markWiredByCode();  moonCloudModule->addChild(moonTalkModule);
     scheduler.addModule(moonCloudModule);
     if (improvModule) networkModule->addChild(improvModule);
     if (mqttModule) networkModule->addChild(mqttModule);

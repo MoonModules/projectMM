@@ -23,6 +23,7 @@ report is never retried, so a delete there is not recoverable by waiting.
 """
 
 import argparse
+import datetime
 import re
 import shutil
 import subprocess
@@ -66,8 +67,17 @@ def main() -> int:
         return 1
 
     for day in (args.start, args.end):
-        if day and not DAY.match(day):
+        if not day:
+            continue
+        # The shape AND the calendar: `2026-02-31` matches the pattern and is not a date, and this
+        # script builds a delete predicate out of it.
+        if not DAY.match(day):
             print(f"not a date: {day} (want YYYY-MM-DD)", file=sys.stderr)
+            return 1
+        try:
+            datetime.date.fromisoformat(day)
+        except ValueError:
+            print(f"not a real date: {day}", file=sys.stderr)
             return 1
     if not args.dev_only and not (args.start and args.end):
         print("give --from and --to, or --dev-only", file=sys.stderr)

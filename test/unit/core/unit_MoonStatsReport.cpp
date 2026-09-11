@@ -2,6 +2,7 @@
 
 #include "doctest.h"
 #include "core/MoonStatsModule.h"
+#include "core/AudioService.h"
 
 #include <cstring>
 #include <string>
@@ -119,8 +120,76 @@ TEST_CASE("no installation id appears until one is supplied") {
           != std::string::npos);
 }
 
-/// Only enabled modules are named, so the report describes what a device actually runs.
-TEST_CASE("the report names the modules that are enabled") {
-    const std::string json = report();
-    CHECK(json.find("\"modules\":[\"System\"]") != std::string::npos);
+/// Memory and light count ride the report as RAW numbers, for the server to bucket into ranges.
+///
+/// Nothing pinned them, and the worker's own `clean()` drops anything that is not a string unless a
+/// field has a branch of its own: exactly the regression that stored three zeros for every device.
+TEST_CASE("the report carries memory and light count as numbers") {
+    mm::SystemModule system;
+    system.setName("System");
+
+    mm::MoonModule* tree[] = {&system};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 1, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr, 256);
+    const std::string json = sink.data();
+
+    CHECK(json.find("\"lightCount\":256") != std::string::npos);
+    // Unquoted: a JSON number, not a string, which is what the server's numeric branch accepts.
+    CHECK(json.find("\"lightCount\":\"") == std::string::npos);
+    CHECK(json.find("\"totalHeap\":") != std::string::npos);
+    CHECK(json.find("\"freeHeap\":") != std::string::npos);
 }
+
+/// The report names what the user ADDED, not the boot tree every device shares.
+///
+/// Counting main.cpp's wired modules made every slice read "2 of 2 devices", which says only that
+/// both booted. What varies between installations is what someone chose to run, so a wired module
+/// is skipped while its children are still walked: a user's effect hangs under a wired parent.
+TEST_CASE("the report names modules by ROLE, not by how they were wired") {
+    // A plain container. NOT wired by code, so only the ROLE rule excludes it: under the older
+    // isWiredByCode() test this one would have been reported.
+    mm::MoonModule container;
+    container.setName("Container");
+
+    // Wired by code AND a real role: the mirror case, reported under the role rule and dropped
+    // under the old one. Together these two fail if the filter ever switches back.
+    mm::AudioService added;
+    added.setName("SomeService");
+    added.markWiredByCode();
+
+    mm::AudioService off;
+    off.setName("Disabled");
+    off.setEnabled(false);
+
+    mm::MoonModule* tree[] = {&container, &added, &off};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 3, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr);
+    const std::string json = sink.data();
+
+    CHECK(json.find("service:SomeService") != std::string::npos);   // a real role: reported
+    CHECK(json.find("Container") == std::string::npos);             // generic: a structural container
+    CHECK(json.find("Disabled") == std::string::npos);              // switched off
+}
+
+/// A user's module hangs UNDER a wired parent, so skipping the parent must not skip the child.
+TEST_CASE("a module added under a wired parent is still reported") {
+    mm::SystemModule parent;
+    parent.setName("Effects");
+    parent.markWiredByCode();
+
+    mm::AudioService child;
+    child.setName("Lissajous");
+    parent.addChild(&child);
+
+    mm::MoonModule* tree[] = {&parent};
+    mm::JsonSink sink;
+    mm::buildMoonStatsReport(sink, tree, 1, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr);
+    const std::string json = sink.data();
+
+    CHECK(json.find("service:Lissajous") != std::string::npos);
+    CHECK(json.find("Effects") == std::string::npos);
+}
+
