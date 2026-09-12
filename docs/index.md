@@ -33,7 +33,7 @@ One source tree drives ESP32, Teensy, Raspberry Pi, macOS, Windows and Linux.
 
 -   :material-check-decagram: **See what's verified**
 
-    Every behaviour is pinned by a test. When a bug is fixed, a test proves it.
+    Every behavior is pinned by a test. When a bug is fixed, a test proves it.
 
     [Unit tests](tests/unit-tests.md) · [Scenario tests](tests/scenario-tests.md)
 

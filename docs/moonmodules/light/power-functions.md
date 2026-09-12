@@ -2,7 +2,7 @@
 
 The shared toolbox the light domain is built from: a small set of named, integer-only routines that
 [effects](effects.md) compose into a look. One home per idea — an effect that needs a distance, a
-bar, a noise field or a smooth follower calls the same one every other effect calls, so behaviour is
+bar, a noise field or a smooth follower calls the same one every other effect calls, so behavior is
 consistent, the cost is measured once, and a fix reaches everything at once.
 
 Three consumers share this vocabulary, and each uses a different slice of it:
@@ -29,7 +29,7 @@ lib8tion directly).
 
 ## Migrating an effect — two steps, in this order
 
-**Step 1, the port: behave identically.** Bringing an effect over from WLED or MoonLight reproduces the original's visual behaviour exactly, because the original is the best available description of what the effect should look like. At this stage a difference is a bug, not a variation — pin it with a golden so any drift is visible. Don't get creative with defaults, oscillator math, color mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result, then write our **own** implementation against `EffectBase` and our primitives — carry the behaviour forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
+**Step 1, the port: behave identically.** Bringing an effect over from WLED or MoonLight reproduces the original's visual behavior exactly, because the original is the best available description of what the effect should look like. At this stage a difference is a bug, not a variation — pin it with a golden so any drift is visible. Don't get creative with defaults, oscillator math, color mapping, or geometry, and don't silently drop a parameter that *is* the mechanism (the PaintBrush straight-vs-curved-lines bug was a dropped partial-line `length`; Game of Life was wrong the first time by not porting the real algorithm). Study the source for the algorithm, defaults, and visual result, then write our **own** implementation against `EffectBase` and our primitives — carry the behavior forward, don't trace or copy the structure (see [*Industry standards, our own code*](../../../CLAUDE.md#principles)). Credit the origin as prior art in the block below.
 
 **Step 2, the tuning: change it deliberately.** Once the port is faithful it becomes ours to improve. Adopting a [power function](power-functions.md) often makes an effect look better as a side effect — bouncing balls that collide with each other because the physics is now the shared kernel's, a gradient that stops banding because the maths went 16-bit — and that is a real gain, not a regression. The rule is only that the change is deliberate and visible: say what moved, re-baseline the golden in the same commit, and let the product owner judge it on the panel. What is forbidden is drifting silently.
 
@@ -72,7 +72,7 @@ These act on the grid as a surface rather than on a shape. Between them they cov
 
 **Drawing a shape by walking the pixels it covers.**
 
-The classical rasteriser: given endpoints, a centre and a radius, or a run length, light exactly the cells the shape passes through. Integer-only and exact, with no distance computed anywhere — which makes these the cheap way to draw when the shape sits on the grid and does not need to move smoothly between pixels.
+The classical rasteriser: given endpoints, a center and a radius, or a run length, light exactly the cells the shape passes through. Integer-only and exact, with no distance computed anywhere — which makes these the cheap way to draw when the shape sits on the grid and does not need to move smoothly between pixels.
 
 Contrast with signed distance fields below: same shapes, opposite approach, different trade-off.
 
@@ -116,7 +116,7 @@ This is what makes shapes composable and smooth-moving. It costs a distance per 
 
 **Smooth pseudo-random values across space: everything organic.**
 
-Noise is the source of anything that should look natural rather than drawn — clouds, fire, smoke, water, marbling, drifting colour. The defining property is that nearby points get similar values (unlike a raw hash), so the result flows instead of flickering.
+Noise is the source of anything that should look natural rather than drawn — clouds, fire, smoke, water, marbling, drifting color. The defining property is that nearby points get similar values (unlike a raw hash), so the result flows instead of flickering.
 
 One sample is a soft blur; the character comes from composing them. Summing octaves adds structure at every scale, folding the field creases it into flame, and displacing the sample coordinate by another field is what produces the flowing, liquid look.
 
@@ -235,7 +235,7 @@ A script reaches the same kernel through [MoonLive](MoonLiveEffect.md#the-vocabu
 
 **One function of (position, time) evaluated per pixel — the other way to write an effect.**
 
-Everything above draws *into* a grid: set this pixel, walk this line, move this row. A shader inverts that — it never draws anything, it answers a question. Given where a pixel is and what time it is, what colour is it? The framework runs that function everywhere.
+Everything above draws *into* a grid: set this pixel, walk this line, move this row. A shader inverts that — it never draws anything, it answers a question. Given where a pixel is and what time it is, what color is it? The framework runs that function everywhere.
 
 That inversion is why shaders compose so freely. There is no state to keep in step and no order of operations to get right, so an effect is built by transforming the *coordinate* before answering: fold space and one shape becomes a thousand, rotate it and the whole design turns, displace it by a noise field and everything flows.
 
@@ -252,7 +252,7 @@ That inversion is why shaders compose so freely. There is no state to keep in st
 | `repeat`, `mirror` | Domain operators: fold space so one shape becomes a lattice. The objects do not multiply — the coordinate does the work | Truchet | — |
 | `opUnion`, `opIntersect`, `opSubtract`, `opShell`, `opRound` | Combine two shapes into a third, which is how an SDF scene is composed rather than drawn | Truchet | — |
 | `sdRoundBox`, `sdPolygon` | Shapes beyond the circle/box/segment trio in [Signed distance fields](#signed-distance-fields) | *(no caller yet)* | — |
-| `cosPalette`, `mixColor` | A whole colour ramp as twelve numbers instead of a table | *(no caller yet)* | — |
+| `cosPalette`, `mixColor` | A whole color ramp as twelve numbers instead of a table | *(no caller yet)* | — |
 
 </div>
 

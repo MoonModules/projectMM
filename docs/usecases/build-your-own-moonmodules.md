@@ -304,7 +304,7 @@ A **driver** takes the finished image and pushes it out to physical LEDs — ove
 - `prepare()` **acquires** the peripheral / opens the socket for the current pin config.
 - `release()` **releases** it — so when you switch a driver off, its GPIO is genuinely freed and another driver can use that pin. No reboot.
 
-You get all of that "release the pin on disable" behaviour by implementing the same two hooks you already know from the memory example. The core's traffic cop does the rest. Writing a driver means learning the specific hardware peripheral (the RMT unit, the Parlio bus, a UDP socket), but the *module shape* is identical to your rainbow — which is the whole point.
+You get all of that "release the pin on disable" behavior by implementing the same two hooks you already know from the memory example. The core's traffic cop does the rest. Writing a driver means learning the specific hardware peripheral (the RMT unit, the Parlio bus, a UDP socket), but the *module shape* is identical to your rainbow, which is the whole point.
 
 ## A suggested classroom path
 

@@ -23,7 +23,7 @@ So the frame is **~145 KB** for *both* targets (§ 5), and that single figure is
 | **ESP32-P4** | i80 / LCD_CAM | ✅ *(untested)* | ✅ *(untested)* | P4 has LCD_CAM too; the i80 driver is already registered on it. **This is the P4's viable route** |
 | **any chip** | RMT | ❌ | ❌ | Structurally impossible (§ 6.2) |
 
-**Blunt version: classic ESP32 cannot do the shift-register driver at any useful size, and Parlio cannot do it at all.** The PO's 48×256 target is an **S3 feature** (and probably a P4-over-i80 feature). If the plan assumes StarLight's numbers, note those were achieved on hpwit's **PSRAM-fed refill ring**: a different memory model projectMM does not have and has deliberately [parked](../work/future/led-driver-psram-ring-analysis.md).
+**Blunt version: classic ESP32 cannot do the shift-register driver at any useful size, and Parlio cannot do it at all.** The PO's 48×256 target is an **S3 feature** (and probably a P4-over-i80 feature). If the plan assumes StarLight's numbers, note those were achieved on hpwit's **PSRAM-fed refill ring**: a different memory model projectMM does not have and has deliberately [parked](led-driver-psram-ring-analysis.md).
 
 **The good news, and it is genuinely good:** on the S3 this needs **no new memory model, no new peripheral, and no new driver class**. It is a fan-out *option on the drivers we already ship*, and the 48×256 floor lands inside a buffer size the S3 is measured to handle.
 
@@ -42,17 +42,17 @@ Plus **one shared CLOCK line** and **one shared LATCH line** across all six '595
 
 **One '245 is exactly enough, and that is not a coincidence:** the signals needing the 3.3 → 5 V shift are **6 data lines + CLOCK + LATCH = 8**, which is precisely a '245's width. A '245 is a bus *transceiver*, so its direction pin (DIR) is strapped for a fixed A→B direction and OE tied active — it is used as a plain octal buffer here.
 
-**The `T` in 74HC*T* is load-bearing.** At 5 V a **74HC** input needs V_IH ≥ 0.7 × Vcc = **3.5 V**, and the ESP32 only drives **3.3 V** — *below* threshold, so a HIGH is not guaranteed to read as a 1. It typically *seems* to work on the bench (a given chip may trip nearer 2.5 V at room temperature) and then fails with temperature, supply, or a new batch: **flaky/garbled strands, not dead ones** — the worst kind of fault to chase. **74HCT** has TTL-compatible inputs (V_IH = **2.0 V**), so 3.3 V is unambiguously a HIGH while the outputs still swing a full 5 V, which is what WS2812 wants. Same margin problem, and same family of fix, as the data-line level shifter in [led-signal-integrity.md](../usecases/led-signal-integrity.md).
+**The `T` in 74HC*T* is load-bearing.** At 5 V a **74HC** input needs V_IH ≥ 0.7 × Vcc = **3.5 V**, and the ESP32 only drives **3.3 V** — *below* threshold, so a HIGH is not guaranteed to read as a 1. It typically *seems* to work on the bench (a given chip may trip nearer 2.5 V at room temperature) and then fails with temperature, supply, or a new batch: **flaky/garbled strands, not dead ones** — the worst kind of fault to chase. **74HCT** has TTL-compatible inputs (V_IH = **2.0 V**), so 3.3 V is unambiguously a HIGH while the outputs still swing a full 5 V, which is what WS2812 wants. Same margin problem, and same family of fix, as the data-line level shifter in [led-signal-integrity.md](../../usecases/led-signal-integrity.md).
 
 **Timing headroom is thin, and the buffer is why — know this before blaming the firmware.** The fitted '245 is **plain HCT** (t_pd ≈ 10–18 ns at 5 V), *not* the ~5 ns **A**HCT part. Shift mode clocks the bus at **26.67 MHz** — a **37.5 ns** period — so the buffer alone can consume roughly a third of the bit period in propagation delay.
 
 **But do not pre-emptively panic (or pre-emptively buy).** hpwit runs **19.2 MHz** on this same hardware and it works; we ask for 39% more. The parts are not marginal by design, they are marginal by *headroom*.
 
-**The clock is a DURATION, not a divider — and it is NOT a free sweep knob.** The bench result that fixed the first bench run: 20 MHz was picked "because it divides exactly" and gave 8 × 50 = **400 ns** slots, over the WS2812B **T0H max (~380 ns)** — the strands rendered scattered max-brightness pixels and washed-out white (zeros read as ones; [lessons.md](lessons.md) #5). The in-spec band for a ×8 slot is **290–380 ns → pclk 21.1–27.6 MHz**, and **26.67 MHz (prescale 3 of the 80 MHz bus resolution) is the only exact divide inside it**. `esp_lcd` silently rounds an inexact rate *down* into a wrong waveform rather than erroring, so an inexact clock would fake a hardware fault.
+**The clock is a DURATION, not a divider — and it is NOT a free sweep knob.** The bench result that fixed the first bench run: 20 MHz was picked "because it divides exactly" and gave 8 × 50 = **400 ns** slots, over the WS2812B **T0H max (~380 ns)** — the strands rendered scattered max-brightness pixels and washed-out white (zeros read as ones; [lessons.md](../past/lessons.md) #5). The in-spec band for a ×8 slot is **290–380 ns → pclk 21.1–27.6 MHz**, and **26.67 MHz (prescale 3 of the 80 MHz bus resolution) is the only exact divide inside it**. `esp_lcd` silently rounds an inexact rate *down* into a wrong waveform rather than erroring, so an inexact clock would fake a hardware fault.
 
 **So do not "test" a buffer-timing hypothesis by lowering the clock** — a lower pclk makes the slot *longer*, pushing T0H further past 380 ns, and the symptom it produces is the same washed-out white. There is no lower exact divide in the band. If the buffer is genuinely suspected, the falsifiable test is the *part*: an **AHCT245** (~5 ns) is a drop-in that restores the margin, and the symptom either tracks it or the buffer is innocent.
 
-This is the same "make the hardware hypothesis falsifiable before reaching for the soldering iron" discipline as the TX-power sweep in [led-signal-integrity.md](../usecases/led-signal-integrity.md).
+This is the same "make the hardware hypothesis falsifiable before reaching for the soldering iron" discipline as the TX-power sweep in [led-signal-integrity.md](../../usecases/led-signal-integrity.md).
 
 **Total GPIO cost = `physicalDataPins + 2`.** hpwit's headline "120 strips from 15 pins" is `NBIS2SERIALPINS = 15` data pins × 8 outputs = 120, **plus** the clock and latch pins — so 17 GPIOs in total, not 15. Worth stating because it changes the pin budget.
 
@@ -265,7 +265,7 @@ This explains both facts we could not otherwise account for: **`asyncTransmit` O
 
 **The fix belongs in the core, but the expander is not optional — it is the whole performance story.** The same staging mechanism lifts two bigger *unshifted* ceilings — **P4 Parlio's ~4,096-light contiguous-block wall** and the **classic ESP32's 2,048-light PSRAM-unreachable wall** — so it is tracked as a **core** item and should be **built and proven on the unshifted path first**, where the win is measurable on proven code. That is a sequencing rule about where to de-risk the mechanism.
 
-It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time is a physical constant (30 µs/light, serial per strand), so the only lever on frame rate is **lights per strand**: 16 direct lanes × 1024 = 16K lights is stuck at **33 fps**, while **48 strands × 256 = 12K at 130 fps**, which hpwit and the PO have *actually run* (StarLight). The expander is the only way to reach 48+ strands without spending 48+ GPIOs, and therefore the only route to 100 fps at this scale. The two mechanisms buy different things: **staging buys lights, the expander buys fps**, and they compound: the expander's own ~145 KB frame is precisely the one that fails from PSRAM today. See [backlog-light § Chunked transfer](../work/future/backlog-light.md).
+It is **not** a claim that the expander is a nice-to-have. The WS2812 wire time is a physical constant (30 µs/light, serial per strand), so the only lever on frame rate is **lights per strand**: 16 direct lanes × 1024 = 16K lights is stuck at **33 fps**, while **48 strands × 256 = 12K at 130 fps**, which hpwit and the PO have *actually run* (StarLight). The expander is the only way to reach 48+ strands without spending 48+ GPIOs, and therefore the only route to 100 fps at this scale. The two mechanisms buy different things: **staging buys lights, the expander buys fps**, and they compound: the expander's own ~145 KB frame is precisely the one that fails from PSRAM today. See [backlog-light § Chunked transfer](backlog-light.md).
 
 ### PHASE 2 DESIGN — the encode-into-the-ring (2026-07-14, arithmetic done, not yet built)
 
@@ -294,7 +294,7 @@ The `encoded frame` column is the **fully-encoded shift frame** (~1,152 B/light 
 | 4 × 4 lights (18 KB) | 259 µs |
 | 8 × 8 lights (72 KB) | 1,210 µs |
 
-**What it costs us.** The encoder + the correction LUT + the SWAR transpose all become ISR-reachable and must be `IRAM_ATTR`; a flash access or a cache miss in that path is an underrun, and an underrun is a visible glitch. That is precisely the fragility the whole-frame design was chosen to avoid (see [MoonLedDriver](../moonmodules/light/moxygen/MoonLedDriver.md)), and it is the price of going past 96 lights/strand on an S3. **Both drivers keep shipping**: `I80LedDriver` (esp_lcd, capped, bulletproof) and `MoonI80LedDriver` (ours, uncapped, real-time).
+**What it costs us.** The encoder + the correction LUT + the SWAR transpose all become ISR-reachable and must be `IRAM_ATTR`; a flash access or a cache miss in that path is an underrun, and an underrun is a visible glitch. That is precisely the fragility the whole-frame design was chosen to avoid (see [MoonLedDriver](../../moonmodules/light/moxygen/MoonLedDriver.md)), and it is the price of going past 96 lights/strand on an S3. **Both drivers keep shipping**: `I80LedDriver` (esp_lcd, capped, bulletproof) and `MoonI80LedDriver` (ours, uncapped, real-time).
 
 **The seam**, keeping the platform boundary intact — the platform owns the ring/descriptors/ISR, the domain owns the encode:
 
@@ -384,7 +384,7 @@ The module header reports the **tick** rate (252 fps) while `frameTime` reports 
 
 ### Where to start next
 
-**The scatter is diagnosed, see § 7.6 and [backlog-light.md](../work/future/backlog-light.md).** The ring is clean iff `ringBufs − nSlices ≥ ~2` (a producer/consumer headroom margin, bench-bisected on the wall 2026-07-18). "More buffers" cannot reach 48×256 (the headroom RAM is ~145 KB regardless of geometry, the whole-frame wall); the fix is a refill that structurally TRAILS the DMA read head (hpwit's model), so headroom holds at any `nSlices` at constant RAM.
+**The scatter is diagnosed, see § 7.6 and [backlog-light.md](backlog-light.md).** The ring is clean iff `ringBufs − nSlices ≥ ~2` (a producer/consumer headroom margin, bench-bisected on the wall 2026-07-18). "More buffers" cannot reach 48×256 (the headroom RAM is ~145 KB regardless of geometry, the whole-frame wall); the fix is a refill that structurally TRAILS the DMA read head (hpwit's model), so headroom holds at any `nSlices` at constant RAM.
 
 **The loopback RX path CAPTURES and bit-verifies** (fixed 2026-07-15, `2873ec9d`: "captures it back off the strand, bit-verifies 2304/2304 bits, textbook 300/600 ns pulse widths"; the R14 bit-0 settling artifact was measured on a captured strand, independent proof). But the current loopback builds a PRIVATE frame and transmits it — it does NOT go through the render ring, so it proves the peripheral, not the pipeline, and cannot observe a ring-scatter. An **intrusive** mode — capture what the LIVE ring actually put on the wire (via `captureAndVerifyFrame`, already decoupled from the transmit) — is the closed-loop instrument the ring fix needs, so a machine can bit-verify the frame reached the LEDs intact instead of relying on the PO's eyes.
 
@@ -409,6 +409,6 @@ The module header reports the **tick** rate (252 fps) while `frameTime` reports 
 - `src/light/drivers/ParallelSlots.h` — the 3-slot wire contract + SWAR transpose.
 - `src/platform/esp32/platform_esp32_i80.cpp` — PSRAM-first on LCD_CAM, internal-only on classic I2S (`SOC_LCDCAM_I80_LCD_SUPPORTED` gate).
 - `src/platform/esp32/platform_esp32_parlio.cpp` — the PSRAM→internal degrade.
-- [performance.md § Multi-pin LED driving](../performance.md) — Parlio **65,535 B/lane** single-shot cap (897 RGB lights/lane); S3 i80 **16,384 lights** on PSRAM.
-- [led-driver-psram-ring-analysis.md](../work/future/led-driver-psram-ring-analysis.md): the classic ~2,048 ceiling; the parked refill ring; the shift-register driver's 12,288 floor.
+- [performance.md § Multi-pin LED driving](../../performance.md) — Parlio **65,535 B/lane** single-shot cap (897 RGB lights/lane); S3 i80 **16,384 lights** on PSRAM.
+- [led-driver-psram-ring-analysis.md](led-driver-psram-ring-analysis.md): the classic ~2,048 ceiling; the parked refill ring; the shift-register driver's 12,288 floor.
 - [leddriver-analysis-bottom-up.md](leddriver-analysis-bottom-up.md) — "the multiplex is a configuration of a parallel-clocked backend, not a sibling driver class"; the RMT × ShiftReg impossibility.

@@ -151,7 +151,7 @@ TEST_CASE("SystemModule accepts no user-added children") {
 // Regression: SystemModule overrides setup() and tick1s(); both must chain to
 // MoonModule's base so a wired-by-code child's setup()/tick1s() actually fire.
 // Without the chain a fixed child (Tasks/I2cScan) would never init or poll (the
-// "children miss callbacks" trap from history/decisions.md). tick20ms() isn't
+// "children miss callbacks" trap). tick20ms() isn't
 // overridden, so the base default already propagates it.
 TEST_CASE("SystemModule propagates lifecycle to a wired-by-code child") {
     mm::SystemModule sys;

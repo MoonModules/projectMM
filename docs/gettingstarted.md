@@ -67,7 +67,7 @@ how ready each one is:
   once you add and set up the matching module yourself in the UI (Chapter 2).
 - 🟠 **Amber** — planned. The hardware has it, but there's no module for it yet —
   it's on the to-do list. (Want to help? Building one is our usual loop: read the
-  product page and datasheet, pin the behaviour as tests, then write the code to
+  product page and datasheet, pin the behavior as tests, then write the code to
   pass them — [see how we work](../CLAUDE.md#principles).)
 
 So a green pill is "just works", a yellow one is "works, with a bit of setup", and
@@ -146,7 +146,7 @@ Three regions, left to right:
 
 - **The module list** (left) — every part of your device, from system info at the
   top to your light setup at the bottom. Click a name to jump to it.
-- **The 3D preview** (centre) — a live picture of your lights in their real shape,
+- **The 3D preview** (center): a live picture of your lights in their real shape,
   updating as the effects run. This is what your physical LEDs are doing, right now.
 - **The controls** (right) — the settings for each module. Drag a slider or pick an
   option and the lights react instantly.

@@ -161,7 +161,7 @@ A public message board between projectMM devices, in the shape Meshtastic's chan
 
 ### File Manager
 
-A boot-wired system tool (distinct from Filesystem, the persistence *engine*): browse and manage the device filesystem from a dedicated panel — a lazy expand/collapse folder tree (VS Code / Explorer shape) plus an inline text editor. Browsing is UI-side over `/api/dir` + `/api/file`, so the module itself stays minimal. Tree/toolbar/editor behaviour: ⌄ details.
+A boot-wired system tool (distinct from Filesystem, the persistence *engine*): browse and manage the device filesystem from a dedicated panel — a lazy expand/collapse folder tree (VS Code / Explorer shape) plus an inline text editor. Browsing is UI-side over `/api/dir` + `/api/file`, so the module itself stays minimal. Tree/toolbar/editor behavior: ⌄ details.
 
 <img src="../../assets/core/FileManagerModule.png" width="300" alt="File Manager panel — folder tree + toolbar">
 

@@ -67,7 +67,7 @@ For **LED output** specifically — the pins a WS2812-class strand data line can
 | Avoid | GPIOs | Why |
 |-------|-------|-----|
 | Reserved | **flash/PSRAM pins per module** | The HP SPI flash + PSRAM bus (module-specific; the Waveshare P4-NANO wires them internally). Off-limits. |
-| Role-conflict | **34-38** | Strapping pins (boot mode). Don't drive at reset; the first LED-driver default wrongly landed here (see [lessons.md](../history/lessons.md)). |
+| Role-conflict | **34-38** | Strapping pins (boot mode). Don't drive at reset; the first LED-driver default wrongly landed here (see [lessons.md](../work/past/lessons.md)). |
 | Role-conflict | **37, 38** | UART0 console on the P4-NANO (`CONFIG_ESP_CONSOLE_UART_DEFAULT`) — the runtime `ESP_LOGI` lines come out here, not over USB. |
 | Board-wired (P4-NANO) | **Ethernet RMII** 28-31 / 49-52, **C6 SDIO** 14-19 / 54, **I2C** 7-8 | Consumed by the NANO's on-board Ethernet PHY, the C6 WiFi co-processor, and the I2C bus. |
 

@@ -91,7 +91,7 @@ extra_css:
 hooks:
   - moondeck/docs/mkdocs_hooks.py
 
-# history/ and backlog/ are internal (agent-facing, transient) — kept OFF the top
+# docs/work/ is internal (agent-facing, transient) — kept OFF the top
 # nav (they're not in the `nav:` tree) but still BUILT into the site, so the many
 # doc-to-doc links into them (a spec citing a design study, a decision record)
 # resolve as normal relative links instead of 404ing. Reachable by following a
@@ -107,7 +107,7 @@ hooks:
 # stale anchors. (A later phase can flip anchors to `error` once swept.)
 validation:
   nav:
-    omitted_files: ignore    # history/backlog intentionally absent from nav
+    omitted_files: ignore    # docs/work/ intentionally absent from nav
   links:
     not_found: warn
     anchors: warn
@@ -115,7 +115,7 @@ validation:
 
 # Top-down navigation over the existing files. Two audiences, in order:
 # a user path first (what it is → install → use → effects), then the developer
-# reference (architecture → modules → source-level). history/ and backlog/ are
+# reference (architecture → modules → source-level). docs/work/ is
 # internal and deliberately absent from the published site.
 nav:
   - Home: index.md

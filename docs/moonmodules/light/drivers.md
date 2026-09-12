@@ -60,7 +60,7 @@ The card reads top-down as **invariant controls → `peripheral` divider → per
 
 Two ParallelLedDriver instances that select peripherals on the **same hardware block** (e.g. both `i80` and `MoonI80`, which share LCD_CAM) conflict — the second idles with a status. Different blocks (RMT + `Parlio` + `i80` on a P4) coexist.
 
-Origin: WS2812B on FastLED / WLED prior art, and the clockless I2S / RMT / Parlio techniques of **[hpwit](https://github.com/hpwit) (Yves Bazin)**, whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../history/leddriver-analysis-top-down.md))
+Origin: WS2812B on FastLED / WLED prior art, and the clockless I2S / RMT / Parlio techniques of **[hpwit](https://github.com/hpwit) (Yves Bazin)**, whose work is why a single board can drive dozens of parallel strands at all ([analysis](../../work/future/leddriver-analysis-top-down.md))
 
 Tests: [RMT](../../tests/unit-tests.md#rmtleddriver) · [shared + peripherals](../../tests/unit-tests.md#parallelleddriver)
 

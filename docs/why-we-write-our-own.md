@@ -36,7 +36,7 @@ The two objections we hear most are that agents take developers' jobs, and that 
 
 It is not a verdict on the libraries we moved away from. They work, they have thousands of users, and they were built by people solving real problems on hardware we have never touched.
 
-It is also not arms-length criticism. We built, maintained and contributed to the projects this one descends from, and the code we spent years inside was written by other people *and by us*. Those lessons are recorded in [history](history/README.md).
+It is also not arms-length criticism. We built, maintained and contributed to the projects this one descends from, and the code we spent years inside was written by other people *and by us*. Those lessons are recorded in [what we built](work/past/README.md).
 
 And it is not a general recommendation. No-dependency is right for *this* project because of what this project is for: total control of the target, and a test system with no blind spots. For most software it would be a bad trade.
 
@@ -54,6 +54,6 @@ Writing your own implementation of a known idea can land in either column, and w
 
 **Transform, not imitate.** The architecture is not the old design retyped. Full testability, a [single module model](architecture.md#moonmodules) and [live reconfiguration](architecture.md#live-reconfiguration-every-change-applies-without-a-reboot) force a different shape; an imitation could not have satisfied them.
 
-Credit is the fifth row, and it needs care for a mechanical reason: rewriting removes the easiest form of attribution there is. Take a dependency and the author's name appears in the manifest automatically, as a side effect of the build. Write it yourself and that disappears, even when the idea, the approach or the algorithm came straight from someone else's work. So it has to be deliberate: named in the README's Credits, named in each module's Prior art notes, named in the [history digests](history/README.md), in the place where it can be checked against the source.
+Credit is the fifth row, and it needs care for a mechanical reason: rewriting removes the easiest form of attribution there is. Take a dependency and the author's name appears in the manifest automatically, as a side effect of the build. Write it yourself and that disappears, even when the idea, the approach or the algorithm came straight from someone else's work. So it has to be deliberate: named in the README's Credits, named in each module's Prior art notes, named in the [friend-repo digests](friend-repos/README.md), in the place where it can be checked against the source.
 
 If something here came from your work and is not credited where it should be, [open an issue](logging-an-issue.md) or find us on [Discord](https://discord.gg/TC8NSUSCdV). We would much rather hear it directly.

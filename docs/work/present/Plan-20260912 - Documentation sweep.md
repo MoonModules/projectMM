@@ -24,7 +24,7 @@ Three things landed with the standards page, so that it holds after this sweep r
 
 - `docs/adr/`: 17 records, each already stated as current behavior in `architecture.md` or the standards.
 - 92 shipped plans in `docs/work/past/plans/`, whose content the code, the tests and the merged PR carry.
-- `docs/history/lessons.md` lost its branch diaries (20,510 to 15,733 words). **Its goal is removal**: each surviving lesson is either a constraint that belongs in the `.h` it guards, a rule that belongs in the standards, or history that belongs in git. Three method lessons already moved to `testing.md` and CLAUDE.md that way.
+- `docs/work/past/lessons.md` lost its branch diaries (20,510 to 15,733 words). **Its goal is removal**: each surviving lesson is either a constraint that belongs in the `.h` it guards, a rule that belongs in the standards, or history that belongs in git. Three method lessons already moved to `testing.md` and CLAUDE.md that way.
 
 ## Two pages with a decided shape, pending
 
@@ -37,12 +37,12 @@ Ordered by findings, most first.
 
 | Findings | Page |
 |---|---|
-| 211 | `docs/history/lessons.md` |
-| 204 | `docs/history/leddriver-analysis-bottom-up.md` |
-| 173 | `docs/history/shift-register-driver-analysis.md` |
+| 211 | `docs/work/past/lessons.md` |
+| 204 | `docs/work/future/leddriver-analysis-bottom-up.md` |
+| 173 | `docs/work/future/shift-register-driver-analysis.md` |
 | 164 | `docs/architecture.md` |
 | 121 | `docs/moonmodules/light/power-functions.md` |
-| 116 | `docs/history/leddriver-analysis-top-down.md` |
+| 116 | `docs/work/future/leddriver-analysis-top-down.md` |
 | 112 | `docs/performance.md` |
 | 95 | `docs/usecases/home-automation.md` |
 | 94 | `docs/testing.md` |
@@ -68,7 +68,6 @@ Ordered by findings, most first.
 | 21 | `docs/moonmodules/light/supporting.md` |
 | 21 | `docs/tutorials/generative-effects.md` |
 | 20 | `docs/work/present/Plan-20260830 - Two-way control surfaces.md` |
-| 16 | `docs/history/README.md` |
 | 16 | `docs/moonmodules/core/control.md` |
 | 15 | `docs/logging-an-issue.md` |
 | 14 | `README.md` |

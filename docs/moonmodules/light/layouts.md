@@ -221,7 +221,7 @@ Detail: [technical](moxygen/GridBlacksLayout.md)
 
 Lights on the surface of a hollow sphere — a one-light-thick shell inside a `(2·radius+1)³` box, no interior lights.
 
-- `radius` — surface radius in light-units (1–64); the shell is every cell whose distance from the centre rounds to `radius`.
+- `radius` — surface radius in light-units (1–64); the shell is every cell whose distance from the center rounds to `radius`.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
 
@@ -233,10 +233,10 @@ Detail: [technical](moxygen/SphereLayout.md)
 
 ### Wheel
 
-A bicycle-wheel: `spokes` straight rows radiate from a centre hub, each carrying `ledsPerSpoke` LEDs spaced one unit apart outward.
+A bicycle-wheel: `spokes` straight rows radiate from a center hub, each carrying `ledsPerSpoke` LEDs spaced one unit apart outward.
 
 - `spokes` — number of spokes radiating from the hub (2–64).
-- `ledsPerSpoke` — LEDs along each spoke, spaced one unit apart from the centre outward.
+- `ledsPerSpoke` — LEDs along each spoke, spaced one unit apart from the center outward.
 
 Origin: MoonLight · via [MoonLight](https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Layouts/L_MoonLight.h)
 

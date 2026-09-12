@@ -30,7 +30,7 @@ Detail: [technical](moxygen/MoonModule.md)
 
 ### Filesystem
 
-The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `defineControls()`. A non-UI module (renders no card); its "last saved" status is surfaced by the File Manager. The home of the no-reboot live-reconfiguration behaviour (see below).
+The persistence **engine**: writes control values to `/.config/*.json` and restores them on boot, overlaying loaded values through each control's pointer during `defineControls()`. A non-UI module (renders no card); its "last saved" status is surfaced by the File Manager. The home of the no-reboot live-reconfiguration behavior (see below).
 
 Detail: [technical](moxygen/FilesystemModule.md)
 

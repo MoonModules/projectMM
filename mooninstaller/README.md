@@ -58,7 +58,7 @@ dropdown pick. Board images are a Pages-only asset (staged from
 
 The picker is a collapsed row consistent with the other fields; clicking it
 expands the searchable card grid, and picking a board collapses it back to a
-labelled summary with a thumbnail:
+labeled summary with a thumbnail:
 
 | Collapsed | Expanded |
 |---|---|
@@ -195,7 +195,7 @@ unit (with the `deviceModel` control) plus the default LED driver** until spec'n
 Dig-2-Go's *onboard* mic is even supported is an open spec'n'test question, so its
 entry adds no `AudioService`. The per-board capability loop that drives this — read
 capabilities off the image/link, wire what we support, propose+test what we don't —
-is recorded in [decisions.md § catalog-driven installer branch](../history/decisions.md).
+is recorded in [lessons.md § catalog-driven installer branch](../docs/work/past/lessons.md#lessons-from-the-catalog-driven-installer-branch-3-layer-device-model).
 
 ### Board images & links
 

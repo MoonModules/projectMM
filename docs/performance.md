@@ -432,7 +432,7 @@ fires 132 back-to-back. At that depth the S31 refused ~19 000 frames and wedged 
 minutes; at 1536 B per buffer (one descriptor per frame) plus `CONFIG_ETH_TRANSMIT_MUTEX`, it runs
 clean. Both are bench-isolated, and ring COUNT is not the lever: 30 descriptors ran no cleaner than
 10. Cost: ~20 KB of internal DMA RAM, since the size applies to both rings
-([lessons.md](history/lessons.md)).
+([lessons.md](work/past/lessons.md)).
 
 **Static RAM: 0 B.** The driver's 1 512 B packet buffer is a class member, so it costs nothing on a
 board that never adds the driver; `check_footprint --module PanelCardDriver --firmware esp32s31`

@@ -1,6 +1,6 @@
 # MoonLive — live-script engine, top-down redesign
 
-> **Forward-looking research document — exception to CLAUDE.md present-tense rule.** **MoonLive** is projectMM's live-script engine (the Moon family: MoonLight, MoonDeck, MoonLive — author an effect as text, see it live). Stage-2 companion to [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md) (read first: it deep-reads the ESPLiveScript fork, surveys WLED ARTI-FX, the embedded-VM field, and a portable WASM fallback, and ends with the product-owner-direction decisions this document expands). It reasons from projectMM's end goal — *author a script as text, run it on a running device on the next tick* — down to a reference architecture, a concrete API, a performance budget, and a staged spike plan. Modelled on [leddriver-analysis-top-down.md](../../history/leddriver-analysis-top-down.md). This expands the eight decisions already made; it does not re-open them. All design is written fresh against projectMM's architecture — prior art (ESPLiveScript, ARTI-FX, MoonLight) is credited, not traced.
+> **Forward-looking research document — exception to CLAUDE.md present-tense rule.** **MoonLive** is projectMM's live-script engine (the Moon family: MoonLight, MoonDeck, MoonLive — author an effect as text, see it live). Stage-2 companion to [livescripts-analysis-bottom-up.md](livescripts-analysis-bottom-up.md) (read first: it deep-reads the ESPLiveScript fork, surveys WLED ARTI-FX, the embedded-VM field, and a portable WASM fallback, and ends with the product-owner-direction decisions this document expands). It reasons from projectMM's end goal — *author a script as text, run it on a running device on the next tick* — down to a reference architecture, a concrete API, a performance budget, and a staged spike plan. Modelled on [leddriver-analysis-top-down.md](../../work/future/leddriver-analysis-top-down.md). This expands the eight decisions already made; it does not re-open them. All design is written fresh against projectMM's architecture — prior art (ESPLiveScript, ARTI-FX, MoonLight) is credited, not traced.
 
 ## TL;DR
 
@@ -378,7 +378,7 @@ The first sequencing question is **depth-first** (build the whole engine on Xten
 
 The [MoonLight effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/) is a ready-made *start-small-grow* curriculum (random pixel → control → trails → oscillators → 2D → 3D → audio → Cosmic Noise). Each rung is **one engine-capability spike** with a concrete acceptance bar. **RipplesEffect.h is the graduation test** (the hard real effect, after the 3D rung). Each step is a normal small commit; the multi-target part is sequenced per §9.1 — the *seam* is proven on a second ISA at Stage 0.5, but the *full* second backend (all stages) comes later, opportunistically.
 
-**Next up: Stage 2 (buffer read-modify-write / trails).** Stages 0, 0.5 and 1 (Controls) are done — what landed and why is recorded in the git history and [lessons.md](../../history/lessons.md); this ladder tracks the remaining rungs.
+**Next up: Stage 2 (buffer read-modify-write / trails).** Stages 0, 0.5 and 1 (Controls) are done — what landed and why is recorded in the git history and [lessons.md](../../work/past/lessons.md); this ladder tracks the remaining rungs.
 
 | Stage | Capability proven | Acceptance bar (the spike) |
 |---|---|---|

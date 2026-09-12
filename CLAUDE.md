@@ -6,7 +6,7 @@ A high-performance system driving large LED installations and DMX fixtures. One 
 
 ## Principles
 
-1. **Minimalism.** Minimal flash, minimal memory, fastest hot path, and the periodic housekeeping that shares it is fast too. Minimal code, minimal documentation: every fact and every piece of logic has exactly one home: reference it. Present tense and positive form only: describe what exists, not what was or what is not; history lives in git (`docs/work/past/`, `docs/work/future/` and `docs/history/` are the exemptions). One uniform building block: everything is a (Moon)module with the same known lifecycle. **The simple solution is the one to find, not the one to settle for**: be generic rather than exhaustive, since one rule covering a class of cases beats a branch per case, and code guarding against every conceivable input is usually a design that admitted too many. Complexity accretes on its own, so a change is judged on whether the system is simpler after it than before.
+1. **Minimalism.** Minimal flash, minimal memory, fastest hot path, and the periodic housekeeping that shares it is fast too. Minimal code, minimal documentation: every fact and every piece of logic has exactly one home: reference it. Present tense and positive form only: describe what exists, not what was or what is not; history lives in git (`docs/work/past/` and `docs/work/future/` are the exemptions). One uniform building block: everything is a (Moon)module with the same known lifecycle. **The simple solution is the one to find, not the one to settle for**: be generic rather than exhaustive, since one rule covering a class of cases beats a branch per case, and code guarding against every conceivable input is usually a design that admitted too many. Complexity accretes on its own, so a change is judged on whether the system is simpler after it than before.
 
 2. **Industry standards.** The textbook solution, pattern, algorithm, and name — a codebase any experienced contributor understands in minutes. The standard, complete construct beats a hand-rolled special case, even when it's more lines. Any bespoke choice carries its one-line reason where it's introduced.
 
@@ -26,7 +26,7 @@ A high-performance system driving large LED installations and DMX fixtures. One 
 
 ## The Process
 
-Every change follows the same timeline: **main → branch → build → test → document → commit → merge → release**. The **product owner** (PO) is the person initiating a branch, and any contributor can be one. The PO initiates every event and every gate list; if unsure, ask ("Feature work is done; run pre-commit, or do you want to look first?"). This holds even when the list would only be *checking* work in progress: running it to see where things stand is still starting a gate list. Verify work in progress with the individual tools instead (a build, `test_desktop.py`, one check script); the list itself is the PO's to fire. A conditional check runs only when its objective trigger matches; an applicable-but-skipped check needs a one-line reason in the commit/PR/release notes. Each cycle produces visible output, and each cycle subtracts: remove code and docs that stopped earning their place, or know why each one stays. `backlog/` and `history/` shrink too. External contributors follow the same timeline: fork, branch, PR into main, with the same checks and review.
+Every change follows the same timeline: **main → branch → build → test → document → commit → merge → release**. The **product owner** (PO) is the person initiating a branch, and any contributor can be one. The PO initiates every event and every gate list; if unsure, ask ("Feature work is done; run pre-commit, or do you want to look first?"). This holds even when the list would only be *checking* work in progress: running it to see where things stand is still starting a gate list. Verify work in progress with the individual tools instead (a build, `test_desktop.py`, one check script); the list itself is the PO's to fire. A conditional check runs only when its objective trigger matches; an applicable-but-skipped check needs a one-line reason in the commit/PR/release notes. Each cycle produces visible output, and each cycle subtracts: remove code and docs that stopped earning their place, or know why each one stays. `docs/work/` shrinks too. External contributors follow the same timeline: fork, branch, PR into main, with the same checks and review.
 
 ### Main
 
@@ -174,7 +174,7 @@ The PO pushes the branch; external review runs on the PR; findings are processed
 
 GCC runs on a FAILING CI run, not on every merge. It catches a class clang misses (`-Wstringop-truncation`, no transitive standard headers), and CI compiles with it on every PR, so CI is where that class surfaces first: reproducing it locally is worth minutes only once CI has something to reproduce. Skip it where no GCC is installed.
 
-Those judgment gates: review feedback addressed; the Reviewer agent over the whole branch diff (start it first, it runs in parallel; scope: boundaries, bespoke conventions, unnecessary abstractions, duplication, hot path, spec conformance, bloat); lessons carried forward only when VERY important — most learning lives in the commit/PR record; a truly important gotcha → `lessons.md`, a major architectural decision → a new ADR, a hardened rule → CLAUDE.md or coding-standards; docs sync; the PR title and description matching the actual diff; the performance snapshot when tick-path code changed; a README refresh when build, flash, or first-run changed.
+Those judgment gates: review feedback addressed; the Reviewer agent over the whole branch diff (start it first, it runs in parallel; scope: boundaries, bespoke conventions, unnecessary abstractions, duplication, hot path, spec conformance, bloat); lessons carried forward only when VERY important, since most learning lives in the commit/PR record; a truly important gotcha → [`docs/work/past/lessons.md`](docs/work/past/lessons.md), a hardened rule → CLAUDE.md or coding-standards; docs sync; the PR title and description matching the actual diff; the performance snapshot when tick-path code changed; a README refresh when build, flash, or first-run changed.
 
 ### Release
 
@@ -245,7 +245,7 @@ across a session into the PO waiting instead of working, and a sweep run twice w
 
 **Invite the product owner to test, then STOP.** If the PO could see or judge the result, hand it over ("running on X, look at Y") and wait for their observation before concluding, documenting, or moving on. Leave the state running; don't revert, reflash, or reconfigure what they were about to look at.
 
-What the agent reads: always CLAUDE.md + architecture.md + coding-standards.md; per commit, only the relevant module specs. `docs/history/` and `docs/backlog/` are read when planning, on request.
+What the agent reads: always CLAUDE.md + architecture.md + coding-standards.md; per commit, only the relevant module specs. `docs/work/` is read when planning, on request.
 
 ## Documentation
 
@@ -259,9 +259,8 @@ Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); so
 - [MIGRATING.md](https://moonmodules.org/projectMM/MIGRATING.html) — breaking-change log
 - [work/](https://github.com/MoonModules/projectMM/tree/main/docs/work): future (the to-build lists), present (plans being built), past (what shipped)
 - [friend-repos/](https://github.com/MoonModules/projectMM/tree/main/docs/friend-repos): monthly activity digests of related open-source LED projects
-- [history/](https://moonmodules.org/projectMM/history/index.html): lessons, prior-project inventories
 - [moonmodules/](https://github.com/MoonModules/projectMM/tree/main/docs/moonmodules) — module catalog pages + generated technical pages
 
 Docs describe the system as it is; git is the history; specs precede implementation. **Documentation model**: [documentation-standards.md](docs/documentation-standards.md).
 
-`history/` is the distilled experience of prior projects (WLED, StarLight, MoonLight, …), credited per module. `backlog/` is its forward mirror. Agents read both only when planning. Both shrink under mandatory subtraction.
+`docs/work/past/` holds the distilled experience of prior projects (WLED, StarLight, MoonLight, …), credited per module, and the lessons this project learned itself. `docs/work/future/` is its forward mirror. Agents read both only when planning, and both shrink under mandatory subtraction.

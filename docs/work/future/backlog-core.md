@@ -558,7 +558,7 @@ On `esp32-eth-wifi`, default 128×128 grid, free heap at boot is ~28 KB — not 
 
 Fix options in increasing scope:
 - **Cap the default grid** — drop to 64×64 on `esp32-eth-wifi` (Layer ~32 KB + LUT ~16 KB = 48 KB, comfortably under). Simplest.
-- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [lessons.md](../../history/lessons.md) "Adaptive memory allocation design" for the allocation rules.
+- **PSRAM for Layer buffer + LUT** — ESP32-Gateway has 4 MB PSRAM unused on non-S3 builds. Moving the 49 KB pixel buffer + 64 KB LUT out of DRAM frees ~110 KB for radios. Cost: ~25% FPS hit (PSRAM bandwidth ~12 MB/s vs DRAM ~80 MB/s); needs measurement. See [lessons.md](../../work/past/lessons.md) "Adaptive memory allocation design" for the allocation rules.
 - **Lazy WiFi init** — skip `esp_wifi_init` when `ssid_` is empty and no AP-fallback is pending. Helps only when credentials exist but the network is unreachable — niche.
 
 ### Boot-time buffer degradation on non-PSRAM at 128×128 (investigation)
@@ -610,7 +610,7 @@ Today the eth-only build profile compiles WiFi out (`MM_NO_WIFI`). Turning WiFi 
 
 **Hardware-limit tail (not covered by the pin check).** Pin-uniqueness rejects the common case but not the controller-count limit: the S3 has **2 I2S controllers** regardless of pins, so a 3rd mic on distinct pins passes the pin check yet fails `i2s_new_channel` at runtime. That tail is already handled — the platform I2S init returns false on failure (no panic, module stays `inited_=false`); verified live (4 pinned AudioModules → error spam, no crash). So scope = pin-uniqueness check + the existing graceful-degrade; don't try to make the pin check also model controller counts.
 
-**Related:** the shipped "disabling releases resources" work (see docs/history/plans/) — a disabled module freeing its pins is what lets the same GPIO be reassigned live without a conflict-reject.
+**Related:** the shipped "disabling releases resources" work (see [past plans](../past/plans/README.md)) — a disabled module freeing its pins is what lets the same GPIO be reassigned live without a conflict-reject.
 
 ### PinsModule — strict reject-on-add mode (the one remaining increment)
 
@@ -663,7 +663,7 @@ When picked up: add `offsetX/Y/Z` (lengthType) controls to `LayoutBase`; `Layout
 
 ### Improv as a child of NetworkModule (deferred — needs scheduler work first)
 
-Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [lessons.md](../../history/lessons.md) "Trying to add a child module to NetworkModule".
+Architecturally the right shape; attempted in plan-21, reverted. Blocker: `Scheduler::tick()` only walks top-level modules for `loop20ms`/`loop1s` — children silently miss those callbacks. See [lessons.md](../../work/past/lessons.md) "Trying to add a child module to NetworkModule".
 
 Minimum-scope fix before the move:
 1. `MoonModule::loop20ms`/`loop1s` propagate to children (or Scheduler walks them) — pick whichever costs less at runtime.

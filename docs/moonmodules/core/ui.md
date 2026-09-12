@@ -7,7 +7,7 @@ light-domain plug-in points — lives in [architecture.md § Web UI](../../archi
 the **backend contract** it consumes (every `/api/*` endpoint, the `/ws` frame shape, the control
 descriptors) is owned by [HttpServerModule](moxygen/HttpServerModule.md); the **emoji legend** the
 cards and picker render is [architecture.md § Tag emoji legend](../../architecture.md#tag-emoji-legend).
-This page covers only what those don't: the browser-side rendering behaviour.
+This page covers only what those don't: the browser-side rendering behavior.
 
 ## Interaction principles
 
@@ -181,7 +181,7 @@ how each *renders*.)
 - **Password controls are obfuscated, not encrypted.** A `password` control serializes in `/api/state`
   as `{"type":"password","value":"<encoded>"}` where `<encoded>` is the password XOR'd with a fixed key
   then base64-encoded; the UI decodes it (`decodePassword()`) so the input holds the real value (masked,
-  hold-to-peek). A **first line of defence only**: the XOR key is a shared constant in both the firmware
+  hold-to-peek). A **first line of defense only**: the XOR key is a shared constant in both the firmware
   and `app.js`, so it's trivially reversible — it stops the password being plainly readable in a raw
   `curl /api/state`, not a determined reader.
 
@@ -249,11 +249,11 @@ and (b) a mutation that changes the tree shape (`/api/control` for a Select that
 card-render closure holding a `mod` reference goes stale within ~1 s. Any "which index am I now?"
 lookup must use `findIndex(c => c.name === mod.name)`, not `indexOf(mod)`.
 
-## Communication client behaviour
+## Communication client behavior
 
 The endpoints, the `/ws` frame shape, and the streaming state sink are owned by
 [HttpServerModule](moxygen/HttpServerModule.md); `/api/control` is `{module, control, value}`. The
-**browser-side** socket behaviour the server doesn't dictate:
+**browser-side** socket behavior the server doesn't dictate:
 
 - URL `ws://<host>/ws` (same port as HTTP); the server pushes a full-state snapshot ~1/s.
 - Client sends `"ping"` every 25 s as keepalive (Safari kills idle sockets otherwise).

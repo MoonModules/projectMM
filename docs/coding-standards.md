@@ -176,7 +176,7 @@ Which checks run at which lifecycle event is defined once, in the [Commit](../CL
 
 ## Debugging and verification
 
-Hard-won discipline for diagnosing hardware and infrastructure failures, distilled from the war stories in [lessons.md](history/lessons.md).
+Hard-won discipline for diagnosing hardware and infrastructure failures, distilled from the war stories in [lessons.md](work/past/lessons.md).
 
 - **Prove the failure is *about* the change before editing code.** When something fails right after a change, re-run it isolated, probe the actual end state, and confirm the artifact under test is the one you built: process uptime, the `build` timestamp, what is bound to the port. A stale process, a loaded machine, or an async-confirmation timeout reads as a regression it isn't.
 - **A status/dimension assertion does not prove the pipeline renders.** A correctness test for a mapping or effect asserts the buffer or LUT is non-empty with the expected coverage (e.g. LUT destinations == physical light count), beyond the declared dimensions looking right.

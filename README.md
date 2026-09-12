@@ -36,6 +36,116 @@ If you like projectMM, give it a star, fork it, or open an issue. It helps the p
 
 Written against ESP-IDF directly with no third-party libraries, and with our own code rather than a fork: [why we write our own code](docs/why-we-write-our-own.md). How it is put together: [architecture.md](docs/architecture.md).
 
+## The parts
+
+projectMM is one system in nine named parts. Each has a page that owns its detail.
+
+```mermaid
+flowchart TB
+    subgraph device["On the device"]
+        direction TB
+        MoonLight["<b>MoonLight</b><br/>layouts, effects,<br/>modifiers, drivers"]
+        MoonLive["<b>MoonLive</b><br/>scripts compiled<br/>on the device"]
+        MoonI80["<b>MoonI80</b><br/>parallel WS2812<br/>over DMA"]
+        MoonCore["<b>MoonCore</b><br/>controls, scheduling,<br/>persistence, platform"]
+        MoonModule["<b>MoonModule</b><br/>the one building block:<br/>every part below is one"]
+        MoonBase["<b>MoonBase</b><br/>installs<br/>updates"]
+
+        MoonLive --> MoonLight
+        MoonLight --> MoonI80
+        MoonLight --> MoonCore
+        MoonI80 --> MoonCore
+        MoonCore --> MoonModule
+        MoonBase -.-> MoonCore
+    end
+
+    MoonInstaller["<b>MoonInstaller</b><br/>flashes a board<br/>from the browser"]
+    MoonDeck["<b>MoonDeck</b><br/>build, flash, test,<br/>discover"]
+    MoonCloud["<b>MoonCloud</b><br/>stats, talk,<br/>sync"]
+
+    MoonInstaller -->|"USB"| device
+    MoonDeck -->|"network"| device
+    device <-->|"opt-in"| MoonCloud
+
+    style MoonCore fill:#2d3561,stroke:#7b88c9,color:#fff
+    style MoonModule fill:#5a3d7a,stroke:#c9a0e0,color:#fff
+    style MoonLight fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style MoonLive fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style MoonI80 fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style MoonBase fill:#2d3561,stroke:#7b88c9,color:#fff
+    style MoonCloud fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    style MoonDeck fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    style MoonInstaller fill:#4d3d1f,stroke:#c9a95f,color:#fff
+```
+
+### MoonModule
+
+The one building block, and the idea the rest of the system is built on. Every effect, modifier, layout, driver and service is a MoonModule: the same base class, the same lifecycle, and controls the module declares itself.
+
+That uniformity pays three times over. The interface renders any module from its declared controls, so a new module needs no UI code. Persistence, live reconfiguration and the REST API work on a module they have never seen. And adding a capability is a new file rather than a new framework, which is why the catalog grows without the core growing with it.
+
+![A module card: declared controls, rendered with no per-module code](docs/assets/core/Layers.png)
+
+[architecture.md § MoonModules](docs/architecture.md#moonmodules)
+
+### MoonCore
+
+The domain-neutral runtime: the module base class, controls, scheduling, persistence, and the platform abstraction. It knows nothing about lights, which is what lets the light domain stay simple on top of it. Everything in the system is a **MoonModule** with the same lifecycle and declared controls, and that uniformity is why the interface renders any module with no per-module code.
+
+![The Services card, built from declared controls](docs/assets/core/Services.png)
+
+[architecture.md § Core](docs/architecture.md#core) · [MoonModules](docs/architecture.md#moonmodules)
+
+### MoonLight
+
+The light domain, and the bigger half of the code: light values, layouts, layers, mapping, blending, effects, modifiers and LED drivers. This is what you build a light show from, stacking a layout, then layers of effects and modifiers, then a driver.
+
+![The Layers panel: a layer, an effect, and its controls](docs/assets/light/Effects.png)
+
+[Effects](docs/moonmodules/light/effects.md) · [Layouts](docs/moonmodules/light/layouts.md) · [Modifiers](docs/moonmodules/light/modifiers.md) · [Drivers](docs/moonmodules/light/drivers.md)
+
+### MoonLive
+
+Scripts compiled to native machine code on the device. Write an effect in the browser, and it runs at the speed of compiled code rather than an interpreter, on ESP32 and on the desktop alike.
+
+![A MoonLive effect running](docs/assets/light/effects/MoonLiveEffect.gif)
+
+[MoonLiveEffect](docs/moonmodules/light/MoonLiveEffect.md) · [the script language](moonlive/README.md)
+
+### MoonI80
+
+Our own DMA driver for parallel WS2812 output, one of the backends [ParallelLedDriver](docs/moonmodules/light/drivers.md#parallelled) selects. It adds a streaming ring and 74HCT595 expander support, which is what drives 12,288 lights from a single board.
+
+[LED drivers](docs/moonmodules/light/drivers.md#moonled)
+
+### MoonBase
+
+A small maintenance image in the factory slot that installs updates into one large app slot, instead of spending half the flash on a second copy of the firmware. A power cut mid-update lands back in MoonBase rather than a half-written app.
+
+[architecture.md § MoonBase](docs/architecture.md#moonbase-the-second-boot-image)
+
+### MoonCloud
+
+The opt-in server side, and the only server a device talks to. [Stats](docs/mooncloud.md#stats) reports what people run so development follows real use, [Talk](docs/mooncloud.md#talk) is a public message board between devices, and [Sync](docs/mooncloud.md#sync-planned) is planned.
+
+[MoonCloud](docs/mooncloud.md) · [privacy policy](docs/privacy-policy.md)
+
+### MoonInstaller
+
+The browser installer: it picks your device, flashes the matching firmware, and hands the device your WiFi credentials over USB. No serial monitor, no recompile.
+
+![The installer picking a device](docs/assets/ui/installer.png)
+
+[Web installer](https://moonmodules.org/projectMM/install/) · [source](mooninstaller/README.md)
+
+### MoonDeck
+
+The developer console: one page that builds, flashes, runs, tests and monitors across every target, and discovers devices on the network.
+
+![MoonDeck, the dev console](docs/assets/ui/moondeck_desktop.png)
+
+[MoonDeck](moondeck/MoonDeck.md)
+
 ## Performance
 
 A full render pipeline (effect, modifier, Art-Net output) on real hardware, at 128x128:
@@ -52,9 +162,7 @@ Per-grid and per-device tables, free-heap figures, and why WiFi costs what it do
 
 ## Getting started
 
-**ESP32**: open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge. It walks you through device, firmware, flashing and network setup.
-
-![The web installer picking a device](docs/assets/ui/installer.png)
+**ESP32**: open the [web installer](https://moonmodules.org/projectMM/install/) in Chrome or Edge ([MoonInstaller](#mooninstaller)). It walks you through device, firmware, flashing and network setup.
 
 **Desktop**: download your build from the [releases page](https://github.com/MoonModules/projectMM/releases), then open `http://localhost:8080/`. Step by step with screenshots: [Installing projectMM on a desktop](docs/tutorials/installing-to-desktop.md).
 
@@ -62,15 +170,13 @@ Per-grid and per-device tables, free-heap figures, and why WiFi costs what it do
 - **Windows x64**: `-setup.exe` installs for your user without an admin prompt. Unsigned, so SmartScreen asks once.
 - **Linux x64**: `.tar.gz`, or `.deb` on Debian, Ubuntu and Raspberry Pi OS.
 
-**From source**: you need [uv](https://docs.astral.sh/uv/), CMake 3.20+ and a C++20 compiler, plus ESP-IDF v6.x for ESP32. Then launch MoonDeck, the browser-based dev console:
+**From source**: you need [uv](https://docs.astral.sh/uv/), CMake 3.20+ and a C++20 compiler, plus ESP-IDF v6.x for ESP32. Then launch [MoonDeck](#moondeck):
 
 ```sh
 uv run moondeck/moondeck.py
 ```
 
 Open `http://localhost:8420` to build, run, test, flash and discover devices. Full setup and every target: [building.md](docs/building.md).
-
-![MoonDeck, the dev console](docs/assets/ui/moondeck_desktop.png)
 
 ## Documentation
 
@@ -103,7 +209,7 @@ This is the current iteration of years of LED and light-system development, and 
 | **StarLight** | Standalone LED firmware | [ewowi/StarLight](https://github.com/ewowi/StarLight) |
 | **MoonLight** | Ground-up build: 60+ effects, memory-optimized mapping, 11 driver types | [ewowi/MoonLight](https://github.com/ewowi/MoonLight) |
 
-We built and maintained these, so projectMM rests on our own hands-on experience. Their lessons are distilled in [`docs/history/`](docs/history/README.md). We carry the ideas forward and write our own code, crediting by name whoever inspired a feature.
+We built and maintained these, so projectMM rests on our own hands-on experience. Their lessons are distilled in [`docs/work/past/`](docs/work/past/README.md). We carry the ideas forward and write our own code, crediting by name whoever inspired a feature.
 
 ## Credits
 
