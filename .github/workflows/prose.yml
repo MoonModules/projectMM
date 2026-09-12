@@ -19,24 +19,28 @@ on:
 jobs:
   vale:
     runs-on: ubuntu-latest
-    # Reports neutral rather than failed. Vale lints whole files, so it sees the ~1,600 findings in
-    # prose that predates the standards, and no input narrows it to the diff. The annotations are
-    # worth reading; the red X would be noise. check_prose.py is the gate that blocks.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           # Full history: reviewdog needs the base commit to work out which lines a PR added.
           # A shallow clone leaves it no base, so every line of every file reads as added.
           fetch-depth: 0
-      - uses: errata-ai/vale-action@v2
+      # Pinned to the v3.0.0 commit. v2 derived reviewdog's -level from fail_on_error and ignored
+      # the level input, so annotations could not be limited to errors.
+      - uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff
         with:
           # Annotate only the lines this PR touches. This scopes what reviewdog REPORTS, not what
-          # Vale scans: Vale reads the whole tree either way.
+          # Vale scans: Vale lints whole files either way.
           filter_mode: added
-          # Errors only. GitHub caps a check run at 50 annotations and Vale finds far more than
-          # that, so the cap decides what is shown: spend it on errors rather than suggestions.
+          # Never fail. Vale sees the findings carried by prose that predates the standards, so a
+          # blocking check here would fail every PR whatever the PR changed. check_prose.py is the
+          # gate that blocks, on added lines alone. Raise this once the sweep clears the tree.
+          fail_level: none
+          # Errors only. GitHub caps annotations per run and Vale finds more than that, so the cap
+          # decides what is shown: spend it on errors rather than suggestions.
           level: error
-          reporter: github-pr-check
+          # Writes annotations through the runner log rather than creating a check run. The
+          # check-run reporters publish their own status, which stays red however the job exits.
+          reporter: github-pr-annotations
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
