@@ -28,10 +28,14 @@ jobs:
           fetch-depth: 0
       - uses: errata-ai/vale-action@v2
         with:
-          # Only lines this PR touches: the same scope check_prose.py applies locally.
+          # Annotate only the lines this PR touches. This scopes what reviewdog REPORTS, not what
+          # Vale scans: Vale reads the whole tree either way.
           filter_mode: added
-          # Fail the check on `error`; warnings and suggestions annotate the diff without blocking.
-          fail_on_error: true
+          # Deliberately absent: fail_on_error. Vale emits ~1,900 errors across 39 files of prose
+          # that predates the standards, and fail_on_error judges that full output rather than the
+          # filtered annotations, so it fails every PR whatever the PR changed.
+          # check_prose.py is the gate that blocks: it feeds Vale the added lines alone.
+          # Turn this on once the sweep in docs/work/present clears the tree.
           reporter: github-pr-check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
