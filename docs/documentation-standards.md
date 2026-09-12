@@ -6,6 +6,42 @@ Every rule has one home. Another document links here rather than restating, beca
 
 It starts with the four kinds of page and which one each of ours is. Then how a page is written, then the two pages every module has. It ends with comments: the smallest scale, and the one place code and prose meet.
 
+## The hierarchy
+
+A reader enters at the top and stops as soon as they have enough. A writer puts a fact at the shallowest level that fully owns it, and links to it from every level above. Each branch is one [Diátaxis](https://diataxis.fr/) type, named on the right.
+
+```text
+README.md, docs/index.md             what projectMM is, and the one thing to do next
+│
+├─ gettingstarted.md                 a blank board to a first light show        tutorial
+│  └─ tutorials/                     one lesson each, followed start to finish  tutorial
+│
+├─ usecases/                         one task you already have                  how-to
+├─ building.md                       how to build and flash every target        how-to
+│
+├─ architecture.md                   how the system is shaped, and why          explanation
+├─ why-we-write-our-own.md           why our own code rather than a library     explanation
+│
+├─ reference/                        pinouts, variants, boards                  reference
+├─ performance.md, metrics/          what it costs, measured                    reference
+├─ testing.md                        what is tested, and how                    reference
+├─ MIGRATING.md                      what changed under you                     reference
+│
+├─ CLAUDE.md                         the process every change follows           rules
+│  ├─ coding-standards.md            how code is written                        rules
+│  └─ documentation-standards.md     how prose is written                       rules
+│
+├─ moonmodules/                      one row per module, its controls           reference
+│  └─ moxygen/                       every member, generated from the header    reference
+│     └─ src/**/*.h                  the one home for per-member detail         reference
+│
+└─ work/, history/, friend-repos/    planned, shipped, and who we watch         outside
+```
+
+Each level says what a thing is and links down for the rest. A fact stated above its home is a second copy that drifts.
+
+The README is the strictest case. It is the page most often written as if it were the only one: it names a capability and links to the page that owns it, so a paragraph of detail there sits in the wrong place.
+
 ## What we document
 
 Document a thing once, in the place closest to it, and link the rest. A fact the source states is never re-typed in prose, so the question "where does this belong?" has one answer, and so does "where do I find it?"
@@ -38,6 +74,7 @@ Two scales below a page: **a module** has exactly one reference page written and
         - **Positive form only.** "Not", "never", "neither", "without", "un-" and "non-" are the alarm bells: a negation says everything a thing is not, which is no shape at all. A real constraint stays ("the DMA cannot read PSRAM at shift clock"); a bare absence goes.
     - **Industry standards**: the textbook name for a thing, so a reader recognizes it without being taught our vocabulary. A bespoke choice carries its one-line reason where it appears.
     - **Continuous improvement**: a doc describing what the code no longer does is a defect. Fix it in the change that opened the file, not in a sweep.
+- **A page links down to detail, it does not absorb it.** Each level says what a thing is and sends the reader to the level that owns the detail. A fact stated above its home is a second copy that drifts. The test: if removing a paragraph costs nothing but a link, it was never this page's to hold. The ladder is in [The hierarchy](#the-hierarchy).
 - **A list holds one kind of thing, most important first.** The heading rule, one level down: what a reader reaches for most often leads. A list mixing categories is really two lists.
 - **A rule states a test.** Something a reader can hold a page against and get a yes or no. How the rule came to be broken is history, and goes in the commit that fixed it.
 - **Say it, then stop: about 40 words.** One or two sentences a reader can act on, and a reason only when the point is surprising or has been got wrong before. Past that a reader skims, and a skimmed statement is not followed.

@@ -1,5 +1,5 @@
 {
-  "commit": "5e3fff79",
+  "commit": "2457c5ae",
   "flash": {
     "esp32s3-n16r8": 2103024,
     "desktop": 1949704,
@@ -31,8 +31,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 139,
-      "fps": 7194,
+      "tick_us": 128,
+      "fps": 7812,
       "scenario_p50": {
         "Layer_base_pipeline": {
           "p50": 69,
@@ -703,7 +703,7 @@
     "platform": 18966,
     "ui": 11179,
     "test": 58735,
-    "moondeck": 23122
+    "moondeck": 23143
   },
   "comments": {
     "core": {
@@ -727,8 +727,8 @@
       "ratio": 0.216
     },
     "moondeck": {
-      "lines": 3734,
-      "ratio": 0.185
+      "lines": 3736,
+      "ratio": 0.184
     }
   },
   "tests": {
@@ -737,7 +737,7 @@
   },
   "docs": {
     "md_files": 122,
-    "md_lines": 27131,
+    "md_lines": 27158,
     "plans_files": 30,
     "backlog_lines": 2861,
     "lessons_lines": 518,

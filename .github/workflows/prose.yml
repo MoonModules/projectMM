@@ -21,6 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: reviewdog diffs against the base branch to scope `filter_mode: added`.
+          # A shallow clone leaves it no base, so every line of every file reads as added and the
+          # run dies on GitHub's 50-annotation cap instead of reporting the diff.
+          fetch-depth: 0
       - uses: errata-ai/vale-action@v2
         with:
           # Only lines this PR touches: the same scope check_prose.py applies locally.
