@@ -259,7 +259,7 @@ Three distinct things, kept distinct in the vocabulary:
 - **deviceModel** — the whole assembled product, identified by its catalog name (`Olimex ESP32-Gateway Rev G`). This is *which hardware this is*. It is distinct from **`deviceName`**, *which individual unit this is* (per-unit identity the user sets — see [§ Device name](#device-name-one-identity-every-network-name-derives-from-it)); a **device** (the umbrella term) has a `deviceName` and a `deviceModel`.
 - **board** — the bare PCB *only*. The word survives in its literal sense: **on-board** LED, **on-board** peripherals, board-soldered pins — things physically *on the PCB*. (A deviceModel is a board plus whatever is wired onto it.)
 
-**Firmware** is the compiled binary: chip target plus which radios/peripherals/sdkconfig fragments are included. Today's variants: `esp32` (classic, WiFi **and** RMII Ethernet in one binary — Ethernet comes up only when a PHY is present, pins/PHY per deviceModel), `esp32-eth` (classic, Ethernet only, WiFi excluded), `esp32-16mb` (classic with 16 MB flash, WiFi + Ethernet), `esp32s3-n16r8` / `esp32s3-n8r8` (S3 with WiFi + W5500 SPI Ethernet), `esp32p4rev1-eth` (Waveshare ESP32-P4-NANO, Ethernet only), `esp32p4rev1-eth-wifi` (the same P4 hardware with WiFi via its on-board ESP32-C6 over esp_hosted), `esp32p4rev3-eth` / `esp32p4rev3-eth-wifi` (the same two images built for P4 **v3.x** silicon, which is not binary-compatible with rev <3.0 — untested, no v3 board on the bench). Each chip's firmware carries the Ethernet *driver(s)* it can host (RMII EMAC for classic/P4, W5500 SPI for S3); which PHY/pins a deviceModel uses is runtime config. Selected by `build_esp32.py --firmware <key>`, reported by `SystemModule.firmware`, used as the contract target key in scenarios.
+**Firmware** is the compiled binary: chip target plus which radios, peripherals and sdkconfig fragments are included. One chip's firmware carries every Ethernet driver that chip can host; which PHY and pins a device model uses is runtime configuration. The variants themselves are listed in [firmware variants](reference/firmware-variants.md#firmware-variants).
 
 **deviceModel** is the physical hardware: chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna), identified by its product name. Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 Dev`. A unit cannot identify its own deviceModel (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. It is stored on the unit as SystemModule's `deviceModel` Text control (display-only in the UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the unit via `POST /api/control` after each discover and after every dropdown change. The catalog of valid deviceModels lives at [mooninstaller/deviceModels.json](../mooninstaller/deviceModels.json), shared between MoonDeck and the web installer: MoonDeck reads it for its dropdown and HTTP push (plain REST on the LAN); the web installer reads it for its picker and pushes the whole entry, deviceModel plus every module/control, over serial during provisioning as REST ops (**"Improv = REST over serial"**, the `APPLY_OP` vendor RPC; see [ImprovProvisioningModule.md](moonmodules/core/moxygen/ImprovProvisioningModule.md)). Pushing over serial sidesteps the mixed-content block that stops an HTTPS installer page from POSTing to an `http://` device; an already-running device is re-configured via MoonDeck on the LAN. **`SET_BOARD` carries only the board name**, and every other field ships over HTTP after WiFi association. Do not extend its wire format: that couples unrelated controls to the board-name lifecycle and hides the timing constraint. A pre-association control gets either its own vendor RPC dispatched before the credentials, or a board-specific sdkconfig fragment when the value is truly board-static.
 
@@ -655,13 +655,7 @@ The system checks available heap before each allocation and degrades gracefully 
 
 ### Degradation cascade
 
-Best to worst:
-
-1. **Full pipeline**: LUT + driver output buffer. Modifier applied, clean separation.
-2. **Skip LUT + driver buffer**: modifier not applied, forced 1:1 mapping. No intermediate buffers. (A LUT without a driver buffer to map into is useless; they're always skipped together.)
-3. **Reduce layer dimensions**: halve width/height until the buffer fits, minimum 8×8.
-
-Each degradation is observable via `lutSkipped()` and reported in `/api/system` per-module metrics.
+When memory is short the pipeline steps down rather than failing to start, and each step is observable, so a device that cannot afford the full pipeline still shows something and says what it dropped. The steps, best to worst, are in [firmware variants](reference/firmware-variants.md#degradation-cascade).
 
 ### Invariants
 
@@ -677,14 +671,7 @@ Every MoonModule self-reports `classSize()` / `dynamicBytes()` / `tickTimeUs()` 
 
 ### Scaling to available memory
 
-| Device | Memory | Typical capability |
-|--------|--------|--------------------|
-| ESP32 + OPI PSRAM | 2–8 MB | Many layers, 10K+ LEDs |
-| ESP32, no PSRAM | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Proven up to 16 K lights (128×128 measured live on Olimex; see [performance.md](performance.md)). The degraded path (single Layer, 1:1 direct, no blending) is reserved for installations that grow beyond what the full pipeline fits. |
-| Teensy 4.x | 1 MB internal, no PSRAM | Comfortable headroom for several layers; excellent DMA-based LED output (OctoWS2811). Ethernet built-in on 4.1, optional on 4.0. |
-| Desktop / RPi | Abundant | No constraints |
-
-The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory and reallocated when configuration changes.
+What each class of device can run is tabulated in [firmware variants](reference/firmware-variants.md#scaling-to-available-memory). The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory and reallocated when configuration changes.
 
 ## Multi-device sync
 

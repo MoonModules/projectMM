@@ -1,0 +1,23 @@
+# documentation-standards.md: "American English spelling, everywhere." Stems, so one entry covers
+# its inflections. Ported from check_prose.py, which this replaces.
+extends: substitution
+message: "American spelling: use '%s'."
+level: error
+ignorecase: true
+swap:
+  behaviour: behavior
+  colour: color
+  initialis: initializ
+  optimis: optimiz
+  recognis: recogniz
+  analyse: analyze
+  analysing: analyzing
+  materialis: materializ
+  normalis: normaliz
+  serialis: serializ
+  cancelled: canceled
+  modelling: modeling
+  labelled: labeled
+  centre: center
+  licence: license
+  defence: defense

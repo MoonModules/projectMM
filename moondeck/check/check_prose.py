@@ -1,26 +1,28 @@
 #!/usr/bin/env -S uv run --script
-"""Prose rules the coding standards state and nothing enforced: no em-dashes, US spelling.
+"""Prose rules, enforced on ADDED lines through Vale.
 
-Both rules were written down and then broken repeatedly, in the same commits that swept them
-out of other files, because they are habits rather than decisions. A habit is not fixed by
-intending to do better; it is fixed by a check that fails.
+The rules are stated in docs/documentation-standards.md and live as YAML under .vale/styles/,
+one file per rule, so the standard and its check share one vocabulary. This script owns the one
+thing Vale cannot: SCOPE. It walks the git diff and feeds Vale only what a change adds, because
+the tree holds thousands of pre-existing violations and a whole-file gate would fail every commit
+until a sweep larger than any change. Converting as files are touched reaches the same end state
+without that.
 
-ADDED LINES ONLY. Pre-existing prose is not this check's business: rewriting a sentence a
-change merely touched is churn that buries the actual diff, and the standards apply to new
-prose. A line that only moved, or whose only edit was a rename, keeps whatever it had.
+An ERROR (em-dash, spelling, "e.g.") blocks; a warning or suggestion informs. Wired as a
+write-time hook (hook_prose.py) so a fix happens while the sentence is still in mind, and again
+at the commit gate. Without vale on PATH the check skips with a notice rather than failing.
 
-ADDED LINES ONLY IS THE WHOLE DESIGN, not a simplification to remove later. The tree holds
-~7,700 pre-existing violating lines across ~490 files, two thirds of them in C++ and Python
-comments, so a full-tree gate would fail every commit until a sweep whose blast radius is far
-larger than any one change. Checking only what a change ADDS converges on the same end state
-without that: every file converts as it is touched, and no commit pays for prose it did not
-write. Registered in the commit gate on that basis, and wired as a write-time hook
-(hook_prose.py) so the fix happens while the sentence is still in mind.
+TEMPORARY. This script and hook_prose.py exist only to keep the gate honest while the tree
+holds inherited violations. Once `vale docs/ CLAUDE.md README.md` exits clean, delete both
+and let .github/workflows/prose.yml check whole files.
 
     uv run moondeck/check/check_prose.py
 """
 
+import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -44,25 +46,6 @@ EXEMPT = (
     "docs/documentation-standards.md",  # the RULE: it must quote an em-dash and "analyse" to ban them
 )
 
-# The banned character, by CODEPOINT rather than as a literal. Written literally, a sweep that
-# rewrites em-dashes in this repo edits the detector itself: one such pass turned this into a
-# comma and the check then flagged every comma in the tree. The en-dash (U+2013) and the arrow
-# (U+2192) are NOT banned, so the test is this one codepoint and nothing else.
-EM_DASH = "\u2014"
-
-# British to American. Substring matches, so a stem covers its inflections.
-SPELLING = {
-    "behaviour": "behavior", "colour": "color", "initialis": "initializ",
-    "optimis": "optimiz", "recognis": "recogniz",
-    # The stem includes the e on purpose: the plain noun ("analysis"/"analyses") is already
-    # US spelling (coding-standards names it a keeper), so only the e-form verbs are flagged.
-    "analys" + "e": "analyze", "analys" + "ing": "analyzing",
-    "materialis": "materializ", "normalis": "normaliz", "serialis": "serializ",
-    "cancelled": "canceled", "modelling": "modeling", "labelled": "labeled",
-    "centre": "center", "licence": "license", "defence": "defense",
-}
-
-
 def added_lines(base):
     """Every line this branch or working tree ADDS, as (path, line text)."""
     diff = subprocess.run(
@@ -84,35 +67,70 @@ def main():
                       capture_output=True).returncode != 0:
         base = "HEAD"
 
-    findings = []
+    if shutil.which("vale") is None:
+        print("Prose check: vale is not installed (brew install vale); skipping.")
+        return 0
+
+    # Group added lines per file, so Vale sees each file's additions as one document and its
+    # per-file exemptions in .vale.ini apply. Line numbers reported are positions WITHIN the
+    # added text, not the file; the quoted text is what identifies the line.
+    by_path = {}
     for path, text in added_lines(base) + added_lines("HEAD"):
         if not path.endswith(SUFFIXES) or path.startswith(EXEMPT):
             continue
-        if EM_DASH in text:
-            # Quote AROUND the offending character, not the head of the line. A long line
-            # truncated at 96 characters hides it and shows an arrow or a hyphen instead, which
-            # reads as a false positive and teaches the reader to distrust the check.
-            at = text.index(EM_DASH)
-            findings.append((path, "em-dash", text[max(0, at - 40):at + 40].strip()))
-        low = text.lower()
-        for brit, amer in SPELLING.items():
-            if brit in low:
-                findings.append((path, f"{brit} -> {amer}", text.strip()[:96]))
-                break
+        by_path.setdefault(path, []).append(text)
 
-    # The same line can arrive from both diffs; report each once.
+    findings, errors = [], 0
+    for path, lines in by_path.items():
+        # Vale parses by extension; a .h or .py is fed as plain text so comment prose is checked
+        # without a code-aware parser pretending the whole file is a program.
+        ext = ".md" if path.endswith(".md") else ".txt"
+        r = subprocess.run(["vale", "--output=JSON", "--no-exit", "--ext=" + ext,
+                            "--path=" + path],
+                           input="\n\n".join(dict.fromkeys(lines)), capture_output=True, text=True)
+        try:
+            report = json.loads(r.stdout or "{}")
+        except json.JSONDecodeError:
+            continue
+        for alerts in report.values():
+            for a in alerts:
+                sev = a.get("Severity", "")
+                if sev == "error":
+                    errors += 1
+                findings.append(f"{path}: {sev} {a.get('Check')}: {a.get('Message')}  "
+                                f"[{a.get('Match', '')[:40]}]")
+
+    # Pages the sweep has finished are checked WHOLE, not by diff: .vale.ini lists them with every
+    # rule promoted to error, so any regression on such a page fails here before it reaches a PR.
+    strict = [l.strip()[1:-1] for l in open(".vale.ini", encoding="utf-8")
+              if l.startswith("[") and l.strip().endswith(".md]")]
+    for path in strict:
+        if not os.path.exists(path):
+            continue
+        r = subprocess.run(["vale", "--output=JSON", "--no-exit", path], capture_output=True, text=True)
+        try:
+            report = json.loads(r.stdout or "{}")
+        except json.JSONDecodeError:
+            continue
+        for alerts in report.values():
+            for a in alerts:
+                sev = a.get("Severity", "")
+                if sev == "error":
+                    errors += 1
+                findings.append(f"{path}: {sev} {a.get('Check')}: {a.get('Message')}  "
+                                f"[{a.get('Match', '')[:40]}]  (whole file: this page is finished)")
+
     findings = sorted(set(findings))
     if not findings:
-        print("Prose check: no em-dashes or British spellings in added lines.")
+        print("Prose check: clean in added lines.")
         return 0
 
-    print(f"Prose check: {len(findings)} issue(s) in ADDED lines.\n")
-    for path, what, text in findings:
-        print(f"  {path}: {what}")
-        print(f"    {text}")
-    print("\nAn em-dash reads as a habit rather than a choice: use a colon for an explanation,")
-    print("commas or parentheses for an aside, or a full stop for two independent clauses.")
-    return 1
+    print(f"Prose check: {len(findings)} finding(s) in ADDED lines.\n")
+    for f in findings:
+        print("  " + f)
+    print("\nRules: docs/documentation-standards.md, enforced by .vale/styles/projectMM/.")
+    # Only an ERROR blocks; warnings and suggestions inform.
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

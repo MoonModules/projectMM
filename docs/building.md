@@ -79,6 +79,28 @@ A **source checkout writes to `build/fs/`** (its config under `build/fs/.config/
 
 The distinction matters because a shipped binary is launched from a download folder or a Start-menu shortcut, where a path relative to the working directory is either unwritable or belongs to that folder rather than to the user. The root is created when the filesystem mounts, and a location that cannot be written to fails the mount and is reported once, rather than surfacing as a failed save on every change.
 
+### Editor setup (clangd)
+
+Diagnostics appear **as you type**, from the same [`.clang-tidy`](../.clang-tidy) config CI
+uses, so a finding shows up while the code is still in your head, not ten minutes later in a
+pipeline.
+
+Once per machine: install the **clangd** extension (`llvm-vs-code-extensions.vscode-clangd`)
+and **disable Microsoft's C/C++ IntelliSense**, running both produces duplicated and
+contradictory diagnostics. Nothing else to configure: [`.clangd`](../.clangd) at the repo root
+points at the compilation database, and `CMAKE_EXPORT_COMPILE_COMMANDS` (set in
+`CMakeLists.txt`) means any normal build refreshes it.
+
+Two things worth knowing:
+
+- **If every file reports `'cstdint' file not found`**: the build directory was configured
+  with a different compiler than clangd is. `.clangd`'s `--query-driver` handles the usual
+  cases; if a new toolchain appears, add it there. This failure is loud and total, real
+  diagnostics disappear behind it, so it is worth recognizing on sight.
+- **clangd runs a subset of the CI check set**: skipping checks it considers slow (>10%
+  AST-build cost). That is deliberate and means the same config file is safe to share: CI
+  remains the authority.
+
 ### Packaging
 
 `uv run moondeck/ci/package_desktop.py` builds and packages for the host it runs on: a `.dmg` with a `.app` on macOS, a `.tar.gz` plus a `.deb` on Linux, and a `.zip` plus an NSIS `-setup.exe` on Windows. The Windows installer puts the program in `%LOCALAPPDATA%\Programs\projectMM` with a Start-menu shortcut and an uninstaller; it needs no elevation, and it never touches the settings directory, so an upgrade keeps the user's configuration.

@@ -1,35 +1,36 @@
 # Documentation standards
 
-How the project writes prose: docs, comments, and the pages generated from them. Code rules are in [coding-standards.md](coding-standards.md). The two meet at `///` comments, which are code by location and documentation by purpose: their syntax is a coding-standards rule, everything they say follows this page.
+How the project writes prose: docs, comments, and the pages generated from them. For developers, the people who write those. Code rules are in [coding-standards.md](coding-standards.md). The two meet at `///` comments, which are code by location and documentation by purpose: their syntax is a coding-standards rule, everything they say follows this page.
 
 Every rule has one home. Another document links here rather than restating, because two copies become two different rules.
 
+It starts with the four kinds of page and which one each of ours is. Then how a page is written, then the two pages every module has. It ends with comments: the smallest scale, and the one place code and prose meet.
+
 ## What we document
 
-Every page is one of these, in the order a newcomer meets them.
+Document a thing once, in the place closest to it, and link the rest. A fact the source states is never re-typed in prose, so the question "where does this belong?" has one answer, and so does "where do I find it?"
 
-| Page | Holds | Written by |
+Every page serves one of four reader needs, and only one. This is [Diátaxis](https://diataxis.fr/), followed as written: the four come from two questions, whether the reader is **learning** or **working**, and whether they want to **do** something or **understand** it.
+
+| | Doing | Understanding |
 |---|---|---|
-| **README.md** | what projectMM is, and first light in under a minute | hand |
-| **CLAUDE.md** | the rules: principles, process, roles | hand |
-| **architecture.md** | how the system fits together, and why it is shaped that way | hand |
-| **Summary pages** | one row per module: what it is, its controls, its links | hand |
-| **Technical pages** | every class, member and control, from the `.h` | generated |
-| **Tutorials and use cases** | one task, start to finish | hand |
-| **Standards** | how we write code and documentation | hand |
-| **work/future** | what does not exist yet: the backlog | hand |
-| **work/present** | plans being built now, deleted at their PR | hand |
-| **work/past** | shipped plans and dated records | hand, editable and prunable |
+| **Learning** | **Tutorial**: a lesson to follow. `gettingstarted.md`, `tutorials/`. | **Explanation**: why it is shaped this way. `architecture.md`. |
+| **Working** | **How-to**: one task you already have. `usecases/`, `building.md`. | **Reference**: facts, fast. The generated technical pages, the catalog rows, `performance.md`, `MIGRATING.md`. |
 
-The split that matters: a hand-written page says what the code cannot, and a generated page IS the code. Nobody edits a generated page, because the next build overwrites it.
+The test for any page is the cell it sits in. A tutorial that stops to explain, or a reference that starts to teach, is two pages: move the other half to where it belongs.
+
+Two kinds of page sit outside the grid on purpose. **The rules** ([CLAUDE.md](../CLAUDE.md), [coding-standards.md](coding-standards.md), this page, [testing.md](testing.md)) are for contributors, and bind every change. **Work not yet in the code** lives under `docs/work/`, and nothing there describes the system as it is: `future` is what does not exist, `present` is being built and deleted at its PR, `past` is what shipped.
+
+Two scales below a page: **a module** has exactly one reference page written and one generated (see [Module pages](#module-pages)), and **a line of code** carries its own reason in a comment (see [Comments](#comments)).
+
+**The split that decides everything else: a hand-written page says what the code cannot, and a generated page IS the code.** Nobody edits a generated page, because the next build overwrites it. So a fact about behavior belongs in the `.h` and reaches the reader through generation; a fact about intent, cost or sequence has no source to generate from, and is written.
 
 **A shipped plan is a working document, not testimony.** It may be edited, trimmed, or deleted: whatever its PR already carries is duplication. Only a dated record stating what was true at a moment (release notes, an inventory quoted from another project) is kept unrewritten.
-
-Document a thing once, in the place closest to it, and link the rest. A fact the source states is never re-typed in prose.
 
 ## Writing
 
 - **A page is read start to finish by one reader**, either a **user** (no coding, no hardware knowledge beyond plugging in a board) or a **developer** (C++, embedded, this codebase's shape). Where a page serves both, lead with the user and put the depth lower down.
+- **The headings are the page's table of contents, and they read top to bottom.** A few lines say what the page is, one paragraph says how it is laid out, then the sections follow in the order a reader needs them. A title that makes sense only after reading the body is the order being wrong.
 - **One tone of voice, everywhere: factual, no nonsense.** State what is true and what to do, addressing the reader as "you". Leave out enthusiasm, apology, and how we felt building it. Only the assumed knowledge changes between pages, never the voice.
 - **Follow the [principles](../CLAUDE.md#principles).** Three bear on documentation directly:
     - **Minimalism**: every fact has one home; history lives in git.
@@ -37,11 +38,17 @@ Document a thing once, in the place closest to it, and link the rest. A fact the
         - **Positive form only.** "Not", "never", "neither", "without", "un-" and "non-" are the alarm bells: a negation says everything a thing is not, which is no shape at all. A real constraint stays ("the DMA cannot read PSRAM at shift clock"); a bare absence goes.
     - **Industry standards**: the textbook name for a thing, so a reader recognizes it without being taught our vocabulary. A bespoke choice carries its one-line reason where it appears.
     - **Continuous improvement**: a doc describing what the code no longer does is a defect. Fix it in the change that opened the file, not in a sweep.
-- **Say it, then stop.** One or two sentences a reader can act on. A reason earns one more when the point is surprising or has been got wrong before; past that it is an argument, and an argument is not documentation.
-- **About 40 words per statement.** Past that a reader skims, and a skimmed statement is not followed.
+- **A list holds one kind of thing, most important first.** The heading rule, one level down: what a reader reaches for most often leads. A list mixing categories is really two lists.
+- **A rule states a test.** Something a reader can hold a page against and get a yes or no. How the rule came to be broken is history, and goes in the commit that fixed it.
+- **Say it, then stop: about 40 words.** One or two sentences a reader can act on, and a reason only when the point is surprising or has been got wrong before. Past that a reader skims, and a skimmed statement is not followed.
 - **Write for the reader who will follow it**, not the one arguing with it. A trap that only bites whoever maintains the tooling belongs in the tooling.
-- **Mechanism lives with the mechanism.** How a generator or script works belongs in that script. A page says what the reader must do.
+- **Ask, do not argue.** A request states what you want and why, then stops. Quoting the other side's code back to them and pre-empting every objection is pressure, and earns a reply shorter than the message. Ask the one question that decides the rest.
+- **A sentence is one thought.** Past twenty words it is usually two, joined by a comma or a colon that a full stop should have been. Instructions in particular: one step, one sentence, and the reader's eyes never lose the line.
+- **The text never refers to itself.** "This page", "this recipe", "as described above", "in the following section": each one is the author stepping in front of the content. Say the thing; the reader knows where they are.
+- **One example, only where the prose alone would be misread.** A code block earns its place by preventing a wrong reading; a second example is the author enjoying the subject.
+- **A link's text says what it reaches.** "See the hot path rule" tells the reader whether to follow it; "see here" does not, and a bare filename only if the filename is the point.
 - **One parenthetical per sentence.** A second qualification means the sentence carries two ideas: split it, or drop the weaker one.
+- **Mechanism lives with the mechanism.** How a generator or script works belongs in that script. A page says what the reader must do.
 - **American English spelling, everywhere**: identifiers, wire keys, comments, docs, UI strings. A grep for one dialect silently misses the other, and a drifting wire key breaks a contract with no compile error. A proper noun keeps its own spelling.
 - **No em-dashes in prose.** Use a comma, colon, parentheses, or a full stop. A literal one in a UI string or test fixture stays.
 - **No hard line wraps in markdown.** Let the editor soft-wrap, so a one-word edit is a one-word diff.
@@ -62,9 +69,8 @@ Document a thing once, in the place closest to it, and link the rest. A fact the
 
 ## Comments
 
-- **Comments say WHY.** Restating what the line does is noise, and usually a naming failure: see [prefer naming over commenting](coding-standards.md#conventions).
-- **One line, above the code it explains.** A second line is the drift signal: the first line said the thing, and the rest is the author still talking. Class descriptions are the exception, and they have the budget below.
-- **A budget, in lines.** A class `///` is about 10 lines, an `@moreinfo` appendix about 20. Over budget, cut. A file whose comments outnumber its code has stopped being a header.
+- **Comments say WHY.** Restating what the line does is noise, and usually a naming failure: see [prefer naming over commenting](coding-standards.md#writing-a-line-of-code).
+- **One line, above the code it explains.** A second line is the author still talking. A class `///` gets about ten lines and an `@moreinfo` appendix about twenty; over that, cut. A file whose comments outnumber its code has stopped being a header.
 - **Keep the constraint, cut the exposition.** A constraint cannot be recovered from the code: the latch is 300 us, the DMA cannot read PSRAM at shift clock. What was tried first, and why this pattern over another, goes in the commit message.
 - **Removing a comment needs the same justification as removing code**: outdated, wrong, or it only restated the code. Never strip to hit a length target, and never delete a reason you cannot reconstruct.
 - **Say each fact once.** A restatement for emphasis reads as new information and costs the reader a second pass to learn it is not.

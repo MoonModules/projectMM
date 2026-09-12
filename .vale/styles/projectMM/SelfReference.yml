@@ -1,0 +1,20 @@
+# documentation-standards.md: "The text never refers to itself." A page that says "this page" is
+# the author stepping in front of the content. A reviewer named it as the tell of machine-written
+# text: "self referential stuff like mentioning 'this recipe'."
+extends: existence
+message: "'%s' is the text referring to itself: say the thing instead."
+level: warning
+ignorecase: true
+tokens:
+  - this page
+  - this recipe
+  - this guide
+  - this document
+  - this section
+  - this tutorial
+  - this article
+  - the following section
+  - as described above
+  - as mentioned above
+  - as we saw
+  - in this post

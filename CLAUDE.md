@@ -98,7 +98,7 @@ product owner triggers it; say in one line what was picked and why.
 
 Docs land with the code, not at merge time: the module's spec and catalog card describe what actually shipped ([documentation-standards § Module pages](docs/documentation-standards.md#module-pages)); a breaking change gets its entry in [docs/MIGRATING.md](docs/MIGRATING.md); a shipped backlog item or spec draft is deleted. The merge gate only verifies this happened.
 
-**How the writing looks, and how much of it there is: [documentation-standards.md](docs/documentation-standards.md).** American spelling and no em-dashes, both enforced by `check_prose.py` (a write-time hook, and again at the commit gate) because they are habits invisible to their own author; prose and comments minimal, dense, and about what the code cannot say, which no check catches and every review should. That page is the one home for all of it: the rules are not restated here, because two copies become two different rules.
+**How the writing looks, and how much of it there is: [documentation-standards.md](docs/documentation-standards.md).** American spelling and no em-dashes, both enforced by Vale (a write-time hook, the commit gate, and on every PR) because they are habits invisible to their own author; prose and comments minimal, dense, and about what the code cannot say, which no check catches and every review should. That page is the one home for all of it: the rules are not restated here, because two copies become two different rules.
 
 ### Commit
 
@@ -109,7 +109,8 @@ On "run pre-commit": run the checks whose trigger the diff matches, report one l
 | Check | Command | Runs when the diff touches |
 |---|---|---|
 | spec drift | `uv run moondeck/check/check_specs.py` | always |
-| prose (spelling, em-dashes) | `uv run moondeck/check/check_prose.py` | any `.md`, `.h`, `.cpp`, `.py`, `.js`, `.css`, `.html` or MoonLive script |
+| prose (Vale, the rules in `.vale/styles/`) | `uv run moondeck/check/check_prose.py` | any `.md`, `.h`, `.cpp`, `.py`, `.js`, `.css`, `.html` or MoonLive script |
+| docs build (links, anchors) 🐢 | `uv run moondeck/docs/build_docs.py --strict` | any `.md`, `mkdocs.yml` |
 | front pages agree | `uv run moondeck/check/check_taglines.py` | `README.md`, `docs/index.md`, `CLAUDE.md` |
 | device-model catalog | `uv run moondeck/check/check_devices.py` | `mooninstaller/deviceModels.json` |
 | firmware list | `uv run moondeck/check/check_firmwares.py` | `moondeck/build/build_esp32.py`, `mooninstaller/firmwares.json` |
@@ -256,8 +257,7 @@ Published at [moonmodules.org/projectMM](https://moonmodules.org/projectMM/); so
 - [testing.md](https://moonmodules.org/projectMM/testing.html) — test inventory and strategy
 - [performance.md](https://moonmodules.org/projectMM/performance.html) — per-module timing/memory per platform
 - [MIGRATING.md](https://moonmodules.org/projectMM/MIGRATING.html) — breaking-change log
-- [backlog/](https://moonmodules.org/projectMM/backlog/index.html) — forward-looking to-build lists (core / light / mixed)
-- [adr/](https://moonmodules.org/projectMM/adr/index.html) — immutable architecture decision records (Nygard format); immutable except the status line: superseded/amended ADRs get a dated pointer to their successor
+- [work/](https://github.com/MoonModules/projectMM/tree/main/docs/work): future (the to-build lists), present (plans being built), past (what shipped)
 - [friend-repos/](https://github.com/MoonModules/projectMM/tree/main/docs/friend-repos): monthly activity digests of related open-source LED projects
 - [history/](https://moonmodules.org/projectMM/history/index.html): lessons, prior-project inventories
 - [moonmodules/](https://github.com/MoonModules/projectMM/tree/main/docs/moonmodules) — module catalog pages + generated technical pages

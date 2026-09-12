@@ -20,7 +20,7 @@ One-time surveys of earlier projects, used to decide what to harvest into projec
 
 ### The plan archive
 
-[`plans/`](../work/past/plans/README.md) holds 89 approved feature plans from before plans became temporary. Under the current rule ([CLAUDE.md § Branch](../../CLAUDE.md#branch)) a plan's text goes into its PR description and the product owner may delete the file once the plan is realized, so nothing new is added here. These files predate that: they follow the older kept-forever convention, with the outcome marked in the filename (`… (shipped).md`, `… (attempted, abandoned).md`, unmarked = never finished). Reference only, and a candidate for the same subtraction the rest of `history/` gets: the merged PRs are the permanent record of what these describe.
+[`plans/`](../work/past/plans/README.md) holds the 18 approved feature plans that remain from before plans became temporary. Under the current rule ([CLAUDE.md § Branch](../../CLAUDE.md#branch)) a plan's text goes into its PR description and the product owner may delete the file once the plan is realized, so nothing new is added here. These files predate that: they follow the older kept-forever convention, with the outcome marked in the filename (`… (shipped).md`, `… (attempted, abandoned).md`, unmarked = never finished). Reference only, and a candidate for the same subtraction the rest of `history/` gets: the merged PRs are the permanent record of what these describe.
 
 ### Our own lessons
 

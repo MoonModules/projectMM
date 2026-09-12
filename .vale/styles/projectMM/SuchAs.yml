@@ -1,0 +1,9 @@
+# documentation-standards.md: write "such as", not "e.g." A /// brief ends at the first period, so
+# "e.g." truncates the generated summary mid-sentence.
+extends: substitution
+message: "Write 'such as' rather than '%s': a period ends a /// brief."
+level: error
+ignorecase: true
+swap:
+  'e\.g\.': such as
+  'i\.e\.': that is

@@ -12,6 +12,9 @@ the tool call had a problem and feeds stderr back, so the fix happens in context
 
 Only fires on the suffixes the standards govern (check_prose.py owns that list), and only on
 ADDED lines, so pre-existing prose in a file being edited is never the writer's problem.
+
+TEMPORARY, together with check_prose.py: both go once the tree is swept clean and the
+Vale workflow (.github/workflows/prose.yml) checks whole files.
 """
 
 import json
