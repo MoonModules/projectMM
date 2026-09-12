@@ -11,7 +11,7 @@
 Three things landed with the standards page, so that it holds after this sweep rather than eroding.
 
 - **[Diátaxis](https://diataxis.fr/)**, followed as written. Every page is one of tutorial, how-to, reference or explanation, and the test for a page is the cell it sits in. The nav splits how-to guides from tutorials, and reference pages (MoonCloud, the privacy policy, firmware variants) sit under Reference.
-- **Vale**, with the rules as YAML under `.vale/styles/projectMM/`, one file per rule, ported from and replacing the hand-rolled checker's table. Seven rules: em-dash, American spelling, `e.g.` to `such as`, sentence length, negated headings, weasel words, self-reference. `.github/workflows/prose.yml` runs it on every PR and annotates the lines the PR adds. It blocks nothing yet, because Vale scans the whole tree and the unswept pages carry ~1,900 errors; `check_prose.py` is the gate that fails, on added lines alone.
+- **Vale**, with the rules as YAML under `.vale/styles/projectMM/`, one file per rule, ported from and replacing the hand-rolled checker's table. Seven rules: em-dash, American spelling, `e.g.` to `such as`, sentence length, negated headings, weasel words, self-reference. `.github/workflows/prose.yml` runs it on every PR and annotates the errors on lines the PR adds, reporting neutral rather than failed: Vale lints whole files, the unswept pages carry ~1,600 findings, and no action input narrows it to the diff. `check_prose.py` is the gate that fails, on added lines alone.
 - **`--strict` on the docs build**, in CI and in the commit gate. A dead link or anchor fails the build. It caught 153 of them during the folder restructure; before this it was off, on a rationale that had gone stale.
 
 ## Done (whole file clean)

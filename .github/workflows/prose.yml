@@ -19,23 +19,24 @@ on:
 jobs:
   vale:
     runs-on: ubuntu-latest
+    # Reports neutral rather than failed. Vale lints whole files, so it sees the ~1,600 findings in
+    # prose that predates the standards, and no input narrows it to the diff. The annotations are
+    # worth reading; the red X would be noise. check_prose.py is the gate that blocks.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history: reviewdog diffs against the base branch to scope `filter_mode: added`.
-          # A shallow clone leaves it no base, so every line of every file reads as added and the
-          # run dies on GitHub's 50-annotation cap instead of reporting the diff.
+          # Full history: reviewdog needs the base commit to work out which lines a PR added.
+          # A shallow clone leaves it no base, so every line of every file reads as added.
           fetch-depth: 0
       - uses: errata-ai/vale-action@v2
         with:
           # Annotate only the lines this PR touches. This scopes what reviewdog REPORTS, not what
           # Vale scans: Vale reads the whole tree either way.
           filter_mode: added
-          # Deliberately absent: fail_on_error. Vale emits ~1,900 errors across 39 files of prose
-          # that predates the standards, and fail_on_error judges that full output rather than the
-          # filtered annotations, so it fails every PR whatever the PR changed.
-          # check_prose.py is the gate that blocks: it feeds Vale the added lines alone.
-          # Turn this on once the sweep in docs/work/present clears the tree.
+          # Errors only. GitHub caps a check run at 50 annotations and Vale finds far more than
+          # that, so the cap decides what is shown: spend it on errors rather than suggestions.
+          level: error
           reporter: github-pr-check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
