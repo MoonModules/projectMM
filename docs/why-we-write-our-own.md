@@ -4,7 +4,7 @@ title: Why we write our own code
 
 # Why we write our own code
 
-projectMM pulls in no third-party libraries: no FastLED, no ESPAsyncWebServer, no ArduinoJson. A library that is genuinely needed lives behind the platform boundary in `src/platform/`, never in core or the light domain. The *what*, with the replacement for each, is in [building.md § Third-party libraries](building.md#third-party-libraries). This page is the *why*.
+projectMM pulls in no third-party libraries: no FastLED, no ESPAsyncWebServer, no ArduinoJson. A library that is genuinely needed lives behind the platform boundary in `src/platform/`, never in core or the light domain. The *what*, with the replacement for each, is in [building.md § Third-party libraries](building.md#third-party-libraries). The *why* follows.
 
 ## A dependency is a hole in the test coverage
 
@@ -22,17 +22,17 @@ This is not a decision that could have been made a few years ago, and it is not 
 
 Writing your own version of a mature library used to be irrational for a project this size. Not impossible: irrational. The budget was evenings, and libraries exist precisely to buy time that is not there. Taking the dependency was the correct call, and it was taken, repeatedly, for years.
 
-What changed is the effort of writing code, and what changed it is AI agents. That is the whole reason. A rebuild that would have been years of Saturdays became something worth attempting, and the architecture that follows from full ownership, testable end to end with no black boxes, became reachable rather than theoretical. How that work is actually run, and the rules the agents work under, is in [Principles & process](principles-and-process.md).
+What changed is the effort of writing code, and what changed it is AI agents. That is the whole reason. A rebuild that would have been years of Saturdays became something worth attempting, and the architecture that follows from full ownership, testable end to end with no black boxes, became reachable rather than theoretical. How that work is run, and the rules the agents work under, is in [Principles & process](principles-and-process.md).
 
 ## Why agents at all
 
 Using agents to build open-source software is contested, and a page that credits them with making this project possible cannot reasonably skip past that. So, briefly and once: where we stand.
 
-We use AI agents because the technology is not going away, and the only way to learn what a tool really does, where it is strong and where it quietly fails, is to run a real project on it.
+We use AI agents because the technology is not going away, and the only way to learn what a tool does, where it is strong and where it quietly fails, is to run a real project on it.
 
 The two objections we hear most are that agents take developers' jobs, and that the energy they burn is not worth it. On both we have a position rather than an argument: we think AI changes jobs rather than takes them, the way computers changed office work from the 1990s onward, and we think the energy cost is defensible. We are not going to argue either here, and neither is a claim that everyone should work this way.
 
-## What this is not
+## The limits of this argument
 
 It is not a verdict on the libraries we moved away from. They work, they have thousands of users, and they were built by people solving real problems on hardware we have never touched.
 

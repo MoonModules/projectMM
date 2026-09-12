@@ -2,13 +2,13 @@
 
 A **modifier written as a live script**: the coordinate transform that decides where each light sits in the pattern, authored as text on a running device instead of compiled in as a C++ class. Same [MoonLive](MoonLiveEffect.md) engine as a scripted effect, pointed at a different job.
 
-A [modifier](modifiers.md) reshapes how a Layer's output maps onto the physical lights — mirror it, shift it, swap its axes. Each hand-written one is a class, a rebuild and a reflash. A scripted one is a line of text, applied as you type.
+A [modifier](modifiers.md) reshapes how a Layer's output maps onto the physical lights: mirror it, shift it, swap its axes. Each hand-written one is a class, a rebuild and a reflash. A scripted one is a line of text, applied as you type.
 
 <img src="../../assets/light/MoonLiveModifier.png" width="300" alt="MoonLiveModifier">
 
 ## Writing one
 
-The script transforms **one coordinate**. It needs no loop over the lights, because the Layer already does that: it calls the script once per physical light while it builds its mapping. (A `for` is available if the arithmetic wants one — it just is not how the script reaches the next light.)
+The script transforms **one coordinate**. It needs no loop over the lights, because the Layer already does that: it calls the script once per physical light while it builds its mapping. (A `for` is available if the arithmetic wants one, though it is not how the script reaches the next light.)
 
 ```c
 class MirrorModifier {
@@ -30,9 +30,9 @@ setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
 
 ### What a script can read
 
-`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script) — the engine writes them per call, and a script cannot declare a name that shadows one.
+`x`, `y`, `z` (the light being folded) and `width`, `height`, `depth` (the box it lives in) are [system variables](MoonLiveEffect.md#system-variables-what-the-engine-hands-a-script): the engine writes them per call, and a script cannot declare a name that shadows one.
 
-`width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black — with no error anywhere, because the script itself ran perfectly.
+`width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black. No error appears anywhere, because the script itself ran perfectly.
 
 ### Seeing inside a script
 
@@ -61,8 +61,8 @@ Past half full, the status also names the tightest limit the script is approachi
 | `script` | the script's file name, picked from the [library](MoonLiveEffect.md) or your own; naming it (or re-naming it after an edit) recompiles and re-maps live |
 
 Plus one control per `addControl` in the script's `defineControls()`: `addControl("amount", amount, 0, 64)`
-becomes a slider, and moving it rebuilds the mapping just as editing the script does.
+becomes a slider, and moving it rebuilds the mapping as editing the script does.
 
-Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through — the transform disappears until the script parses again, and the device keeps rendering throughout.
+Editing the script asks the Layer to rebuild its mapping, so a change is visible immediately. A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through, so the transform disappears until the script parses again, and the device keeps rendering throughout.
 
 Detail: [technical](moxygen/MoonLiveModifier.md)

@@ -8,34 +8,39 @@ It starts with the four kinds of page and which one each of ours is. Then how a 
 
 ## The hierarchy
 
-A reader enters at the top and stops as soon as they have enough. A writer puts a fact at the shallowest level that fully owns it, and links to it from every level above. Each branch is one [Diátaxis](https://diataxis.fr/) type, named on the right.
+A reader enters at the top and stops as soon as they have enough. A writer puts a fact at the shallowest level that fully owns it, and links to it from every level above. Purple is the four [Diátaxis](https://diataxis.fr/) types, green is written once in the source and generated from there, and gold sits outside the grid.
 
-```text
-README.md, docs/index.md             what projectMM is, and the one thing to do next
-│
-├─ gettingstarted.md                 a blank board to a first light show        tutorial
-│  └─ tutorials/                     one lesson each, followed start to finish  tutorial
-│
-├─ usecases/                         one task you already have                  how-to
-├─ building.md                       how to build and flash every target        how-to
-│
-├─ architecture.md                   how the system is shaped, and why          explanation
-├─ why-we-write-our-own.md           why our own code rather than a library     explanation
-│
-├─ reference/                        pinouts, variants, boards                  reference
-├─ performance.md, metrics/          what it costs, measured                    reference
-├─ testing.md                        what is tested, and how                    reference
-├─ MIGRATING.md                      what changed under you                     reference
-│
-├─ CLAUDE.md                         the process every change follows           rules
-│  ├─ coding-standards.md            how code is written                        rules
-│  └─ documentation-standards.md     how prose is written                       rules
-│
-├─ moonmodules/                      one row per module, its controls           reference
-│  └─ moxygen/                       every member, generated from the header    reference
-│     └─ src/**/*.h                  the one home for per-member detail         reference
-│
-└─ work/, history/, friend-repos/    planned, shipped, and who we watch         outside
+```mermaid
+flowchart TB
+    entry["<b>README.md</b> · <b>index.md</b><br/><i>what it is, what to do next</i>"]
+
+    tut["<b>tutorial</b><br/>gettingstarted.md · tutorials/<br/><i>a lesson to follow</i>"]
+    how["<b>how-to</b><br/>usecases/ · building.md<br/><i>one task you already have</i>"]
+    exp["<b>explanation</b><br/>architecture.md<br/><i>why it is shaped this way</i>"]
+    ref["<b>reference</b><br/>reference/ · testing.md<br/>performance.md · MIGRATING.md<br/><i>facts, fast</i>"]
+
+    mod["<b>moonmodules/</b><br/><i>reference: one row per module</i>"]
+    mox["<b>moxygen/</b><br/><i>every member, generated</i>"]
+    hdr["<b>src/**/*.h</b><br/><i>per-member detail lives here</i>"]
+
+    rules["<b>the rules</b><br/>CLAUDE.md · coding-standards<br/>documentation-standards<br/><i>for contributors</i>"]
+    outside["<b>work/</b> · <b>friend-repos/</b><br/><i>planned, shipped, watched</i>"]
+
+    entry --> tut --> how --> exp --> ref
+    entry --> mod --> mox --> hdr
+    entry -.-> rules
+    rules -.-> outside
+
+    style entry fill:#2d3561,stroke:#7b88c9,color:#fff
+    style tut fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style how fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style exp fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style ref fill:#3d2d61,stroke:#a07bc9,color:#fff
+    style mod fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    style mox fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    style hdr fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    style rules fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    style outside fill:#4d3d1f,stroke:#c9a95f,color:#fff
 ```
 
 Each level says what a thing is and links down for the rest. A fact stated above its home is a second copy that drifts.
@@ -82,6 +87,7 @@ Two scales below a page: **a module** has exactly one reference page written and
 - **Ask, do not argue.** A request states what you want and why, then stops. Quoting the other side's code back to them and pre-empting every objection is pressure, and earns a reply shorter than the message. Ask the one question that decides the rest.
 - **A sentence is one thought.** Past twenty words it is usually two, joined by a comma or a colon that a full stop should have been. Instructions in particular: one step, one sentence, and the reader's eyes never lose the line.
 - **The text never refers to itself.** "This page", "this recipe", "as described above", "in the following section": each one is the author stepping in front of the content. Say the thing; the reader knows where they are.
+- **A diagram beats the paragraph that describes it.** Draw a structure, a flow or a hierarchy as a [Mermaid](https://mermaid.js.org/) diagram: it renders on the site and on GitHub, and it diffs as text. A screenshot does the same where the point is what a reader sees. Both follow the example rule: they replace prose rather than decorate it.
 - **One example, only where the prose alone would be misread.** A code block earns its place by preventing a wrong reading; a second example is the author enjoying the subject.
 - **A link's text says what it reaches.** "See the hot path rule" tells the reader whether to follow it; "see here" does not, and a bare filename only if the filename is the point.
 - **One parenthetical per sentence.** A second qualification means the sentence carries two ideas: split it, or drop the weaker one.

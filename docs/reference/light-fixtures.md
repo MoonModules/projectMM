@@ -3,7 +3,7 @@
 DMX channel maps and specifications for the fixtures and Art-Net nodes on the bench, read from
 their manuals so a light preset can be built without re-scraping a PDF. A fixture here has a
 matching entry in the **LightPresets** library ([drivers](../moonmodules/light/drivers.md)); the
-preset is the channel-role layout, this page is where the numbers behind it come from.
+preset is the channel-role layout, and the numbers behind it are below.
 
 ## SHEHDS Mini LED Moving Head 10W RGBW
 
@@ -53,11 +53,11 @@ color values; routing brightness onto it is the better model and is
 unmapped hold at 0, which is what a light driver wants: **strobe off** (CH7) and full-speed
 movement (CH5). The fine channels are unused until 16-bit positioning is wired up.
 
-Two things to know when driving it by hand: every channel at 255 makes the fixture **strobe**,
-because CH7 is a strobe channel rather than part of the dimmer, and the 13-channel mode's CH12 at
-250-255 selects **sound mode**, in which the fixture ignores DMX movement and runs its own program.
+Two things matter when driving it by hand. Every channel at 255 makes the fixture **strobe**, because
+CH7 is a strobe channel rather than part of the dimmer. And the 13-channel mode's CH12 at 250-255
+selects **sound mode**, where the fixture ignores DMX movement and runs its own program.
 
-### 13-channel mode (not used)
+### 13-channel mode (the alternative)
 
 The same first 11 channels, plus CH12 (0-249 auto run, 250-255 sound mode) and CH13 (150-200
 reset). Both are program modes that take control away from DMX, so the 11-channel mode is the one
@@ -80,8 +80,8 @@ fixture, the counterpart to the LED drivers that speak to addressable strips dir
 
 **Its universe display is 1-based: node `01` is Art-Net universe 1.** Set the driver's
 `universe_start` to the number the node shows, not one less. This is the setting that cost a whole
-bench session: a universe mismatch is completely silent, because ArtDMX for another universe is
-dropped with no error anywhere, and the symptom is identical to a broken fixture, a wrong DMX
+bench session. A universe mismatch is silent: ArtDMX for another universe is dropped with no error
+anywhere, and the symptom is identical to a broken fixture, a wrong DMX
 address or a closed shutter. Check the universe FIRST when a fixture does not respond, and confirm
 it by reading the number off the node's own display.
 

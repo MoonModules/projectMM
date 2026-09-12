@@ -1,5 +1,5 @@
 {
-  "commit": "2457c5ae",
+  "commit": "b52e8b57",
   "flash": {
     "esp32s3-n16r8": 2103024,
     "desktop": 1949704,
@@ -31,8 +31,8 @@
   },
   "perf": {
     "desktop": {
-      "tick_us": 128,
-      "fps": 7812,
+      "tick_us": 132,
+      "fps": 7575,
       "scenario_p50": {
         "Layer_base_pipeline": {
           "p50": 69,
@@ -736,12 +736,12 @@
     "scenarios": 27
   },
   "docs": {
-    "md_files": 122,
-    "md_lines": 27158,
+    "md_files": 121,
+    "md_lines": 27147,
     "plans_files": 30,
     "backlog_lines": 2861,
-    "lessons_lines": 518,
-    "claude_md_lines": 267
+    "lessons_lines": 0,
+    "claude_md_lines": 260
   },
   "complexity": {
     "functions": 3557,

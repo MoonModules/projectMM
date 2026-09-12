@@ -1,10 +1,10 @@
 # Core supporting modules
 
-The core machinery the UI modules lean on — not directly user-facing, so no controls of their own. Each row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-file design rationale that no single `.h` owns lives in the prose sections below the table.
+The core machinery the UI modules lean on, internal rather than user-facing, so no controls of their own. Each row links to its generated technical page (the full API, from the `.h`) and its tests. Cross-file design rationale that no single `.h` owns lives in the prose sections below the table.
 
 ### Control
 
-A named, typed value a MoonModule exposes to the UI — the binding between a class variable and its web-UI widget, DMX channel, and persisted value. Every module holds a list of these.
+A named, typed value a MoonModule exposes to the UI: the binding between a class variable and its web-UI widget, DMX channel, and persisted value. Every module holds a list of these.
 
 Detail: [technical](moxygen/Control.md)
 
@@ -20,7 +20,7 @@ Detail: [technical](moxygen/Scheduler.md)
 
 ### MoonModule
 
-The base class every module derives from — the shared lifecycle (`setup` / `tick` / `release`), the controls list, child propagation, and the self-reporting footprint (`classSize` / `dynamicBytes` / `tickTimeUs`). Learn the pattern once, apply it everywhere.
+The base class every module derives from, carrying the shared lifecycle (`setup` / `tick` / `release`), the controls list, child propagation, and the self-reporting footprint (`classSize` / `dynamicBytes` / `tickTimeUs`). Learn the pattern once, apply it everywhere.
 
 Detail: [technical](moxygen/MoonModule.md)
 
@@ -38,4 +38,4 @@ Detail: [technical](moxygen/FilesystemModule.md)
 
 ## Persistence and dynamic rebuild
 
-Control values persist via [FilesystemModule](moxygen/FilesystemModule.md), which overlays loaded values through each control's variable pointer during `defineControls()`. Calling `defineControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show — this is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.
+Control values persist via [FilesystemModule](moxygen/FilesystemModule.md), which overlays loaded values through each control's variable pointer during `defineControls()`. Calling `defineControls()` again at runtime (e.g. when a Select changes mode) clears and rebuilds the set, so only the controls relevant to the current mode show. This is how a control's conditional `hidden` flag re-evaluates. The rebuild sweep is also how a config change applies live, with no reboot.

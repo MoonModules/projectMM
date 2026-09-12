@@ -12,15 +12,15 @@ One report about this install, sent once when the firmware is installed or upgra
 
 projectMM is built by a small group of volunteers, so where the effort goes is the most consequential decision the project makes. Without numbers that decision is made from whoever spoke up most recently on Discord, which is a real signal but a badly skewed one: it over-weights the loud, the new, and the broken.
 
-- **To build what is actually used.** Which effects, layouts, modifiers, drivers and services are on real devices tells us where the next improvement is worth the most. An effect on nearly every install earns polish; one almost nobody enables does not get rewritten ahead of it.
-- **To know what we can stop carrying.** Every feature costs flash, memory and maintenance forever, and on an ESP32 that budget is genuinely scarce. Something no install uses is a candidate for removal, and that is very hard to justify on a hunch.
+- **To build what people use.** Which effects, layouts, modifiers, drivers and services run on real devices tells us where the next improvement is worth the most. An effect on nearly every install earns polish; one almost nobody enables does not get rewritten ahead of it.
+- **To know what we can stop carrying.** Every feature costs flash, memory and maintenance forever, and on an ESP32 that budget is genuinely scarce. Something no install uses is a candidate for removal, and that is hard to justify on a hunch.
 - **To test on the hardware people own.** Chip, flash, PSRAM and device model tell us which boards to keep on the bench and which variants must keep building. We would rather find a break on a board we own than have you find it.
 - **To size things for real installations.** How many lights are driven, and how much memory is free, say whether a default is sensible or whether we tuned it for a device nobody runs. A layout that assumes 256 lights is the wrong default if most walls are far bigger.
 - **To know whether an upgrade reached anyone.** The running version against the last reported one distinguishes an upgrade from a fresh install, which is what tells us whether a release is being picked up or a problem is stranding people on an old one.
 
 Development is not held hostage to these numbers: something rare and excellent stays. They inform the decision rather than make it.
 
-### What it does not do
+### The limits of what is sent
 
 It carries no device name, no addresses, no credentials, and nothing you typed; a unit test asserts those cannot appear in a report. There is no profile, nothing is sold, and no third party receives it. Turning it off stops all of it, and the charts go back to empty.
 

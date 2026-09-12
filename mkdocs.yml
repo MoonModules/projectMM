@@ -61,7 +61,13 @@ markdown_extensions:
       permalink: true
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
+  # superfences also renders ```mermaid blocks as diagrams rather than code, via the
+  # custom fence below: Material ships the mermaid runtime, so no extra dependency.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.inlinehilite
   # Renders Material icon shortcodes (`:material-flash:` → the ⚡ glyph) used on
   # the landing page's buttons and card grid. Without this they show as literal
