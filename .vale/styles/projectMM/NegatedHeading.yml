@@ -1,0 +1,13 @@
+# documentation-standards.md: "Positive form only." A heading that names an absence gives the
+# reader no shape at all. Headings only: inside prose a real constraint may legitimately negate.
+extends: existence
+message: "A heading in negative form: name what the section IS."
+level: warning
+scope: heading
+ignorecase: true
+tokens:
+  - '\bnot\b'
+  - '\bnever\b'
+  - '\bno\b'
+  - '\bwithout\b'
+  - "\\bdon't\\b"

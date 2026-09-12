@@ -234,7 +234,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     //
     // Six hypotheses are ruled out by measurement; the open one is IDF's own note that without
     // descriptor write-back "descriptor is always owned by DMA after being used". Full account +
-    // what NOT to re-try: docs/history/shift-register-driver-analysis.md § 7.5.
+    // what NOT to re-try: docs/work/future/shift-register-driver-analysis.md § 7.5.
     ioCfg.trans_queue_depth = (clockMultiplier > 1) ? 1 : 2;
     ioCfg.on_color_trans_done = i80DoneCb;
     ioCfg.user_ctx = st;
@@ -282,7 +282,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // possible and the driver must get back to it. PSRAM therefore remains the fallback (a frame too
     // big for internal RAM still runs, just poorly, rather than refusing to drive at all).
     //
-    // Full account + what has already been ruled out: docs/history/shift-register-driver-analysis.md § 7.5.
+    // Full account + what has already been ruled out: docs/work/future/shift-register-driver-analysis.md § 7.5.
 #if SOC_LCDCAM_I80_LCD_SUPPORTED
     // Only the LCD_CAM backend can reach PSRAM at all, so the preference only exists here. (The
     // classic ESP32's i80 is the I2S peripheral, whose DMA cannot address PSRAM — it takes the
@@ -316,7 +316,7 @@ I80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // the common path allocates exactly one frame buffer and pays no async memory. When wanted, same
     // PSRAM-first-else-internal allocate-and-degrade: if it fits, arm double-buffer mode (buf[1] + its
     // semaphore); if it doesn't (memory-tight board), leave buf[1] null and run single-buffer. The
-    // double-buffer is never *required* (allocate-and-degrade, ADR 0002).
+    // double-buffer is never *required* (allocate-and-degrade).
     if (wantSecond) {
         st->done[1] = xSemaphoreCreateBinary();
         if (st->done[1]) {

@@ -1,8 +1,8 @@
 # Driving projectMM from a phone or tablet
 
-Eight switches, eight knobs and eight faders on a touchscreen, moving the device in real time and following it when something else moves it. This page takes you from nothing to a working surface in about five minutes, using a free app and one file.
+Eight switches, eight knobs and eight faders on a touchscreen, moving the device in real time and following it when something else moves it. It takes about five minutes to go from nothing to a working surface, using a free app and one file.
 
-> New here? Start with **[Install & first light](../gettingstarted.md)**. This page assumes projectMM is running and you can find it in a browser.
+> New here? Start with **[Install & first light](../gettingstarted.md)**. What follows assumes projectMM is running and you can find it in a browser.
 
 ---
 
@@ -156,7 +156,7 @@ Full options are on the [OSC module's page](../moonmodules/core/services.md).
 
 ---
 
-## What the surface actually sends
+## What the surface sends
 
 Worth knowing if you ever edit the layout.
 

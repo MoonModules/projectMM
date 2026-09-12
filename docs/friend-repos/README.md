@@ -13,6 +13,33 @@ Monthly logs of what shipped on related open-source LED projects — the live la
 - [hpwit-ESPLiveScript.md](hpwit-ESPLiveScript.md) — hpwit's live C-like script compiler for the ESP32 (main quiet; work moved to version branches).
 - [hpwit-new-parser.md](hpwit-new-parser.md) — **ESPLiveScript2**, hpwit's from-scratch rewrite of the above (repo is named `new-parser`; the library lives in `asmparser2/`). Dormant May 2025 → August 2026, then an active rewrite whose stated goal is a *verifiable* compiler: host builds plus QEMU running the actual compiled Xtensa bytes.
 
+## Cross-repo trends
+
+Reading across the friend-repo digests, the themes the wider ESP32-LED ecosystem converged on over this release cycle (Sept 2025 → June 2026):
+
+- **ESP32-P4 / S3 parallel output.** FastLED poured effort into the PARLIO and LCD_CAM drivers (P4/S3 parallel LED output, big encode speedups); NightDriverStrip added custom RMT output; hpwit's I2SClocklessLedDriver pushed IDF-5.5 + arduino-less-ESP-IDF support for its I2S/LCD DMA driver (the canonical implementation of this technique), and troyhacks ran ESP32-P4 bring-up branches. The frontier is parallel, DMA-driven output on the newer chips.
+- **PSRAM strategy is unsettled everywhere.** All four wrestled with PSRAM this cycle — WLED-MM moved preview buffers into PSRAM, NightDriverStrip did a full PSRAM-default reversal (then tuned the threshold), WLED added S3-no-PSRAM builds. Nobody has a clean answer; the cache-disabled-during-flash hazard recurs across repos.
+- **Audio-reactive maturing.** FastLED added a silence-gate + ESP-DSP FFT backend; WLED-MM and WLED both refined audio sync and auto-disable-during-realtime; NightDriverStrip modernised its SoundAnalyzer/FFT. Audio-reactive is table stakes now, and the polish is in *not* reacting to noise/silence.
+- **The FastLED dependency question.** WLED merged a *full FastLED replacement* (its own color/math); projectMM already made the same call (own color math, no FastLED in core). Two independent projects concluded the dependency wasn't worth it.
+- **UI as a firmware-driven consumer.** Both WLED and NightDriverStrip pushed toward "the official UI knows nothing the firmware doesn't publish over the wire" — exactly projectMM's MoonModule-driven, no-hardcoded-knowledge UI principle. Convergent design. NightDriverStrip's **2.0.0** (June 2026) crystallised this: a brand-new web UI, a browser-based installer, and settings (like strip type) moved from compile-time to *runtime-selectable* on the device — the same "reconfigure live, no reflash" direction projectMM builds around.
+- **Effect velocity.** WLED and WLED-MM shipped many new effects (PacMan, Color Clouds, Shimmer, the user_fx pack); new effects remain the most visible user-facing output.
+- **Display / HDMI output beyond LED strips.** troyhacks ran a cluster of branches probing HDMI video output and large hardware panels (WaveShare 10.1″, M5Stack, ESP32-P4 panels) — driving *displays*, not just addressable strips, off the same firmware.
+- **On-device live scripting.** hpwit's ESPLiveScript compiles small C-like effect scripts that run live on the ESP32 with no reflash — a different answer to effect authoring than C++ recompilation or a fixed effect table.
+
+## What these projects do that projectMM doesn't (yet)
+
+Observational: where the landscape is ahead of projectMM. These are *not* commitments; real adoption decisions live in the [`../backlog/`](../work/future/README.md), cross-referenced where one already exists.
+
+- **Parallel multi-strip output on S3/P4** (PARLIO/LCD_CAM, and hpwit's I2S/shift-register drivers) — the direct parallel drivers ship (MultiPin/Moon on LCD_CAM, Parlio on P4, driving up to 16 strands and 12,288+ lights). The shift-register/'595 expander path also ships but is dormant: it works at prime-only geometries yet has a known lapping-ring sparkle at the largest configs, so it stays off by default. See the [LED-driver analysis](../work/future/leddriver-analysis-top-down.md).
+- **Audio-reactive input** — none of projectMM's effects are audio- or motion-reactive yet. The Peripheral role + the Pi-sensor backlog entry are the foundation; the producer→effect wiring is backlog.
+- **A guided setup/installer wizard on-device** (NightDriverStrip's Setup Wizard, WLED's installer) — projectMM has the web installer + Improv, but no on-device first-run wizard.
+- **A large built-in effect library** — projectMM ships a focused set (concrete-first); the WLED family ships dozens. Breadth is a deliberate non-goal until the core is proven.
+- **On-device live effect scripting** (hpwit's ESPLiveScript) — projectMM effects are compiled C++; there's no runtime script path. Not a goal today, noted as a landscape contrast.
+
+## Refreshing
+
+Adding a month or a new friend repo is the [friend-repos](README.md) workflow, and its prompt lives there. This folder's own documents are records rather than a feed: they change when the thing they record changes.
+
 ## Digest prompt (reusable)
 
 > **Friend-repo monthly digest.** For the repo `<NAME>` (local clone at `<PATH>`, or via `gh api repos/<owner>/<NAME>`), summarise what landed on its **main/default branch** during `<MONTH YEAR>`.

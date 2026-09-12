@@ -1,0 +1,8 @@
+# documentation-standards.md: "Say it, then stop: about 40 words." Past that a reader skims, and a
+# skimmed statement is not followed. A suggestion, since the rule calls itself "about".
+extends: occurrence
+message: "Sentence runs past 40 words; a skimmed statement is not followed."
+level: suggestion
+scope: sentence
+max: 40
+token: '\b\w+\b'

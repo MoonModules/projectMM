@@ -1,0 +1,16 @@
+# documentation-standards.md: "factual, no nonsense." These words assert emphasis without carrying
+# information; a sentence reads the same without them, which is the test.
+extends: existence
+message: "'%s' adds emphasis, not information."
+level: suggestion
+ignorecase: true
+tokens:
+  - very
+  - really
+  - simply
+  - just
+  - basically
+  - actually
+  - obviously
+  - clearly
+  - of course

@@ -112,7 +112,7 @@ ModuleFactory is core infrastructure ([`src/core/ModuleFactory.h`](../src/core/M
 
 **Self-reporting.** Every MoonModule reports its own footprint and cost: `classSize()` (the `sizeof` of the class instance, captured at registration), `dynamicBytes()` (heap allocated during `prepare`), and `tickTimeUs()` (average time its `tick` took, accumulated per tick). These surface in `/api/system`, console output, and scenario tests: the same numbers for an effect, a driver, or a system service, because they're a base-class feature, not a light-domain one.
 
-Each MoonModule has two documentation surfaces under `docs/moonmodules/`: an end-user **summary page** — one 4-column table row in its group's page (effects/modifiers/layouts/drivers, or core/light UI/supporting) — and a **generated technical page** built from the header's `///` comments. See [coding-standards § Documentation model](coding-standards.md#documentation-model) for the full model.
+Each MoonModule has two documentation surfaces under `docs/moonmodules/`: an end-user **summary page** (one 4-column table row in its group's page: effects/modifiers/layouts/drivers, or core/light UI/supporting) and a **generated technical page** built from the header's `///` comments. See [documentation-standards § Module pages](documentation-standards.md#module-pages) for the full model.
 
 ## Controls
 
@@ -136,7 +136,7 @@ Control values and each module's `enabled` flag are persisted to flash so settin
 - **Conditional controls**: every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. The load path can therefore find persisted values regardless of the live conditional state.
 - **Code-wired children survive a stale file**: some children aren't created by the user; `main.cpp`'s boot wiring attaches them (`ImprovProvisioningModule` under `NetworkModule`; `NetworkSendDriver`, `PreviewDriver` under their parents). Each such child calls `markWiredByCode()` after `addChild()`, a one-bit flag meaning *"I belong here because the code put me here, not because a saved file or a user asked for me."* The problem it solves: persistence reconciles the live tree to match the saved JSON, so a child that exists in code but is absent from an older saved file (written before that child was added) would be trimmed on load. The flag tells the apply step to keep it. Children added through the HTTP API or recreated from JSON stay unmarked; those follow the file's tree shape exactly, so UI deletes still take effect.
 
-Persistence reaches the Scheduler through a **function-pointer hook** (`setLoadAllHook`) the load phase calls if set: FilesystemModule registers its load routine there at startup, so the Scheduler never names FilesystemModule (no circular dependency, persistence stays optional; a null hook means defaults-only). The choice of a flat POD image over a JSON format, and of load-before-setup, is [ADR-0001](adr/0001-persistence-pod-memcpy-not-json.md).
+Persistence reaches the Scheduler through a **function-pointer hook** (`setLoadAllHook`) the load phase calls if set: FilesystemModule registers its load routine there at startup, so the Scheduler never names FilesystemModule (no circular dependency, persistence stays optional; a null hook means defaults-only). The format is a flat POD image rather than JSON, and the load runs before setup.
 
 ## Parallelism
 
@@ -172,7 +172,7 @@ No registry, no subscription, no event bus. The consumer reads the latest value 
 
 **Push through a domain-neutral sink.** When the producer should hand bytes to a generic core service rather than expose a struct, the core defines a narrow interface and the producer pushes to it. The producer owns the data and its wire format; the core sink (the interface's implementer) knows only "take these bytes and do my generic job"; it has zero knowledge of what the bytes mean or which domain produced them. `BinaryBroadcaster` (`HttpServerModule` implements it: "broadcast these bytes to all WebSocket clients") is the example; the producer side lives in the light domain (see [§ The pipeline](#the-pipeline)).
 
-Both shapes extend to any future producer/consumer pair (a sensor owning a state struct read through a `const Foo*`; a module pushing bytes to a core sink). Neither is pub/sub, and the reasons this project chose pull + a prepare-pass over an event bus are [ADR-0011](adr/0011-data-exchange-pull-and-prepare-pass-not-pubsub.md).
+Both shapes extend to any future producer/consumer pair (a sensor owning a state struct read through a `const Foo*`; a module pushing bytes to a core sink). Neither is pub/sub: with one producer per data kind and a consumer that wants that specific data, a registry and listener lifecycles buy nothing.
 
 ## Event triggering between modules
 
@@ -186,7 +186,7 @@ A control changes, or the module tree is mutated (a child added, deleted, replac
 
 **`quiesce()` — the structural path's thread guard.** A module may hand work to another thread (`Drivers` ticks its Driver children on a core-1 task, see [§ Parallelism](#parallelism)), which makes a *structural* mutation dangerous in a way a control change is not: `addChild` reallocates the child array a worker may be walking, and `removeChild` is followed by the caller's `release()` + `deleteTree()`, which frees the very module a worker may be inside `tick()` on. So `MoonModule` declares `virtual void quiesce()` (default no-op) and **core calls it on the parent before every child-array mutation** (`addChild` / `removeChild` / `replaceChildAt`); a module owning a worker overrides it to park that worker. The control path already funnels through `applyState()`/`prepareTree()`, where the owner quiesces itself — this is the same rule extended to the sibling (structural) path, and it lives in core so no HTTP handler has to remember it (CLAUDE.md § *when core already owns a mechanism for one path, extend it to the sibling path*). Deleting a driver from the UI mid-encode is therefore safe by construction, not by handler discipline.
 
-This is the recognised layout/prepare-pass pattern (JUCE `prepareToPlay`, UIKit `layoutSubviews`, gated by per-object metadata like WPF's `AffectsMeasure`, here `affectsPrepare`); the pull-and-prepare-pass-not-pub/sub decision is [ADR-0011](adr/0011-data-exchange-pull-and-prepare-pass-not-pubsub.md). The light domain consumes it for the mapping rebuild ([§ Mapping and blending](#mapping-and-blending)); the mechanism itself is core.
+This is the recognized layout/prepare-pass pattern (JUCE `prepareToPlay`, UIKit `layoutSubviews`, gated by per-object metadata like WPF's `AffectsMeasure`, here `affectsPrepare`). The light domain consumes it for the mapping rebuild ([§ Mapping and blending](#mapping-and-blending)); the mechanism itself is core.
 
 ### Live reconfiguration: every change applies without a reboot
 
@@ -259,9 +259,9 @@ Three distinct things, kept distinct in the vocabulary:
 - **deviceModel** — the whole assembled product, identified by its catalog name (`Olimex ESP32-Gateway Rev G`). This is *which hardware this is*. It is distinct from **`deviceName`**, *which individual unit this is* (per-unit identity the user sets — see [§ Device name](#device-name-one-identity-every-network-name-derives-from-it)); a **device** (the umbrella term) has a `deviceName` and a `deviceModel`.
 - **board** — the bare PCB *only*. The word survives in its literal sense: **on-board** LED, **on-board** peripherals, board-soldered pins — things physically *on the PCB*. (A deviceModel is a board plus whatever is wired onto it.)
 
-**Firmware** is the compiled binary: chip target plus which radios/peripherals/sdkconfig fragments are included. Today's variants: `esp32` (classic, WiFi **and** RMII Ethernet in one binary — Ethernet comes up only when a PHY is present, pins/PHY per deviceModel), `esp32-eth` (classic, Ethernet only, WiFi excluded), `esp32-16mb` (classic with 16 MB flash, WiFi + Ethernet), `esp32s3-n16r8` / `esp32s3-n8r8` (S3 with WiFi + W5500 SPI Ethernet), `esp32p4rev1-eth` (Waveshare ESP32-P4-NANO, Ethernet only), `esp32p4rev1-eth-wifi` (the same P4 hardware with WiFi via its on-board ESP32-C6 over esp_hosted), `esp32p4rev3-eth` / `esp32p4rev3-eth-wifi` (the same two images built for P4 **v3.x** silicon, which is not binary-compatible with rev <3.0 — untested, no v3 board on the bench). Each chip's firmware carries the Ethernet *driver(s)* it can host (RMII EMAC for classic/P4, W5500 SPI for S3); which PHY/pins a deviceModel uses is runtime config. Selected by `build_esp32.py --firmware <key>`, reported by `SystemModule.firmware`, used as the contract target key in scenarios.
+**Firmware** is the compiled binary: chip target plus which radios, peripherals and sdkconfig fragments are included. One chip's firmware carries every Ethernet driver that chip can host; which PHY and pins a device model uses is runtime configuration. The variants themselves are listed in [firmware variants](reference/firmware-variants.md#firmware-variants).
 
-**deviceModel** is the physical hardware: chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna), identified by its product name. Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 Dev`. A unit cannot identify its own deviceModel (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. It is stored on the unit as SystemModule's `deviceModel` Text control (display-only in the UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the unit via `POST /api/control` after each discover and after every dropdown change. The catalog of valid deviceModels lives at [mooninstaller/deviceModels.json](../mooninstaller/deviceModels.json), shared between MoonDeck and the web installer: MoonDeck reads it for its dropdown and HTTP push (plain REST on the LAN); the web installer reads it for its picker and pushes the whole entry — deviceModel plus every module/control — over serial during provisioning as REST ops (**"Improv = REST over serial"**, the `APPLY_OP` vendor RPC; see [ImprovProvisioningModule.md](moonmodules/core/moxygen/ImprovProvisioningModule.md)). Pushing over serial sidesteps the mixed-content block that stops an HTTPS installer page from POSTing to an `http://` device; an already-running device is re-configured via MoonDeck on the LAN.
+**deviceModel** is the physical hardware: chip + PCB + on-board peripherals (PHY, USB-serial, PSRAM, antenna), identified by its product name. Examples: `Olimex ESP32-Gateway Rev G`, `LOLIN D32`, `Generic ESP32 Dev`. A unit cannot identify its own deviceModel (no readable PCB ID on classic ESP32), so MoonDeck deduces it from the firmware where unambiguous (`esp32-eth*` ⇒ Olimex) and otherwise lets the user pick. It is stored on the unit as SystemModule's `deviceModel` Text control (display-only in the UI; HTTP `/api/control` writes still apply). MoonDeck mirrors the picked / deduced value to the unit via `POST /api/control` after each discover and after every dropdown change. The catalog of valid deviceModels lives at [mooninstaller/deviceModels.json](../mooninstaller/deviceModels.json), shared between MoonDeck and the web installer: MoonDeck reads it for its dropdown and HTTP push (plain REST on the LAN); the web installer reads it for its picker and pushes the whole entry, deviceModel plus every module/control, over serial during provisioning as REST ops (**"Improv = REST over serial"**, the `APPLY_OP` vendor RPC; see [ImprovProvisioningModule.md](moonmodules/core/moxygen/ImprovProvisioningModule.md)). Pushing over serial sidesteps the mixed-content block that stops an HTTPS installer page from POSTing to an `http://` device; an already-running device is re-configured via MoonDeck on the LAN. **`SET_BOARD` carries only the board name**, and every other field ships over HTTP after WiFi association. Do not extend its wire format: that couples unrelated controls to the board-name lifecycle and hides the timing constraint. A pre-association control gets either its own vendor RPC dispatched before the credentials, or a board-specific sdkconfig fragment when the value is truly board-static.
 
 A deviceModel can run multiple firmwares (the Olimex Gateway runs both `esp32-eth` and the default `esp32`); a firmware can run on multiple deviceModels (`esp32` runs on any classic ESP32 dev kit). The `esp32s3-n16r8` firmware is S3-only and does not run on the Olimex Gateway or other classic-ESP32 hardware. The codebase reserves "deviceModel" exclusively for the physical product and "firmware" exclusively for the compiled binary.
 
@@ -353,7 +353,7 @@ Services are **user-add/deletable children of the `Services` container** — the
 Two domain-neutral services let several controllers act as one installation. They're core because nothing about them is light-specific; any domain spanning multiple devices uses the same two.
 
 - **Discovery**: devices find each other via mDNS. `NetworkModule` advertises each device today; this is live.
-- **Clock sync**: a shared monotonic clock is the foundation any cross-device coordination builds on. The design is filed in [backlog-core](backlog/backlog-core.md).
+- **Clock sync**: a shared monotonic clock is the foundation any cross-device coordination builds on. The design is filed in [backlog-core](work/future/backlog-core.md).
 
 What the synced clock is *for* is a domain question; the light domain's use of it (synced animation across a wall) is in [§ Multi-device sync](#multi-device-sync).
 
@@ -464,7 +464,7 @@ Effects know nothing about hardware, protocols, physical LED layout, or mapping.
 
 ### Buffer persistence — the layer does not clear each frame
 
-The Layer's buffer **persists** frame to frame: `Layer::tick()` does not clear it before running effects (the decision, and why not clear-each-frame, is [ADR-0003](adr/0003-layer-buffer-persists-frame-to-frame.md)). It is zeroed once on allocation/resize, and once more in `Layer::prepare()` after `rebuildLUT()`, so a rebuild starts from black and persistence then holds between frames. Each effect owns its background:
+The Layer's buffer **persists** frame to frame: `Layer::tick()` does not clear it before running effects. It is zeroed once on allocation/resize, and once more in `Layer::prepare()` after `rebuildLUT()`, so a rebuild starts from black and persistence then holds between frames. Each effect owns its background:
 
 - A **full-grid** effect (Plasma, Rainbow, Fire, Noise) writes every pixel each frame.
 - A **trail** effect calls `layer()->fadeToBlackBy(amt)` to decay the previous frame, so a comet leaves a fading tail.
@@ -530,6 +530,8 @@ Two traps worth naming. A quantity already gated by wallclock must not ALSO be s
 
 ## MoonLive: the live-script engine
 
+**The core knows expressions plus a generic call mechanism; the host registers its functions.** Every argument parses as an expression, so a literal and a nested call are the same shape, and the LED names and RGB meaning live only in the light-domain registration. The core sees a neutral `BuiltinTable` of `{name -> Call(fn ptr) | Inline(opcode tag)}`: a buffer writer is `Inline` (the hot-path fast path), a pure helper is `Call`. Adding a domain function is a table entry, never a change to the language.
+
 MoonLive lets you author an effect (later: a layout, modifier, driver, or core rule) as **text** and run it on a running device, with no recompile-and-flash cycle. Its standout property is *how* it runs the script: not a bytecode interpreter, but a **native-codegen compiler** — source text is lexed, parsed, lowered to a typed IR, and assembled to real machine code that the render loop calls through a plain function pointer, so a scripted effect runs at near-hand-written speed in the hot path. This is the core construct; a scripted effect (`MoonLiveEffect`) is the thin binding that gives it the MoonModule lifecycle.
 
 The engine is a **domain-neutral core** with one narrow seam, structured as three tiers so adding a CPU is additive, never a rewrite:
@@ -592,13 +594,13 @@ Each driver child reads from the Drivers container's output buffer. Everything b
 Two rules separate those channels from color, and both matter:
 
 - **Brightness never scales them.** Brightness is a light-output setting; scaling pan by it would swing a moving head toward 0/0 as the rig dims.
-- **They interpolate but never accumulate** (the rule; the additive half is NOT yet implemented, see below). A blend op that INTERPOLATES (opacity, a crossfade) is meaningful on any channel, and on pan it is a genuine feature: the head sweeps smoothly from the old aim to the new one as a layer fades in. A blend op that ACCUMULATES (additive) is meaningful only on emissive channels, where summing two lights models two sources lighting one surface. Summing two aims models nothing, since it points at neither and saturates at hard-over as soon as both layers are positioned, so an accumulating op should fall back to assignment on a motion channel with the topmost writer winning. **Today `blendMap` treats a light as opaque bytes and adds motion channels along with color**; it only bites with two enabled layers on a fixture that carries motion, and the fix is [backlogged](backlog/backlog-light.md).
+- **They interpolate but never accumulate** (the rule; the additive half is NOT yet implemented, see below). A blend op that INTERPOLATES (opacity, a crossfade) is meaningful on any channel, and on pan it is a genuine feature: the head sweeps smoothly from the old aim to the new one as a layer fades in. A blend op that ACCUMULATES (additive) is meaningful only on emissive channels, where summing two lights models two sources lighting one surface. Summing two aims models nothing, since it points at neither and saturates at hard-over as soon as both layers are positioned, so an accumulating op should fall back to assignment on a motion channel with the topmost writer winning. **Today `blendMap` treats a light as opaque bytes and adds motion channels along with color**; it only bites with two enabled layers on a fixture that carries motion, and the fix is [backlogged](work/future/backlog-light.md).
 
 **DMX fixtures are addressed as a daisy chain of IDENTICAL fixtures**, the same model addressable LEDs already impose: a strip is N identical pixels at a fixed stride, and a DMX run is treated as N identical fixtures at a fixed stride. One light preset describes one fixture, its channel count is the stride, and fixture *n* starts at `start + n x channelCount`. Twenty-five channels per fixture puts them at DMX 1, 26, 51, and so on, and the driver's `count` says how many are on the chain.
 
 This is what makes a moving head reachable by the same pipeline as a pixel: the light domain produces one logical light per fixture, and the driver expands each into that fixture's channel block through the preset. It is also the cheapest thing to configure, since only the start address and the fixture type are needed, never a per-fixture address table.
 
-The trade is deliberate: **a chain must be homogeneous**. Mixing fixture types on one universe, or leaving gaps between fixtures, has no expression in this model, and neither does a fixture whose address does not sit on the stride. Those need a per-fixture address map, which is the fixture-model work ([backlog](backlog/backlog-light.md)); until then, a mixed rig is served by giving each fixture type its own driver instance with its own preset, start address and count.
+The trade is deliberate: **a chain must be homogeneous**. Mixing fixture types on one universe, or leaving gaps between fixtures, has no expression in this model, and neither does a fixture whose address does not sit on the stride. Those need a per-fixture address map, which is the fixture-model work ([backlog](work/future/backlog-light.md)); until then, a mixed rig is served by giving each fixture type its own driver instance with its own preset, start address and count.
 
 ### Multicast and IGMP snooping
 
@@ -646,20 +648,14 @@ Network input (ArtNet receive, WebSocket) is processed synchronously at a define
 
 ### Adaptive allocation
 
-The system checks available heap before each allocation and degrades gracefully when memory is insufficient (the allocate-on-demand-with-a-cascade decision, over fixed buffers, is [ADR-0002](adr/0002-adaptive-memory-degradation-cascade.md)). A minimum reserve (`HEAP_RESERVE = 32 KB`) is kept for stack, HTTP, WiFi, and overhead.
+The system checks available heap before each allocation and degrades gracefully when memory is insufficient (allocate on demand with a cascade, rather than fixed buffers). A minimum reserve (`HEAP_RESERVE = 32 KB`) is kept for stack, HTTP, WiFi, and overhead.
 
 - **Mapping LUT** is created only if all of: modifiers exist on the layer; layout is not a simple non-serpentine grid (where physical == logical); enough heap available after the reserve.
 - **Driver output buffer** (see [§ Drivers](#drivers) for what it's for) is created only when the pipeline must write into physical space rather than hand a driver a layer's logical buffer directly — that is, when **two or more layers are enabled** (they must be composited into one buffer) **or** a layer has a **mapping LUT** actually allocated (logical≠physical) — and enough heap is available. A single enabled layer with no LUT needs no output buffer: drivers read its buffer directly (the zero-copy fast path).
 
 ### Degradation cascade
 
-Best to worst:
-
-1. **Full pipeline**: LUT + driver output buffer. Modifier applied, clean separation.
-2. **Skip LUT + driver buffer**: modifier not applied, forced 1:1 mapping. No intermediate buffers. (A LUT without a driver buffer to map into is useless; they're always skipped together.)
-3. **Reduce layer dimensions**: halve width/height until the buffer fits, minimum 8×8.
-
-Each degradation is observable via `lutSkipped()` and reported in `/api/system` per-module metrics.
+When memory is short the pipeline steps down rather than failing to start, and each step is observable, so a device that cannot afford the full pipeline still shows something and says what it dropped. The steps, best to worst, are in [firmware variants](reference/firmware-variants.md#degradation-cascade).
 
 ### Invariants
 
@@ -675,21 +671,14 @@ Every MoonModule self-reports `classSize()` / `dynamicBytes()` / `tickTimeUs()` 
 
 ### Scaling to available memory
 
-| Device | Memory | Typical capability |
-|--------|--------|--------------------|
-| ESP32 + OPI PSRAM | 2–8 MB | Many layers, 10K+ LEDs |
-| ESP32, no PSRAM | ~320 KB internal | Full pipeline: double buffering, mapping, blending, parallelism. Proven up to 16 K lights (128×128 measured live on Olimex; see [performance.md](performance.md)). The degraded path (single Layer, 1:1 direct, no blending) is reserved for installations that grow beyond what the full pipeline fits. |
-| Teensy 4.x | 1 MB internal, no PSRAM | Comfortable headroom for several layers; excellent DMA-based LED output (OctoWS2811). Ethernet built-in on 4.1, optional on 4.0. |
-| Desktop / RPi | Abundant | No constraints |
-
-The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory and reallocated when configuration changes.
+What each class of device can run is tabulated in [firmware variants](reference/firmware-variants.md#scaling-to-available-memory). The architecture does not assume PSRAM is present. Buffer counts and sizes are determined at runtime based on available memory and reallocated when configuration changes.
 
 ## Multi-device sync
 
 How lighting uses the core [multi-device runtime](#multi-device-runtime) (discovery + clock sync) to drive an installation spanning multiple controllers:
 
 - **Synced visuals from the shared clock.** Effects animate off elapsed time ([§ Effects](#effects)), so a synced clock is what makes a wall of controllers animate in lockstep regardless of each one's frame rate. This is the light-domain payoff of the core clock sync.
-- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards. The ArtNet *driver* sends to fixtures; device-to-device distribution as a sync topology is filed in [backlog-core](backlog/backlog-core.md). No bespoke protocol.
+- **Light distribution**: one device sending rendered light data to another uses the existing ArtNet / E1.31 / DDP standards. The ArtNet *driver* sends to fixtures; device-to-device distribution as a sync topology is filed in [backlog-core](work/future/backlog-core.md). No bespoke protocol.
 
 # Web UI
 

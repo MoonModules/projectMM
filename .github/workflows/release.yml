@@ -855,7 +855,7 @@ jobs:
           # installer staged above under pages/install/ survives (a plain
           # --site-dir pages would wipe it — mkdocs cleans its output dir).
           # history/ and backlog/ are excluded in mkdocs.yml (internal docs).
-          uv run moondeck/docs/build_docs.py --site-dir "$RUNNER_TEMP/docs-site"
+          uv run moondeck/docs/build_docs.py --strict --site-dir "$RUNNER_TEMP/docs-site"
           cp -r "$RUNNER_TEMP/docs-site/." pages/
           ls -la pages/
 

@@ -2,7 +2,7 @@
 
 The log of **breaking changes** — what changed between versions, and the action to take.
 
-projectMM ships **no migration code**: the persistence layer is robust by default (an absent key keeps the control's default, a stale value clamps to the new bounds, an unknown key is ignored), which absorbs almost all schema drift with zero migration-specific code. The rare change that a robust reader *cannot* absorb is **documented here instead of migrated** — see [ADR-0013](adr/0013-no-migration-code-robust-persistence-plus-documented-breaks.md) for the decision and its rationale.
+projectMM ships **no migration code**: the persistence layer is robust by default (an absent key keeps the control's default, a stale value clamps to the new bounds, an unknown key is ignored), which absorbs almost all schema drift with zero migration-specific code. The rare change that a robust reader *cannot* absorb is **documented here instead of migrated**. A patching framework is deferred rather than rejected: it becomes the right tool if breaking format changes get frequent enough that ad-hoc losses pile up (a rough bar: more than five across a few releases) and users hold persisted state too valuable to re-derive. At that point build the recognizable version-stamp plus ordered-patch-chain pattern, not a bespoke one and its rationale.
 
 **The File Manager's Backup (⤓) / Restore (⟲) carries config across these breaks.** [src/ui/migrate.js](https://github.com/MoonModules/projectMM/blob/main/src/ui/migrate.js) is the **authoritative, dated log of every machine-mappable break** (file, type, control, and value renames): Restore applies it in the browser and reports what did not carry over, so entries below describe only what a map cannot express, behavior changes, semantics to re-check, and erase-flash moves. It works even on a freshly erased device: join its `MM-XXXX` SoftAP, open `http://4.3.2.1`, restore there, and take the offered restart; the bundle carries the WiFi credentials, so the device comes back on your network. For a device still on old firmware (no Backup button yet), the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
 
@@ -167,7 +167,7 @@ values as before. **If you drive a fixture on `IRGB` or another dimmer-carrying 
 light up where it previously stayed dark.** Nothing to change; the previous behavior was a defect.
 
 Routing brightness to the dimmer channel rather than holding it open is the better model and is
-[backlogged](backlog/backlog-light.md), so this value will change again.
+[backlogged](work/future/backlog-light.md), so this value will change again.
 
 
 ### esp32-16mb moves to the MoonBase partition table (2026-08-28)
@@ -235,7 +235,7 @@ changes — a renamed call produces a byte-identical descriptor, which is why no
 can notice.
 
 **Action for a third-party module: *recompile*.** Rename the five calls to `addControl`; the
-arguments are unchanged. A missed one is a compile error, never a silent behaviour change: the
+arguments are unchanged. A missed one is a compile error, never a silent behavior change: the
 overloads bind by exact reference type, so a call that compiles produces the widget it always did.
 
 
@@ -265,7 +265,7 @@ The type name is the persisted filename and the preset capture key, so two thing
 | The saved light tree | The device looks for `/.config/Effects.json` and the old file is `Layers.json`, so the light tree boots empty | Re-add your Layer, effect and modifiers, then let it save |
 | Presets that capture the look | A preset file records `"captures": "Layers"`, a name no module now answers to | Re-save each preset once the tree is rebuilt |
 
-A preset also records the ROLE it covers, and that role is now named after the container rather than after a module inside it: `"layer"` becomes `"effects"`. A preset carrying the old role still loads, but shows no tint on its pad until it is re-saved — the UI has no `layer` role to colour it by.
+A preset also records the ROLE it covers, and that role is now named after the container rather than after a module inside it: `"layer"` becomes `"effects"`. A preset carrying the old role still loads, but shows no tint on its pad until it is re-saved: the UI has no `layer` role to color it by.
 
 The child `Layer` keeps its name, as does everything under it.
 
@@ -350,7 +350,7 @@ This rename left `RmtLedDriver` untouched, and `ParlioLedDriver` untouched *at t
 
 ## Earlier
 
-These pre-date this log and were recorded in ADR-0013's Consequences list. A device that persisted state on an older build and loads a newer one loses only the noted value, which re-populates on next use.
+These pre-date this log. A device that persisted state on an older build and loads a newer one loses only the noted value, which re-populates on next use.
 
 ### UI last-selected module (`mm.selectedModule` → `mm_selected`)
 

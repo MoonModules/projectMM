@@ -873,7 +873,7 @@ private:
     // boundary is one shared outputBuffer_: core 0 waits encodeDone_ before overwriting it (the
     // cheap composite is the only serialization; the two heavy stages — render, encode — overlap).
     // Not engaged (multicore off, low memory, no driver, or an identity buffer that won't fit) → every
-    // child ticks inline exactly as before. See docs/history/plans/Plan-20260713 - Multicore Step 2.
+    // child ticks inline exactly as before. See docs/work/past/plans/Plan-20260713 - Multicore Step 2.
     platform::WorkerTask encodeTask_{};
     std::atomic<bool> encodeDone_{true};   // core 1 sets true when its encode finishes; core 0 waits it
     std::atomic<bool> encodeStop_{false};  // stop flag the worker fn observes via a woken waitNotify

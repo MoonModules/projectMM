@@ -13,7 +13,7 @@
 /// vectors are published, so `unit_sha256.cpp` pins this against them.
 ///
 /// The one use today is the MoonStats installation id
-/// ([the MoonCloud plan](../../docs/history/plans/Plan-20260910 - MoonCloud.md)). It is NOT a
+/// ([the MoonCloud plan](../../docs/work/present/Plan-20260910 - MoonCloud.md)). It is NOT a
 /// general-purpose crypto layer: no HMAC, no streaming over a socket, no constant-time comparison,
 /// because nothing here needs them and an unused primitive is a maintenance cost with no user.
 

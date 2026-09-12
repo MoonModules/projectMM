@@ -23,7 +23,7 @@
 //
 // Everything past sendValue has a default, so a transport implements what its hardware can actually
 // do: OSC overrides one method, a GPIO surface lights an LED, an APC transport overrides the color
-// verbs. See docs/history/plans/Plan-20260830 - Two-way control surfaces.md.
+// verbs. See docs/work/past/plans/Plan-20260830 - Two-way control surfaces.md.
 //
 // Only sendValue has an implementer today, OSC being the only transport that exists, and the three
 // others were reviewed as speculative on that basis. Kept deliberately: the shapes come from the

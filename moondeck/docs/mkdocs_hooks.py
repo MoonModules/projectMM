@@ -58,7 +58,7 @@ _OUT_OF_DOCS = ("src/", "moondeck/", "test/", "esp32/", "mooninstaller/",
                 ".clang-tidy", ".clangd")
 
 # A markdown link into a repo file the site doesn't host. Two authored shapes, both
-# common in the transient history/plans + backlog notes:
+# common in the transient docs/work/ notes:
 #   ../../src/foo   — climbs out of docs/ with `../`
 #   src/foo         — repo-ROOT-relative, no `../` (resolves to a nonexistent docs/src/foo)
 # The pattern accepts an optional `../` run, then the href; _sub sorts out which case.
@@ -108,10 +108,10 @@ def _rewrite_out_of_docs_links(markdown: str, src_uri: str) -> str:
         if target.startswith(_OUT_OF_DOCS) and not target.startswith("docs/"):
             return f"]({_BLOB_BASE}/{target}{frag})"
         # Fallback for links authored relative to the REPO ROOT (common in the
-        # transient history/plans + backlog notes, written before their file sat
+        # transient docs/work/ notes, written before their file sat
         # this deep under docs/): strip leading `../` and see if the remainder is
         # itself an out-of-docs repo path. Catches `../../moondeck/x.py` from a
-        # docs/history/plans/ page, which resolves to a nonexistent docs/moondeck/x.py,
+        # docs/work/past/plans/ page, which resolves to a nonexistent docs/moondeck/x.py,
         # AND a bare `src/x.js` / `docs/plan.md` with no `../` at all (same intent,
         # written root-relative) — both 404 in-site, so send them to the GitHub blob.
         stripped = re.sub(r'^(?:\.\./)+', '', rel)

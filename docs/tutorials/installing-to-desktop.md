@@ -2,7 +2,12 @@
 
 projectMM does not need an ESP32. The same code runs as an ordinary application on your computer, rendering effects, serving the web UI, and driving Art-Net, DMX and LED panel cards over the network. It is the quickest way to see projectMM working, and on a real PC the effects have far more compute behind them than any microcontroller can offer.
 
-This page covers **Windows**. For macOS and Linux, the [README](https://github.com/MoonModules/projectMM#readme) has the download and first-run steps.
+The steps below cover **Windows**. macOS and Linux differ only in the download and the first run:
+
+- **macOS**: open the `.dmg` and drag projectMM to Applications. The build is ad-hoc signed rather than notarized, so Gatekeeper says it cannot verify the developer: right-click the app and choose **Open** to accept it once, or clear the flag with `xattr -dr com.apple.quarantine /Applications/projectMM.app`.
+- **Linux**: unpack the `.tar.gz` and run the binary, or install the `.deb` on Debian, Ubuntu and Raspberry Pi OS with `sudo apt install ./projectmm_X.Y.Z_amd64.deb`, which puts it on your PATH.
+
+Both then open `http://localhost:8080/`, and §5 onward applies unchanged.
 
 > Looking to flash a device instead? That is [Install & first light](../gettingstarted.md). This page is about running projectMM *on the computer itself*.
 

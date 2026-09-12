@@ -8,7 +8,7 @@ match this class of hardware in the first place.
 **The headline, because it contradicts the obvious assumption:** neither desk speaks OSC. Both are
 **Mackie Control** surfaces. OSC is the right protocol for the wider ecosystem (Resolume,
 TouchDesigner, TouchOSC, DIY Arduino rigs) and is planned on that basis, but it does not reach
-these two. See [the OSC plan](../history/plans/Plan-20260829%20-%20OSC%20control%20ingest.md).
+these two. See [the OSC plan](../work/present/Plan-20260829%20-%20OSC%20control%20ingest.md).
 
 ## Behringer X-Touch (Universal)
 

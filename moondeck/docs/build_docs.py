@@ -13,14 +13,10 @@ existing docs/ tree as a navigable site, config in mkdocs.yml. Dependencies are
 declared inline (PEP 723) so `uv run` provisions them — same pattern as the other
 moondeck/docs/ tools and the uv-everywhere project rule; no requirements file.
 
-Link validation is governed by the `validation:` block in mkdocs.yml, not by
---strict. The docs deliberately link OUT to repo files MkDocs can't see
-(../src/*.h, ../CLAUDE.md, ../moondeck/*) — the "drill into source" links that
-resolve in the deployed tree; MkDocs warns on them because they're outside
-docs_dir. Those (and the pre-existing stale cross-doc anchors) are `warn`, so
-the normal build is the CI gate: it fails on a missing page or broken nav, not
-on an out-of-tree source link. --strict is offered for local anchor auditing
-only (it promotes every warning to fatal).
+Strict by default in CI: a broken link or a dead anchor fails the build. Out-of-tree source
+links (../src/*.h, ../CLAUDE.md) are rewritten to GitHub URLs by mkdocs_hooks.py before
+MkDocs sees them, so they raise no warning. A restructure once moved 170 files and left 153
+dangling anchors that only a strict build surfaced; that is the failure this flag exists for.
 
 The docs preview serves on :8422 (mkdocs' own default is :8000; we override it).
 The three local dev servers use adjacent ports — MoonDeck :8420, installer
@@ -28,10 +24,10 @@ preview :8421, docs preview :8422 — so all three run at once without a port
 clash. Override with --port.
 
 Usage:
-    uv run moondeck/docs/build_docs.py            # build to site/ (CI gate)
+    uv run moondeck/docs/build_docs.py            # build to site/
     uv run moondeck/docs/build_docs.py --serve     # live-preview at :8422
     uv run moondeck/docs/build_docs.py --serve --port 9000   # serve on a custom port
-    uv run moondeck/docs/build_docs.py --strict   # local: fail on ANY warning (anchor audit)
+    uv run moondeck/docs/build_docs.py --strict   # fail on any warning (the CI gate)
 """
 
 import argparse

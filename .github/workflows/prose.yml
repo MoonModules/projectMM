@@ -1,0 +1,46 @@
+name: Prose
+
+# Vale over the lines a PR ADDS or changes, with the rules in .vale/styles/projectMM/. Diff-scoped
+# on purpose: the tree still holds pre-existing violations, and a contributor is answerable for
+# what they wrote, not for inherited prose. An `error` (em-dash, British spelling, "e.g.") fails
+# the check; warnings and suggestions land as inline annotations only.
+#
+# Two things are scheduled to change once the tree is swept clean (`vale docs/` exits 0): this
+# job drops `filter_mode` and checks whole files, and moondeck/check/{check_prose,hook_prose}.py
+# are deleted, since their only job was the added-lines scope this job then no longer needs.
+
+on:
+  pull_request:
+    paths:
+      - '**.md'
+      - '.vale.ini'
+      - '.vale/**'
+
+jobs:
+  vale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: reviewdog needs the base commit to work out which lines a PR added.
+          # A shallow clone leaves it no base, so every line of every file reads as added.
+          fetch-depth: 0
+      # Pinned to the v3.0.0 commit. v2 derived reviewdog's -level from fail_on_error and ignored
+      # the level input, so annotations could not be limited to errors.
+      - uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff
+        with:
+          # Annotate only the lines this PR touches. This scopes what reviewdog REPORTS, not what
+          # Vale scans: Vale lints whole files either way.
+          filter_mode: added
+          # Never fail. Vale sees the findings carried by prose that predates the standards, so a
+          # blocking check here would fail every PR whatever the PR changed. check_prose.py is the
+          # gate that blocks, on added lines alone. Raise this once the sweep clears the tree.
+          fail_level: none
+          # Errors only. GitHub caps annotations per run and Vale finds more than that, so the cap
+          # decides what is shown: spend it on errors rather than suggestions.
+          level: error
+          # Writes annotations through the runner log rather than creating a check run. The
+          # check-run reporters publish their own status, which stays red however the job exits.
+          reporter: github-pr-annotations
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

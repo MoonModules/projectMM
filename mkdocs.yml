@@ -61,7 +61,13 @@ markdown_extensions:
       permalink: true
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
+  # superfences also renders ```mermaid blocks as diagrams rather than code, via the
+  # custom fence below: Material ships the mermaid runtime, so no extra dependency.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.inlinehilite
   # Renders Material icon shortcodes (`:material-flash:` → the ⚡ glyph) used on
   # the landing page's buttons and card grid. Without this they show as literal
@@ -91,7 +97,7 @@ extra_css:
 hooks:
   - moondeck/docs/mkdocs_hooks.py
 
-# history/ and backlog/ are internal (agent-facing, transient) — kept OFF the top
+# docs/work/ is internal (agent-facing, transient) — kept OFF the top
 # nav (they're not in the `nav:` tree) but still BUILT into the site, so the many
 # doc-to-doc links into them (a spec citing a design study, a decision record)
 # resolve as normal relative links instead of 404ing. Reachable by following a
@@ -107,7 +113,7 @@ hooks:
 # stale anchors. (A later phase can flip anchors to `error` once swept.)
 validation:
   nav:
-    omitted_files: ignore    # history/backlog intentionally absent from nav
+    omitted_files: ignore    # docs/work/ intentionally absent from nav
   links:
     not_found: warn
     anchors: warn
@@ -115,7 +121,7 @@ validation:
 
 # Top-down navigation over the existing files. Two audiences, in order:
 # a user path first (what it is → install → use → effects), then the developer
-# reference (architecture → modules → source-level). history/ and backlog/ are
+# reference (architecture → modules → source-level). docs/work/ is
 # internal and deliberately absent from the published site.
 nav:
   - Home: index.md
@@ -127,8 +133,6 @@ nav:
       # resource it is, rather than warning about an unresolvable absolute path.
       - Web installer: https://moonmodules.org/projectMM/install/
       - Log an issue: logging-an-issue.md
-      - MoonCloud: mooncloud.md
-      - Privacy policy: privacy-policy.md
   # Tutorials: the guided path AFTER "Install & first light". Ordered as a reader
   # would walk them — concepts first, then the longer-form use cases (which predate
   # this section and are being folded in gradually).
@@ -139,6 +143,9 @@ nav:
       - Driving LED panels with a receiving card: tutorials/panel-cards.md
       - Driving projectMM from a phone or tablet: tutorials/control-surface.md
       - Making beautiful effects: tutorials/generative-effects.md
+  # Diátaxis keeps how-to guides apart from tutorials: a tutorial is a lesson for someone learning,
+  # a how-to solves a task the reader already has. Same folder split (tutorials/ vs usecases/).
+  - How-to guides:
       - Build your own MoonModules: usecases/build-your-own-moonmodules.md
       - Home automation: usecases/home-automation.md
       - LED signal integrity: usecases/led-signal-integrity.md
@@ -160,6 +167,9 @@ nav:
       - Services: moonmodules/core/services.md
       - Supporting: moonmodules/core/supporting.md
       - Web UI: moonmodules/core/ui.md
+  - Reference:
+      - MoonCloud: mooncloud.md
+      - Privacy policy: privacy-policy.md
   - Tests (what we verify):
       - Unit tests: tests/unit-tests.md
       - Scenario tests: tests/scenario-tests.md
@@ -173,6 +183,7 @@ nav:
       - Why we write our own code: why-we-write-our-own.md
       - Architecture: architecture.md
       - Coding standards: coding-standards.md
+      - Documentation standards: documentation-standards.md
       - Building: building.md
       - Testing strategy: testing.md
       - Performance: performance.md
@@ -181,6 +192,7 @@ nav:
       - Repo health: metrics/repo-health.md
       - Migrating (breaking changes): MIGRATING.md
       - Hardware reference:
+          - Firmware variants and memory: reference/firmware-variants.md
           - GPIO usage per MCU: reference/gpio-usage.md
           - ESP32-S31 coreboard: reference/esp32-s31-coreboard.md
           - MHC-WLED ESP32-P4 shield: reference/mhc-wled-esp32-p4-shield.md

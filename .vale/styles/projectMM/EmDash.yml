@@ -1,0 +1,8 @@
+# documentation-standards.md: "No em-dashes in prose." A comma, colon, parentheses or a full stop
+# instead, whichever the clause actually calls for.
+extends: existence
+message: "Em-dash: use a comma, colon, parentheses, or a full stop."
+level: error
+nonword: true
+tokens:
+  - '—'

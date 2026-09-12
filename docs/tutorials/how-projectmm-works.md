@@ -79,7 +79,7 @@ remove them, rearrange them freely.
 | Card | What it's for |
 |---|---|
 | **Layouts** | Where the lights physically ARE |
-| **Effects** | What colour they are, over time |
+| **Effects** | What color they are, over time |
 | **Drivers** | How the colours actually reach the lights |
 
 That split is why the menu is ordered the way it is: the device first, then the

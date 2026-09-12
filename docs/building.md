@@ -79,6 +79,28 @@ A **source checkout writes to `build/fs/`** (its config under `build/fs/.config/
 
 The distinction matters because a shipped binary is launched from a download folder or a Start-menu shortcut, where a path relative to the working directory is either unwritable or belongs to that folder rather than to the user. The root is created when the filesystem mounts, and a location that cannot be written to fails the mount and is reported once, rather than surfacing as a failed save on every change.
 
+### Editor setup (clangd)
+
+Diagnostics appear **as you type**, from the same [`.clang-tidy`](../.clang-tidy) config CI
+uses, so a finding shows up while the code is still in your head, not ten minutes later in a
+pipeline.
+
+Once per machine: install the **clangd** extension (`llvm-vs-code-extensions.vscode-clangd`)
+and **disable Microsoft's C/C++ IntelliSense**, running both produces duplicated and
+contradictory diagnostics. Nothing else to configure: [`.clangd`](../.clangd) at the repo root
+points at the compilation database, and `CMAKE_EXPORT_COMPILE_COMMANDS` (set in
+`CMakeLists.txt`) means any normal build refreshes it.
+
+Two things worth knowing:
+
+- **If every file reports `'cstdint' file not found`**: the build directory was configured
+  with a different compiler than clangd is. `.clangd`'s `--query-driver` handles the usual
+  cases; if a new toolchain appears, add it there. This failure is loud and total, real
+  diagnostics disappear behind it, so it is worth recognizing on sight.
+- **clangd runs a subset of the CI check set**: skipping checks it considers slow (>10%
+  AST-build cost). That is deliberate and means the same config file is safe to share: CI
+  remains the authority.
+
 ### Packaging
 
 `uv run moondeck/ci/package_desktop.py` builds and packages for the host it runs on: a `.dmg` with a `.app` on macOS, a `.tar.gz` plus a `.deb` on Linux, and a `.zip` plus an NSIS `-setup.exe` on Windows. The Windows installer puts the program in `%LOCALAPPDATA%\Programs\projectMM` with a Start-menu shortcut and an uninstaller; it needs no elevation, and it never touches the settings directory, so an upgrade keeps the user's configuration.
@@ -209,7 +231,7 @@ the partition table.
 (cd ~/esp/esp-idf && ./install.sh esp32s31)   # one-time, adds the S31 RISC-V toolchain
 ```
 
-Flash the S31 over USB with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), **not** the web installer: the browser flasher (`esptool-js`) has no S31 chip definition, so a browser flash fails — the CLI's `esptool.py` supports it. The web installer surfaces the same guidance if you try. (Status + the condition to enable web flashing: [backlog](backlog/README.md).)
+Flash the S31 over USB with the CLI (`flash_esp32.py --firmware esp32s31 --port <port>`), **not** the web installer: the browser flasher (`esptool-js`) has no S31 chip definition, so a browser flash fails, but the CLI's `esptool.py` supports it. The web installer surfaces the same guidance if you try. (Status + the condition to enable web flashing: [backlog](work/future/README.md).)
 
 On Windows, the `--port` argument is a `COM*` name (e.g. `COM3`) instead of `/dev/tty.usbserial-XXXX`. MoonDeck's port picker enumerates `COM*` automatically.
 
@@ -262,11 +284,11 @@ After the driver installs and Windows finishes binding (a few seconds), the boar
 
 **Pinned to `v6.1-rc1`** (commit `44f0c59f`, a signed pre-release tag). `setup_esp_idf.py` holds the exact commit in `PINNED_IDF_VERSION`, warns loudly when the installed tree differs, and by default offers to check the pin out so a stray `git pull` or a fresh shallow clone landing on a newer commit converges back rather than silently building against the wrong tree (`--no-checkout` keeps it warn-only). Minimum is ESP-IDF v5.1 (C++20 needs GCC 12+); the project uses v6.x APIs (`esp_eth_phy_new_generic`, the component manager for mDNS, the modern RMT/parlio/LCD drivers) so v5.x would need adjustments.
 
-**Why a v6.1 pre-release and not a stable tag.** The v6.x line is: **v6.0 is the current stable** (GA 2026-02-27); **v6.1 is pre-release** (beta1 2026-06-24, rc1 2026-08-14, GA to follow). We pin the `v6.1-rc1` *tag* (a fixed, signed pre-release, not the rolling `release/v6.1` branch) because it carries driver fixes for the newer SoCs (P4 parlio, RMT v2 on every chip) **and is on the earliest IDF line that carries the `esp32s31` preview target** — and because v6.0 vs v6.1 is a small delta. Riding the betas toward GA means breakage from the v6.1 delta surfaces incrementally, not all at once at the GA re-pin. The trade-off is honest: a pre-release gets **no support guarantee**, which is why the pin is a fixed tag, not a floating branch. The clean inflection point is **v6.1 GA**: re-pin to the `v6.1` tag then, which starts the 30-month support clock (see below). Each pin move (beta1 → RC → GA) is a deliberate re-test pass, not a routine pull. Tracked in [backlog](backlog/README.md).
+**Why a v6.1 pre-release and not a stable tag.** The v6.x line is: **v6.0 is the current stable** (GA 2026-02-27); **v6.1 is pre-release** (beta1 2026-06-24, rc1 2026-08-14, GA to follow). We pin the `v6.1-rc1` *tag* (a fixed, signed pre-release, not the rolling `release/v6.1` branch) because it carries driver fixes for the newer SoCs (P4 parlio, RMT v2 on every chip) **and is on the earliest IDF line that carries the `esp32s31` preview target**, and because v6.0 vs v6.1 is a small delta. Riding the betas toward GA means breakage from the v6.1 delta surfaces incrementally, not all at once at the GA re-pin. The trade-off is honest: a pre-release gets **no support guarantee**, which is why the pin is a fixed tag, not a floating branch. The clean inflection point is **v6.1 GA**: re-pin to the `v6.1` tag then, which starts the 30-month support clock (see below). Each pin move (beta1 → RC → GA) is a deliberate re-test pass, not a routine pull. Tracked in [backlog](work/future/README.md).
 
 **v6.0 is the floor — don't depend on anything newer than it.** Because **v6.0 stable is our fallback** if the v6.1 line proves troublesome, the firmware and build tooling must stay buildable on v6.0. The rule is generic: **use no IDF API, component, Kconfig symbol, or tool that isn't present in v6.0.** A feature that exists only on the v6.1-dev branch (or arrives in a later minor) is off-limits until v6.0 is no longer the fallback. When adopting anything new from the IDF, confirm it shipped in v6.0 first (check the v6.0 docs / release notes, not `latest`); if it's v6.1-only, it waits.
 
-**Explicit exceptions are allowed.** The floor is a default, not an absolute. A feature may step below it (depend on something not in v6.0) when the product owner decides so *explicitly* and the reason is documented at the point it's introduced — in the module spec, a code comment at the dependency, and the commit body. The bar is a conscious, recorded decision, not a silent drift: a floor you can consciously waive with a stated reason stays honest, whereas a rule quietly violated does not. Each such exception also narrows the v6.0 fallback (that target now needs the newer dependency too), so it states what the fallback loses. The known exception today is **P4 WiFi over the C6 co-processor**, which needs `esp_wifi_remote` / esp-hosted (a managed component outside mainline v6.0); it is an accepted, documented exception, scoped to the P4 target, tracked in the [backlog](backlog/README.md).
+**Explicit exceptions are allowed.** The floor is a default, not an absolute. A feature may step below it (depend on something not in v6.0) when the product owner decides so *explicitly* and the reason is documented at the point it's introduced: in the module spec, a code comment at the dependency, and the commit body. The bar is a conscious, recorded decision, not a silent drift: a floor you can consciously waive with a stated reason stays honest, whereas a rule quietly violated does not. Each such exception also narrows the v6.0 fallback (that target now needs the newer dependency too), so it states what the fallback loses. The known exception today is **P4 WiFi over the C6 co-processor**, which needs `esp_wifi_remote` / esp-hosted (a managed component outside mainline v6.0); it is an accepted, documented exception, scoped to the P4 target, tracked in the [backlog](work/future/README.md).
 
 **v6.0 vs v6.1, and where the real change was.** The earthquake was **v5.x → v6.0**, not v6.0 → v6.1:
 
@@ -292,7 +314,7 @@ Two guardrails bound the "embrace everything" stance:
 - **Platform-generic stays intact.** These are ESP32-specific gains; none may regress Teensy or the desktop (macOS / Windows / Linux) paths, which don't use ESP-IDF at all. An IDF feature is adopted *inside* the ESP32 platform layer / build tooling, never by leaking an IDF assumption into shared `src/` or the desktop build. If embracing a v6.x feature would touch a cross-platform seam, that seam stays abstracted (the existing platform-boundary rule).
 - **The v6.0 floor.** Adopt only what's in v6.0 (see the rule above), so the v6.0 fallback keeps working.
 
-Where we are on each. The adoption plan and per-item triggers are filed in [backlog-core § Adopting the v6.x ecosystem changes](backlog/backlog-core.md).
+Where we are on each. The adoption plan and per-item triggers are filed in [backlog-core § Adopting the v6.x ecosystem changes](work/future/backlog-core.md).
 
 | Change | Where we are now |
 |---|---|

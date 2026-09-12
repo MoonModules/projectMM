@@ -24,7 +24,7 @@
 // APIs, which is what keeps this a recognisable construct rather than a bespoke register poke).
 //
 // Both implementations ship: the esp_lcd one is the reference, this one is the measured
-// alternative, and selecting between them is a module swap in the UI. See docs/adr/0014.
+// alternative, and selecting between them is a module swap in the UI.
 //
 // Gated on SOC_LCDCAM_I80_LCD_SUPPORTED — the NARROW macro, unlike the esp_lcd sibling's broad
 // SOC_LCD_I80_SUPPORTED: this backend pokes LCD_CAM registers through hal/lcd_ll.h, which does not
@@ -153,7 +153,7 @@ constexpr int kBusId = 0;
 // expander's 26.67 MHz clock (see createState's measurement note). The ring sidesteps it: a closed
 // descriptor chain over a few small INTERNAL buffers, refilled by the CPU as the DMA drains them, so
 // the DMA never reads PSRAM at the shift clock at all. The encoder reads the tiny (internal) Layer
-// buffer instead — ~24× smaller than the encoded frame. See platform.h and ADR-0014.
+// buffer instead, ~24x smaller than the encoded frame. See platform.h.
 
 // **The ring's geometry is RUNTIME, not a constant** — `rowsPerBuf` (lights per DMA buffer) and
 // `ringBufs` (pool depth) arrive as parameters and live on MoonI80State. The driver exposes both as
@@ -866,7 +866,7 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // it once, owner-checking off — and the mount errors are GONE, yet the transfer still never
     // completes. So the `lli full` storm was a symptom, not the cause: the hypothesis is dead, killed
     // by a controlled experiment with a working control condition (direct mode, same PSRAM, drives
-    // fine). That is the measurement ADR-0014 phase 1 exists to produce.
+    // fine). That is the measurement the whole-frame phase exists to produce.
     //
     // Hence internal RAM first in shift mode, and PSRAM first otherwise. This is not a workaround
     // inherited from the sibling; it is what the measurement says. On this WHOLE-FRAME path it caps the
@@ -883,7 +883,7 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     // buf[0] is deliberately NOT reserve-guarded, unlike buf[1] below. The reserve protects the
     // WiFi/HTTP heap from an OPTIONAL allocation; buf[0] is the frame itself, so refusing it to keep
     // the reserve intact would decline to drive the LEDs at all — degrading the essential thing to
-    // protect a nice-to-have, the inverse of the allocate-and-degrade policy (ADR-0002).
+    // protect a nice-to-have, the inverse of the allocate-and-degrade policy.
     // **With a PIN EXPANDER there is NO PSRAM fallback: internal RAM or nothing.** A '595 clocks at
     // clockMultiplier x the pixel rate, and the LCD DMA cannot sustain PSRAM at that rate — measured on an
     // S3: a 256-light frame placed in PSRAM (0x3c...) reports "no LED output" and burns ~219 ms per tick
@@ -904,7 +904,7 @@ MoonI80State* createState(const uint16_t* dataPins, uint8_t laneCount,
     }
     st->cap = bufferBytes;
 
-    // Second buffer for the async double-buffer — ONLY when asked. Allocate-and-degrade (ADR 0002):
+    // Second buffer for the async double-buffer, ONLY when asked. Allocate-and-degrade:
     // if it fits, arm double-buffer mode (buf[1] + its semaphore); if it doesn't, leave buf[1] null
     // and the driver runs single-buffer. The internal fallback additionally must leave HEAP_RESERVE
     // intact — the second buffer is a nice-to-have and must never eat the WiFi/HTTP reserve.
