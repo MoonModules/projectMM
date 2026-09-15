@@ -6,8 +6,6 @@ The pipeline comes first, then each stage in the order light flows through it, a
 
 ## The pipeline
 
-![A layout, a layer of effects, and the drivers that output it](../../assets/light/Effects.png)
-
 Modules in the light pipeline can be added, replaced, or removed dynamically at runtime.
 
 ```mermaid
@@ -53,6 +51,8 @@ flowchart TB
     class led,net,prev check
     class dma,udp,sock gate
 ```
+
+![A layout, a layer of effects, and the drivers that output it](../../assets/light/Effects.png)
 
 **Data flow.** The pipeline instantiates both core data-exchange shapes (see [data exchange between modules](moonmodule.md#data-exchange-between-modules)):
 

@@ -4,6 +4,43 @@ Scripts compiled to native machine code on the device. An effect written as text
 
 The engine comes first, then how a script reaches the device, and last the one place the lifecycle does not yet fit.
 
+```mermaid
+flowchart TB
+    src["a script, as text<br/>written in the browser"]
+
+    subgraph front["front-end · core, platform-independent"]
+        direction TB
+        lex["lex and parse<br/>every argument is an expression"]
+        ir["typed IR<br/>three-address ops over virtual registers"]
+        lex --> ir
+    end
+
+    subgraph seam["the two seams"]
+        direction TB
+        host["host builtin table<br/>name to Call or Inline<br/>the LED words live only here"]
+        back["per-ISA backend<br/>Xtensa · RISC-V · host<br/>a new CPU is a new file"]
+    end
+
+    native["native machine code<br/>in an allocExec block"]
+    tick["the render loop<br/>calls it through a function pointer"]
+
+    src --> lex
+    ir --> back
+    host -.->|"names and opcodes"| back
+    back --> native --> tick
+
+    classDef text fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef core fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef edge fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef out fill:#3d2d61,stroke:#a07bc9,color:#fff
+    class src text
+    class lex,ir core
+    class host,back edge
+    class native,tick out
+```
+
+The IR is the seam, and it is what keeps the three tiers from knowing about each other: it names operations, never an instruction set and never a domain. The front-end never branches on CPU, the core never learns an LED word, and the compiled result is called like any other function. Adding a CPU is a backend file; adding a domain function is a table entry.
+
 ## A native-codegen compiler
 
 MoonLive lets you author an effect (later: a layout, modifier, driver, or core rule) as **text** and run it on a running device, with no recompile-and-flash cycle. Its standout property is *how* it runs the script. It is a **native-codegen compiler** rather than a bytecode interpreter: source text is lexed, parsed, lowered to a typed IR, and assembled to real machine code. The render loop calls that through a plain function pointer, so a scripted effect runs at near-hand-written speed in the hot path. This is the core construct; a scripted effect (`MoonLiveEffect`) is the thin binding that gives it the MoonModule lifecycle.

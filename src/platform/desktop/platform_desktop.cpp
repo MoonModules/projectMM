@@ -2568,6 +2568,29 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
 bool parlioWs2812Wait(ParlioWs2812Handle& /*h*/, uint8_t /*buffer*/, uint32_t /*timeoutMs*/) { return true; }
 uint32_t parlioWs2812LastTransmitUs(const ParlioWs2812Handle& /*h*/) { return 0; }
 void parlioWs2812Deinit(ParlioWs2812Handle& h) { freeHostBus(h.impl); }
+
+// --- HUB75: no panel on a desktop ------------------------------------------
+// Inert rather than emulated. The other output seams emulate a bus so the driver's
+// encode path still runs host-side, but a HUB75 port has no host analogue worth
+// faking: the encoder is already host-tested on plain buffers (unit_Hub75Slots.cpp),
+// which is the part worth exercising. So init refuses with a cause, and the driver
+// reports it exactly as it would on a chip without the silicon.
+const char* hub75LastError() { return "HUB75 needs an ESP32-S3, P4 or S31"; }
+bool hub75BackendAvailable(Hub75Backend /*backend*/, size_t /*frameBytes*/) { return false; }
+const char* hub75BackendLabel(Hub75Backend backend) {
+    return backend == Hub75Backend::Parlio ? "Parlio" : "LCD_CAM";
+}
+bool hub75Init(Hub75Handle& /*h*/, Hub75Backend /*backend*/, const Hub75Pins& /*pins*/,
+               uint16_t /*width*/, uint16_t /*height*/, uint8_t /*scanRate*/,
+               uint8_t /*bitDepth*/) {
+    return false;
+}
+uint8_t* hub75Buffer(const Hub75Handle& /*h*/) MM_NONBLOCKING { return nullptr; }
+size_t hub75BufferCapacity(const Hub75Handle& /*h*/) MM_NONBLOCKING { return 0; }
+bool hub75Start(Hub75Handle& /*h*/) { return false; }
+uint16_t hub75RefreshHz(const Hub75Handle& /*h*/) MM_NONBLOCKING { return 0; }
+const char* hub75Backend(const Hub75Handle& /*h*/) { return nullptr; }
+void hub75Deinit(Hub75Handle& /*h*/) {}
 RmtLoopbackResult parlioWs2812Loopback(const uint16_t* /*dataPins*/, uint8_t /*laneCount*/,
                                        uint16_t /*rxGpio*/, const uint8_t* /*frame*/,
                                        size_t /*frameBytes*/, size_t /*dataBytes*/,

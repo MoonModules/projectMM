@@ -1230,6 +1230,7 @@ function renderChildTabs(mod, childrenEl, depth) {
         addTab.type = "button";
         addTab.textContent = "+";
         addTab.title = "add " + rolesAcceptedBy(mod).join(" / ");
+        addTab.setAttribute("aria-label", addTab.title);
         addTab.addEventListener("click", () => {
             // THIS card's own footer: a plain querySelector would match the first .card-footer in the
             // subtree, which belongs to a nested child's card (Effects would then offer the Layer's
@@ -2368,6 +2369,9 @@ function createActionButtons(mod) {
     replaceBtn.className = "card-btn";
     replaceBtn.textContent = "✎";
     replaceBtn.title = "Replace with another type";
+    // The glyph is the button's accessible name unless one is given: "✎" tells a
+    // screen reader (and a role-based locator) nothing about what the button does.
+    replaceBtn.setAttribute("aria-label", "Replace with another type");
     replaceBtn.addEventListener("click", () => {
         // Anchored to the button: the picker is a modal that opens under whatever was clicked,
         // not inside the cramped 26px action-button row.
@@ -2380,6 +2384,7 @@ function createActionButtons(mod) {
     delBtn.className = "card-btn card-btn-del";
     delBtn.textContent = "×";
     delBtn.title = "Delete";
+    delBtn.setAttribute("aria-label", "Delete");
     armPressTwice(delBtn, () => deleteModule(mod.name),
                   {armedText: "✓", armedTitle: "Click again to delete"});
     wrap.appendChild(delBtn);

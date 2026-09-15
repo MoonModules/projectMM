@@ -19,7 +19,7 @@ class RandomPixelEffect {
 
 Inside a function the grammar is a sequence of **statements** — a function call, or a `for` loop over them — with **expression arguments**, so any argument may be a literal or a nested call. The class declaration is required: one top-level form rather than two means one set of rules to learn and one parse path to maintain.
 
-**A script's role is its extension**: `.mle` an effect, `.mll` a [layout](MoonLiveLayout.md), `.mlm` a [modifier](MoonLiveModifier.md). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
+**A script's role is its extension**: `.mle` an effect, `.mll` a [layout](#a-layout-written-as-a-script), `.mlm` a [modifier](#a-modifier-written-as-a-script). That is what a card filters its picker on, so an effect card offers effects. The engine is role-blind and runs whichever moment the binding asks for; the extension decides what is OFFERED, not what runs.
 
 **The shipped scripts are the reference**: [`moonlive/`](https://github.com/MoonModules/projectMM/tree/main/moonlive) in the repository holds every script the library ships, one file per effect, layout and modifier. Read them to see what the language looks like in practice: they are the same text the card edits.
 
@@ -125,13 +125,13 @@ Some names are **reserved**: the engine defines them, the script only reads them
 |---|---|
 | `t` | elapsed milliseconds — the clock an animation is written against |
 | `width`, `height`, `depth` | the **logical grid**, `0..255` |
-| `xPos`, `yPos`, `zPos` | the light being transformed, `0..255` (a [modifier](MoonLiveModifier.md) is the one handed these; elsewhere they read 0) |
+| `xPos`, `yPos`, `zPos` | the light being transformed, `0..255` (a [modifier](#a-modifier-written-as-a-script) is the one handed these; elsewhere they read 0) |
 
 Every one but `t` is a byte, because it lives in the controls arena. A grid extent past 255 reports 255 rather than wrapping to a small number, and a modifier handed a coordinate outside `0..255` passes it through untransformed instead of folding a wrong position — so a script never silently sees a value that means something else.
 
 The coordinate is `xPos`/`yPos`/`zPos` rather than `x`/`y`/`z` so that **`x` and `y` stay free as loop counters in every script**, which is what an author reaches for and what the shipped `grid.mll` uses. Reserving them globally would break the most ordinary code there is; a per-role reservation was the alternative and was worse, because a name then meant one thing in one role and was refused in another — which is how `disasm.py`, compiling against the widest vocabulary, came to refuse the shipped default layout.
 
-`width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](MoonLiveLayout.md) is upstream of that grid — it is what the dimensions are derived *from* — so it names its own controls instead (`cols`, `rows`) and reads the grid only if it has a use for it.
+`width`/`height`/`depth` are the Layer's own dimensions, derived from the layouts and the modifier chain. An effect is *told* its canvas rather than declaring it: a size restated as a control is a second answer that can disagree with the first, and a script that sets `width` to 16 on an 8×8 panel draws off the edge. A [layout](#a-layout-written-as-a-script) is upstream of that grid (it is what the dimensions are derived *from*), so it names its own controls instead (`cols`, `rows`) and reads the grid only if it has a use for it.
 
 Reserving is what makes the guarantee hold: without it a declaration would silently shadow the value the engine handed in, and the script would disagree with its layer with no error anywhere.
 
@@ -151,9 +151,9 @@ Registered by the light domain, not built into the compiler (the core owns only 
 | call | does |
 |---|---|
 | `setRGB(index, r, g, b)` | write one light |
-| `setXYZ(x, y, z)` | write one position (a [modifier](MoonLiveModifier.md)) |
+| `setXYZ(x, y, z)` | write one position (a [modifier](#a-modifier-written-as-a-script)) |
 | `fill(r, g, b)` | write every light |
-| `addLight(x, y, z)` | place the next light (a [layout](MoonLiveLayout.md)) |
+| `addLight(x, y, z)` | place the next light (a [layout](#a-layout-written-as-a-script)) |
 | `line(x1, y1, x2, y2, r, g, b)` | a straight segment on the grid, via the shared `draw::line` |
 | `random16(n)` | a value in `[0, n)` |
 | `mod(a, b)` | `a % b` — the wrap a cyclic animation needs |
@@ -286,6 +286,114 @@ ordinary script reads its size and nothing else.
 ## Prior art
 
 MoonLive's native-codegen approach — compile a small C-like language straight to machine code and call it as a function, so a live-authored effect runs at near hand-written speed — was pioneered by **Yves Bazin (hpwit)** in **[ESPLiveScript](https://github.com/hpwit/ESPLiveScript)**: a from-scratch tokenizer, parser, and Xtensa code generator that drives a 12,288-LED panel at ~85 fps where interpreted languages (Lua, Gravity) managed 3–10. That result is what makes "go native, not interpreted" the right call, and ESPLiveScript is the reference MoonLive is built against — studied closely, credited, and written fresh against projectMM's architecture, never copied, per [*Industry standards, our own code*](../../../CLAUDE.md#principles). The live-scripting idea in this ecosystem also descends from **ARTI-FX / ARTI** (the interpreted-effects runtime in WLED MoonModules), which proved the load-a-script-and-run-it-live loop end to end. The host-binding surface (`setRGB`/`setRGBXY`/`setRGBXYZ`) is modelled on the **MoonLight** [effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/).
+
+## A layout written as a script
+
+Where the lights physically are, authored as text instead of compiled in as a C++ class. A [layout](layouts.md) is the one part of the pipeline that differs for every physical build: a ring, a spiral staircase, a car grille, a costume sewn last night. Each one has meant writing a class, rebuilding and reflashing. A script means the person who hung the lights can describe where they went, on the device, and see it immediately.
+
+<img src="../../assets/light/MoonLiveLayout.png" width="300" alt="a scripted layout">
+
+The script places every light itself, with a loop. That is the difference from a scripted modifier: the Layer calls a modifier once per light, so its script transforms a single coordinate, where a layout has no such per-light call to ride on.
+
+```c
+class GridLayout {
+  byte cols = 16;
+  byte rows = 16;
+
+  void defineControls() {
+    addControl("cols", cols, 1, 64);
+    addControl("rows", rows, 1, 64);
+  }
+
+  void placeLights() {
+    for (int y = 0; y < rows; y = y + 1) {
+      for (int x = 0; x < cols; x = x + 1) {
+        addLight(x, y, 0);
+      }
+    }
+  }
+}
+```
+
+`addLight(x, y, z)` places the next light along the strand. There is no index, because the order the script calls it in *is* the strand order.
+
+The `cols` and `rows` lines are the script's own controls, not something the module hands it. A layout is never told how big it is: the pipeline works out the bounding box from the coordinates the layouts actually place, so a size passed in from outside would be a second answer that could disagree with the first. They are named `cols`/`rows` rather than `width`/`height` because those are [system variables](#system-variables-what-the-engine-hands-a-script) naming the logical grid a Layer hands an effect, and a layout is upstream of that grid.
+
+A few shapes that are one line here and a new class otherwise:
+
+```c
+// a strand that runs right to left
+for (int i = 0; i < cols; i = i + 1) { addLight(cols - 1 - i, 0, 0); }
+
+// a diagonal
+for (int i = 0; i < cols; i = i + 1) { addLight(i, i, 0); }
+
+// a circle: lights and grid cells are not the same number
+// (`count` and `radius` are members, surfaced by addControl in defineControls)
+for (int i = 0; i < count; i = i + 1) {
+  addLight(scale(cos(i * turn(count)), radius * 2 + 1),
+           scale(sin(i * turn(count)), radius * 2 + 1), 0);
+}
+```
+
+`t` is the one system variable a layout is given, and it is always **0**: the script runs twice per rebuild and must agree with itself, so it is handed a fixed clock rather than a live one. Asking for `width`/`height`/`depth` is a compile error rather than a silent zero, since those are what a layout is *defining*.
+
+### How the count is known
+
+A layout has to answer **how many lights** before it produces a single coordinate, because the Layer sizes its buffer from that number and only then asks where each light is. A script cannot be asked "how many?" without running it.
+
+So it runs twice. On the first pass `addLight` counts; on the second it emits each position. Same script, same arithmetic, so a deterministic script cannot disagree with itself, which is exactly what the compiled layouts do (`SphereLayout` walks its shell twice for the same reason).
+
+**Nothing is stored between the passes.** Staging 16,384 coordinates would cost 48 KB, which a classic ESP32 driving that many lights does not have spare. Running the script again is cheaper than remembering what it said, and it means a scripted layout costs the same as a compiled one.
+
+A script that calls `random16` breaks the determinism the two passes need. The passes disagree on the COUNT only when the random value decides a loop bound or how many times `addLight` runs; a random COORDINATE keeps the count right and places the lights somewhere else on the second pass, so the fixture is the size it claims but not the shape.
+
+A serpentine, every other row reversed, is what `if` makes expressible, and it is the common panel wiring:
+
+```c
+byte odd = 0;
+for (int y = 0; y < rows; y = y + 1) {
+  for (int x = 0; x < cols; x = x + 1) {
+    if (odd == 0) { addLight(x, y, 0); }
+    else { addLight(cols - 1 - x, y, 0); }
+  }
+  if (odd == 0) { odd = 1; } else { odd = 0; }
+}
+```
+
+Editing any control rebuilds the pipeline, because every one can change where the lights are. A script that fails to compile leaves a fixture with no lights, shows the parse error on the module, and the device keeps running. Detail: [technical](moxygen/MoonLiveLayout.md).
+
+## A modifier written as a script
+
+The coordinate transform that decides where each light sits in the pattern. A [modifier](modifiers.md) reshapes how a Layer's output maps onto the physical lights: mirror it, shift it, swap its axes. Each hand-written one is a class, a rebuild and a reflash; a scripted one is a line of text, applied as you type.
+
+<img src="../../assets/light/MoonLiveModifier.png" width="300" alt="a scripted modifier">
+
+The script transforms **one coordinate**. It needs no loop over the lights, because the Layer already does that: it calls the script once per physical light while building its mapping.
+
+```c
+class MirrorModifier {
+  void modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }   // mirror along x
+}
+```
+
+The body is one expression per axis. Other shapes, in the same place:
+
+```c
+setXYZ(yPos, xPos, zPos);               // swap the axes
+setXYZ(xPos + 4, yPos, zPos);           // shift by four
+setXYZ((width - 1 - xPos) * 2, yPos, zPos);   // mirror, then stretch
+```
+
+`setXYZ(x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`. The index is the destination slot: today the script is handed a single coordinate, so it is always `0`.
+
+`width` matters more than it looks. A mirror written against a fixed `255` sends every light of a 16-wide grid far outside the grid, the Layer discards each one as out of bounds, and the fixture goes black. No error appears anywhere, because the script itself ran perfectly.
+
+**A computed coordinate is full width.** `setXYZ` hands its three values to the binding as a call rather than storing them as bytes, so `setXYZ(767 - xPos, ...)` on a 768-wide wall arrives as 767 rather than clamping to 255. It was an inline three-byte store once, and that is exactly the bug it caused. A negative position handed TO a script is passed through untransformed rather than wrapped.
+
+**A script cannot resize the logical box.** A modifier has two hooks: one reshapes the box once per rebuild, one folds each coordinate. A script drives only the second, so transforms that keep the box the same size work, and ones that halve it (the way the built-in [Mirror](modifiers.md#mirror) does) need the compiled modifier.
+
+A script that fails to compile shows the parse error on the module and the mapping falls back to passing coordinates straight through, so the transform disappears until the script parses again and the device keeps rendering throughout. Detail: [technical](moxygen/MoonLiveModifier.md).
 
 ## Tests
 

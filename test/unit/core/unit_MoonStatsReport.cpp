@@ -402,3 +402,31 @@ TEST_CASE("a stats retraction leaves a foreign status alone") {
     m.clearOwnStatus();
     CHECK(m.status() == kForeign);   // not ours to clear
 }
+
+/// The automatic report waits for a MEASURED frame rate. `Scheduler::fps()` divides by
+/// `tickTimeUs_`, which is computed only when the first 1-second timing window closes, and the
+/// housekeeping tick that sends the report runs inside that window. Without the guard every install
+/// and upgrade row carried `fps: 0` (verified on a NanoPi: the automatic row read 0 while a button
+/// press from the same device read 124), so the pie described only the rare user who pressed it.
+///
+/// Pinned at the builder, which is the layer that decides what a zero MEANS: the report carries
+/// whatever fps it is handed, so the guard belongs in the caller and the zero must stay expressible.
+TEST_CASE("a report carries the frame rate it is given, zero included") {
+    mm::AudioService mod;
+    mod.setName("Audio");
+    mod.setTypeName("AudioService");
+
+    mm::MoonModule* tree[] = {&mod};
+
+    mm::JsonSink measured;
+    mm::buildMoonStatsReport(measured, tree, 1, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr, 0, 0, 0, 124);
+    CHECK(std::string(measured.data()).find("\"fps\":124") != std::string::npos);
+
+    // A cold start is what the tick1s guard exists to avoid sending, so the builder must still be
+    // able to express it: the guard is the policy, not the format.
+    mm::JsonSink cold;
+    mm::buildMoonStatsReport(cold, tree, 1, mm::MoonStatsEvent::Install,
+                             nullptr, "1.0.0", nullptr, 0, 0, 0, 0);
+    CHECK(std::string(cold.data()).find("\"fps\":0") != std::string::npos);
+}

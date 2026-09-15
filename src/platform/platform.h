@@ -1516,6 +1516,93 @@ RmtLoopbackResult parlioWs2812Loopback(const uint16_t* dataPins, uint8_t laneCou
                                        uint8_t rowBits);
 
 // ---------------------------------------------------------------------------
+// HUB75 panel output. A HUB75 panel is SCANNED, not addressed: one frame is
+// height/2 scan lines (RGB1 and RGB2 drive both half-panels at once), each line
+// clocked out as `width` parallel words, one bit plane at a time. A frame is
+// `bitDepth` plane passes of two bytes a slot (the bus is 16 bits wide), and
+// Hub75Geometry::frameBytes is its one home: the platform asks rather than
+// recomputing. That size decides the
+// peripheral, the Parlio single-shot cap being 65,535 bytes, while the
+// i80/LCD_CAM DMA reaches PSRAM.
+//
+// ONE seam, two backends: hub75Init takes the backend to use, and the platform
+// reports which ones this silicon has and which can carry a given frame. WHICH
+// to spend on the panel is the driver's `peripheral` select, because a chip with
+// both may already be driving WS2812 strips from one of them.
+//
+// Inert everywhere the silicon is absent (desktop, classic ESP32): init returns
+// false and the driver reports it, the allocate-and-degrade rule every other
+// output seam follows.
+// ---------------------------------------------------------------------------
+
+/// The pins one HUB75 port needs. All default to `kBusPinUnset` because a
+/// soldered line must never be guessed: a default here would pick the user's
+/// wiring, and on an S3 it would land on octal-PSRAM or a strapping pin.
+/// `e` is used only by 1/32-scan panels and stays unset on 1/8 and 1/16.
+struct Hub75Pins {
+    uint16_t r1 = 0xFFFF, g1 = 0xFFFF, b1 = 0xFFFF;   // upper half-panel color
+    uint16_t r2 = 0xFFFF, g2 = 0xFFFF, b2 = 0xFFFF;   // lower half-panel color
+    uint16_t a = 0xFFFF, b = 0xFFFF, c = 0xFFFF;      // row address, 1/8 scan
+    uint16_t d = 0xFFFF;                              // + 1/16 scan
+    uint16_t e = 0xFFFF;                              // + 1/32 scan
+    uint16_t clk = 0xFFFF, lat = 0xFFFF, oe = 0xFFFF; // shift clock, latch, blank
+};
+
+struct Hub75Handle { void* impl = nullptr; };
+
+/// Which silicon block drives a HUB75 port. A chip may have more than one, and WHICH to spend on
+/// the panel is the user's call rather than the platform's: a P4 has both, and a board driving
+/// WS2812 strips from one needs the panel on the other. The platform reports what exists; the
+/// driver's `peripheral` select decides.
+enum class Hub75Backend : uint8_t { LcdCam = 0, Parlio = 1 };
+
+/// Is this backend present on this silicon AND able to carry a frame of `frameBytes`?
+///
+/// Two questions in one because a user cannot act on them separately: PARLIO exists on a P4 but
+/// caps at 65,535 bytes a transfer, so "present" without "big enough" would offer a choice that
+/// fails at init. `frameBytes` 0 asks only whether the silicon is there, which is what builds the
+/// dropdown before a geometry is known.
+bool hub75BackendAvailable(Hub75Backend backend, size_t frameBytes);
+
+/// The label this backend shows in the UI. Stable across builds: the driver remembers the user's
+/// choice by label, so a firmware that gains a backend does not silently re-point the selection.
+const char* hub75BackendLabel(Hub75Backend backend);
+
+/// Bring up a HUB75 port on `backend` and allocate its frame buffer.
+///
+/// `scanRate` is the panel's own (8, 16 or 32), not derivable from the size: two panels of identical
+/// dimensions can scan differently, so the user says which. `bitDepth` (2..8) is the refresh
+/// tradeoff, and it is the caller's to make.
+///
+/// Returns false when the backend is absent, the pins are incomplete, or the frame does not fit:
+/// `hub75LastError()` says which, so the driver reports a cause rather than "check pins / memory".
+bool hub75Init(Hub75Handle& h, Hub75Backend backend, const Hub75Pins& pins,
+               uint16_t width, uint16_t height, uint8_t scanRate, uint8_t bitDepth);
+
+/// Why the last hub75Init returned false, or nullptr when it did not fail.
+const char* hub75LastError();
+
+/// The DMA frame buffer the driver encodes into (zero-copy), and its capacity.
+/// nullptr / 0 before a successful init.
+uint8_t* hub75Buffer(const Hub75Handle& h) MM_NONBLOCKING;
+size_t   hub75BufferCapacity(const Hub75Handle& h) MM_NONBLOCKING;
+
+/// Start the scan. HUB75 output is CONTINUOUS rather than one-shot: the panel is re-scanned forever
+/// from the same buffer, so this arms the loop once and the driver then writes the next frame into
+/// the buffer between scans. There is no per-frame transmit call and no wait.
+bool hub75Start(Hub75Handle& h);
+
+/// Measured refresh in Hz, from the completed-scan counter. The driver publishes it as a read-only
+/// control, which is what turns a tester's "it flickers" into a number: the docs carry a PREDICTED
+/// table, and this is what actually happened. 0 until the first scan completes.
+uint16_t hub75RefreshHz(const Hub75Handle& h) MM_NONBLOCKING;
+
+/// Which backend this handle is running, for the status line. nullptr before a successful init.
+const char* hub75Backend(const Hub75Handle& h);
+
+void hub75Deinit(Hub75Handle& h);
+
+// ---------------------------------------------------------------------------
 // I2S audio input (digital MEMS microphone, e.g. INMP441). Two seams only:
 // the I2S read (audioMic*) and the FFT kernel (audioFft). Everything else -
 // DC strip, RMS, windowing, the magnitude->16-band log mapping, noise-floor/gain -

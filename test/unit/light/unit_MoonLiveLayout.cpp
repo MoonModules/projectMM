@@ -151,7 +151,7 @@ TEST_CASE("editing the script changes the fixture") {
     CHECK(l.lightCount() == 2);
 }
 
-// Every example in MoonLiveLayout.md must actually compile. A doc that shows a call the language
+// Every layout example in MoonLiveEffect.md must actually compile. A doc that shows a call the language
 // does not have sends the reader to a parse error on their first attempt — and it happened here:
 // an early draft advertised cos8/sin8, which are not registered built-ins.
 TEST_CASE("the scripts the documentation shows all compile") {

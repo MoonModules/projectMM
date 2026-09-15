@@ -29,6 +29,7 @@ idf_component_register(
         "../../src/platform/esp32/platform_esp32_worker.cpp"
         "../../src/platform/esp32/platform_esp32_gpio.cpp"
         "../../src/platform/esp32/platform_esp32_i80.cpp"
+        "../../src/platform/esp32/platform_esp32_hub75.cpp"
         "../../src/platform/esp32/platform_esp32_moon_i80.cpp"
         "../../src/platform/esp32/platform_esp32_parlio.cpp"
         "../../src/platform/esp32/platform_esp32_i2s.cpp"

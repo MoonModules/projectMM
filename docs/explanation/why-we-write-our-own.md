@@ -4,7 +4,7 @@ title: Why we write our own code
 
 # Why we write our own code
 
-projectMM pulls in no third-party libraries: no FastLED, no ESPAsyncWebServer, no ArduinoJson. A library that is genuinely needed lives behind the platform boundary in `src/platform/`, never in core or the light domain. The *what*, with the replacement for each, is in [building.md § Third-party libraries](../how-to/building.md#third-party-libraries). The *why* follows.
+projectMM pulls in no third-party libraries: no FastLED, no ESPAsyncWebServer, no ArduinoJson. A library that is genuinely needed lives behind the platform boundary in `src/platform/`, never in core or the light domain. The *what*, with the replacement for each, is [below](#third-party-libraries). The *why* comes first.
 
 ## A dependency is a hole in the test coverage
 
@@ -57,3 +57,25 @@ Writing your own implementation of a known idea can land in either column, and w
 Credit is the fifth row, and it needs care for a mechanical reason: rewriting removes the easiest form of attribution there is. Take a dependency and the author's name appears in the manifest automatically, as a side effect of the build. Write it yourself and that disappears, even when the idea, the approach or the algorithm came straight from someone else's work. So it has to be deliberate: named in the README's Credits, named in each module's Prior art notes, named in the [friend-repo digests](../friend-repos/index.md), in the place where it can be checked against the source.
 
 If something here came from your work and is not credited where it should be, [open an issue](../how-to/logging-an-issue.md) or find us on [Discord](https://discord.gg/TC8NSUSCdV). We would much rather hear it directly.
+
+## ESP-IDF directly, rather than Arduino
+
+The ESP32 target uses ESP-IDF directly for three reasons:
+
+- **Direct hardware control.** RMT peripheral for LED protocols, FreeRTOS task pinning with explicit stack sizes, `heap_caps_malloc` with SPIRAM/8BIT caps, `esp_timer` microsecond timing. Arduino wraps these with abstractions that add overhead and hide control.
+- **Native CMake.** ESP-IDF's build system *is* CMake (`idf.py` wraps it). No impedance mismatch. Arduino-on-ESP-IDF adds a compatibility layer that complicates the build.
+- **Version stability.** ESP-IDF APIs are stable. Arduino-esp32 version churn caused recurring breakage in MoonLight.
+
+Arduino can be added as an ESP-IDF component later if a specific Arduino library is needed; this is officially supported by Espressif and doesn't require restructuring.
+
+## Third-party libraries
+
+The platform abstraction layer replaces what libraries typically provide. Today no third-party libraries are pulled in:
+
+| Library | Why not | What replaces it |
+|---|---|---|
+| [FastLED](https://github.com/FastLED/FastLED) | Arduino-dependent. LED protocol drivers (RMT, SPI) are available natively in ESP-IDF; FastLED's color math is small enough to reimplement. | Own color math in core. Own LED drivers per platform in `src/platform/`. |
+| [ESPAsyncWebServer](https://github.com/ESP32Async/ESPAsyncWebServer) | Arduino-dependent. Past memory-leak issues. Ties us to Arduino. | Own HTTP server via ESP-IDF's `esp_http_server` (ESP32) or BSD sockets (desktop). Reconsider if Arduino-as-component is added. |
+| [ArduinoJson](https://github.com/bblanchon/ArduinoJson) | Works on ESP-IDF, but heavy: dynamic allocation, large footprint. | Own `JsonSink`, which serves both the API and persistence: each module's state is written as a flat `/.config/<TypeName>.json` and read back through `loadSubtree`. |
+
+When a library is genuinely needed (e.g. FastLED for specific hardware support), it lives inside `src/platform/` and is not referenced from core or light-domain code.

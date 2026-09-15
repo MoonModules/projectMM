@@ -46,6 +46,33 @@ The published pages were flat at the site root and the folders that did exist ca
 
 `index.html` and `gettingstarted.html` stay at the root, and `moonmodules/` is unchanged. No redirects are published, so an old bookmark 404s rather than forwarding.
 
+### The three MoonLive pages became one
+
+**Action: nothing on a device. Update a bookmark to a documentation page.**
+Affects readers, not devices. The engine is the same whichever job a script does, so three pages repeated it and differed only in which moment the host calls. The roles are now sections on the one page.
+
+| Was | Now |
+|---|---|
+| `moonmodules/light/MoonLiveLayout.html` | `moonmodules/light/MoonLiveEffect.html#a-layout-written-as-a-script` |
+| `moonmodules/light/MoonLiveModifier.html` | `moonmodules/light/MoonLiveEffect.html#a-modifier-written-as-a-script` |
+
+The generated technical pages under `moonmodules/light/moxygen/` keep one page per class and are unchanged.
+
+### Four task pages moved from Tutorials to How-to
+
+**Action: nothing on a device. Update a bookmark to a documentation page.**
+Affects readers, not devices. A tutorial is a lesson for someone learning; putting projectMM on a machine is a task somebody already has. The four moved to the folder naming what they are, and the build page shed the two halves that were never how-to.
+
+| Was | Now |
+|---|---|
+| `tutorials/installing-to-desktop.html` | `how-to/installing-to-desktop.html` |
+| `tutorials/installing-on-linux.html` | `how-to/installing-on-linux.html` |
+| `tutorials/panel-cards.html` | `how-to/panel-cards.html` |
+| `tutorials/control-surface.html` | `how-to/control-surface.html` |
+| `how-to/building.html#tooling-overview` | `reference/build-system.html` |
+| `how-to/building.html#why-not-arduino` | `explanation/why-we-write-our-own.html#esp-idf-directly-rather-than-arduino` |
+| `how-to/building.html#third-party-libraries` | `explanation/why-we-write-our-own.html#third-party-libraries` |
+
 
 ### Audio: `floor` is now the silence threshold in both level modes
 

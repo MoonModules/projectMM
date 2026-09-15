@@ -27,7 +27,7 @@ Your browser will most likely flag it straight away: *"isn't commonly downloaded
 
 ## 2. Tell the browser to keep it
 
-Microsoft Defender SmartScreen judges a download by its **reputation**, built from how many people have downloaded that exact file from a publisher it recognises. projectMM is not code-signed, and every build produces a brand-new file, so its reputation is always zero. The warning is about the certificate, not about the contents.
+Microsoft Defender SmartScreen judges a download by its **reputation**, built from how many people have downloaded that exact file from a publisher it recognizes. projectMM is not code-signed, and every build produces a brand-new file, so its reputation is always zero. The warning is about the certificate, not about the contents.
 
 In the Downloads panel, click the **`⋯`** next to the file, then open the **Delete** dropdown and choose **Keep anyway**:
 
@@ -75,7 +75,7 @@ The console window **is** the application. It shows the log, and closing it stop
 
 On a first install you get a default grid and a running effect, enough to confirm everything works. The screenshot above is not a first install: that machine already had projectMM configured with a Game of Life layer, and the setup left it exactly as it was. That is §6.
 
-From here, [How projectMM works](how-projectmm-works.md) explains the Layouts, Effects and Drivers down the left-hand side.
+From here, [How projectMM works](../tutorials/how-projectmm-works.md) explains the Layouts, Effects and Drivers down the left-hand side.
 
 Two options worth knowing: `--no-browser` stops it opening a browser (for a headless machine), and `--port <n>` serves somewhere other than 8080.
 
@@ -138,6 +138,6 @@ Settings live in the same per-user folder whichever route you take, so the three
 
 ## Where to go next
 
-- **[How projectMM works](how-projectmm-works.md)**: the interface, and the Layouts / Effects / Drivers model.
+- **[How projectMM works](../tutorials/how-projectmm-works.md)**: the interface, and the Layouts / Effects / Drivers model.
 - **[Driving LED panels with a receiving card](panel-cards.md)**: turn this desktop into the sending card for an LED wall.
 - **[Install & first light](../gettingstarted.md)**: flashing an ESP32, if you want the same thing on a device.

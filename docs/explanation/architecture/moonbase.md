@@ -4,6 +4,28 @@ A small maintenance image in the factory slot that installs updates into one lar
 
 What it replaces comes first, then the update cycle, then how MoonBase itself is updated and how the two images are told apart.
 
+```mermaid
+flowchart LR
+    subgraph flash["one flash, two images"]
+        direction TB
+        base["factory slot<br/>MoonBase, ~750 KB<br/>small and rarely changing"]
+        app["app slot<br/>projectMM<br/>one copy, not two"]
+        fs["filesystem<br/>the space the second<br/>app slot used to hold"]
+    end
+
+    base -->|"installs the app<br/>while running from factory"| app
+    app -->|"installs MoonBase<br/>while running from ota_0"| base
+
+    classDef recovery fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef running fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef gained fill:#2d3561,stroke:#7b88c9,color:#fff
+    class base recovery
+    class app running
+    class fs gained
+```
+
+Neither image can rewrite the partition it is executing from, so each installs the other. That is the whole scheme: the arrows are the only two write paths, and the app is the only thing that can repair a broken recovery image. The two directions fail differently, and both fail safe. An app update points the bootloader at MoonBase first, so a power cut anywhere in it lands in MoonBase, which a user retries from over the network. A MoonBase update writes and verifies the factory slot without touching otadata, so a cut there leaves the still-valid app in `ota_0` to boot and try again.
+
 ## What it replaces
 
 Dual-OTA spends half the app area on a second copy of the firmware that is idle except during an

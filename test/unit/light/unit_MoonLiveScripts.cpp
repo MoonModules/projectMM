@@ -467,9 +467,9 @@ TEST_CASE("every script example in the docs compiles") {
     const std::filesystem::path repo = scriptRoot().parent_path();
     const std::filesystem::path pages[] = {
         repo / "moonlive" / "README.md",
+        // ONE MoonLive page: the layout and modifier roles are sections on it rather than pages
+        // of their own, so their examples are covered by this entry.
         repo / "docs" / "moonmodules" / "light" / "MoonLiveEffect.md",
-        repo / "docs" / "moonmodules" / "light" / "MoonLiveLayout.md",
-        repo / "docs" / "moonmodules" / "light" / "MoonLiveModifier.md",
     };
 
     int checked = 0;

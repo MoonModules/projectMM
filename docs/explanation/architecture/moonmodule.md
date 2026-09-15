@@ -4,6 +4,59 @@ The one building block. Every effect, modifier, layout, driver and service is a 
 
 The lifecycle comes first, then what a module exposes and persists, then how modules reach each other, and last the two rules every module is held to: robustness and the hot path.
 
+```mermaid
+flowchart TB
+    subgraph boot["boot · Scheduler::setup, five phases in order"]
+        direction TB
+        p1["1 · defineControls<br/>bind each name to a member variable"]
+        p2["2 · load<br/>persisted values land in those variables"]
+        p3["3 · setup<br/>the module's own init, values already in place"]
+        p4["4 · applyState<br/>build the derived state, or release it"]
+        p5["5 · reapply values<br/>for controls only a prepare could declare"]
+        p1 --> p2 --> p3 --> p4 --> p5
+    end
+
+    subgraph run["run · every frame, until something changes"]
+        direction TB
+        t1["tick<br/>per frame, hot path"]
+        t2["tick20ms<br/>periodic work"]
+        t3["tick1s<br/>housekeeping"]
+    end
+
+    subgraph change["a control changes · three tiers, cheapest first"]
+        direction TB
+        c1["onControlChanged<br/>this module only, in place"]
+        c2{"affectsPrepare?"}
+        c3["prepareTree<br/>every module rebuilds its derived state"]
+        c1 --> c2
+        c2 -->|"yes: the shape changed"| c3
+        c2 -->|"no: a value moved"| c1
+    end
+
+    subgraph gone["release · reverse order, two passes"]
+        direction TB
+        r1["release<br/>every module, siblings still alive"]
+        r2["deleteTree<br/>then the memory goes"]
+        r1 --> r2
+    end
+
+    boot --> run
+    run --> change
+    change -->|"applyState routes each node"| run
+    run --> gone
+
+    classDef phase fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef hot fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef cold fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef teardown fill:#3d2d61,stroke:#a07bc9,color:#fff
+    class p1,p2,p3,p4,p5 phase
+    class t1,t2,t3 hot
+    class c1,c2,c3 cold
+    class r1,r2 teardown
+```
+
+Four states, and the arrows are the only way between them. Boot runs its five phases once, in that order, because each depends on the one before. A control cannot take a persisted value before it is bound, and a buffer cannot size itself before the value that sizes it has arrived. After that the module ticks until something changes, and a change re-enters the build phase rather than taking a path of its own. Teardown reverses the order so a module's `release` still sees live siblings.
+
 ## What counts as a module
 
 The core building block is a **[MoonModule](../../moonmodules/core/moxygen/MoonModule.md)**. Everything is a MoonModule, more than effects, modifiers, layouts, and drivers, but also system infrastructure (HTTP server, WebSocket server, file server, WiFi, mDNS, OTA updates) and [services](mooncore.md#services) (sensors and actuators bridging to hardware/network). The core itself is minimal: MoonModule base, buffer management, a [Scheduler](../../moonmodules/core/moxygen/Scheduler.md).
@@ -67,7 +120,7 @@ Controls are the bridge between the [web UI](../../moonmodules/core/ui.md) and t
 Control values and each module's `enabled` flag are persisted to flash so settings survive a reboot. The mechanism lives in [FilesystemModule](../../moonmodules/core/moxygen/FilesystemModule.md):
 
 - **Storage**: one flat JSON file per top-level module under `/.config/<TypeName>.json`. Children are encoded positionally with `<index>.` key prefixes, a deliberately flat file shape loaded by the cheap first-match key helpers in `core/JsonUtil.h`. A control whose *value* is structured, such as a List control's array of objects, round-trips that array with the recursive reader in the same header through its own restore hook. The file's top level stays flat, and the structure lives inside one control's value.
-- **Lifecycle**: `Scheduler::setup()` runs four phases. First `defineControls` binds every module's full control set. Then the FilesystemModule load hook overlays persisted values onto the bound variables, and `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state. Third, each module's own `setup()` runs with persisted values already in its member variables. Last, `prepare` sizes the buffers. Modules themselves know nothing about persistence; they bind their variables.
+- **Lifecycle**: the five phases the diagram above draws, read from persistence's side. `defineControls` binds every module's control set. The load hook then overlays persisted values onto those variables, and `rebuildControls` re-evaluates conditional `hidden` flags against the loaded state. Each module's own `setup()` runs with the values already in place, and `applyState` sizes the buffers. The fifth phase exists for persistence alone: a control that appears only once `prepare` has run, such as one a MoonLive script declares, had nothing to land on during the load, so saved values are re-applied once at the end. Modules themselves know nothing about persistence; they bind their variables.
 - **Save trigger**: HttpServerModule marks the target module dirty on every successful control mutation. FilesystemModule debounces 2 s in `tick1s()`, walks the tree, writes any subtree containing a dirty descendant via atomic write-and-rename.
 - **Conditional controls**: every conditional control is always bound; the module sets a `hidden` flag (`controls_.setHidden(i, …)`) to tell the UI not to render it. The load path can therefore find persisted values regardless of the live conditional state.
 - **Code-wired children survive a stale file**: some children aren't created by the user; `main.cpp`'s boot wiring attaches them (`ImprovProvisioningModule` under `NetworkModule`; `NetworkSendDriver`, `PreviewDriver` under their parents). Each such child calls `markWiredByCode()` after `addChild()`, a one-bit flag meaning *"I belong here because the code put me here, not because a saved file or a user asked for me."* The problem it solves is a trim on load. Persistence reconciles the live tree against the saved JSON, so a child that exists in code but is absent from an older file, written before that child was added, would be dropped. The flag tells the apply step to keep it. Children added through the HTTP API or recreated from JSON stay unmarked; those follow the file's tree shape exactly, so UI deletes still take effect.

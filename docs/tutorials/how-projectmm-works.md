@@ -11,6 +11,8 @@ and becomes a place you know your way around.
 
 ![The projectMM interface: navigation on the left, live preview in the middle, module cards on the right](../assets/gettingstarted/02-01-UI-large.png)
 
+<video src="../assets/uiscenarios/show-the-preview.webm" autoplay loop muted playsinline width="720" title="The 3D preview filling the frame: what the device is rendering, live"></video>
+
 ---
 
 ## 1. Everything is a card
@@ -147,6 +149,8 @@ ever knowing it.
 
 Move a slider and the next frame uses it. Change the WiFi credentials, add an
 effect, resize a grid — all of it takes effect immediately, on a running device.
+
+<video src="../assets/uiscenarios/swap-an-effect.webm" autoplay loop muted playsinline width="720" title="Replacing an effect with another type; the slot keeps its place and the lights never stop"></video>
 
 **Files are the one exception, and only because typing is different.** A script
 you are editing is saved when you click away, press Ctrl/Cmd+S, or press Save —

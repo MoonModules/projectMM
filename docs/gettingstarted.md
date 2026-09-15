@@ -28,6 +28,8 @@ Chrome or Edge, then plug your ESP32 into a USB port.
 
 ![The web installer](assets/gettingstarted/01-01-installer-start.png)
 
+<video src="assets/uiscenarios/install-firmware.webm" autoplay loop muted playsinline width="720" title="The installer: picking a release, a firmware, and a board from the gallery"></video>
+
 ### 2. Pick the USB port
 
 Click **USB Port → Pick a port…**. Your browser shows a small list of connected

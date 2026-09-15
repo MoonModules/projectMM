@@ -56,12 +56,13 @@ Runs `./build/<host>/test/mm_tests -s` (doctest with all test cases shown) — s
 
 ### test_host
 
-Run the host test suites: the Python ones and the JS ones.
+Run the host test suites: the Python ones, the JS ones, and the UI ones.
 
 ```bash
-uv run moondeck/test/test_host.py            # both
+uv run moondeck/test/test_host.py            # Python and JS
 uv run moondeck/test/test_host.py --python   # just Python
 uv run moondeck/test/test_host.py --js       # just JS
+uv run moondeck/test/test_host.py --ui       # only the UI runs (needs a running device)
 ```
 
 The tests the C++ binary cannot reach: the cross-language contracts (the Improv frame's wire format,
@@ -69,6 +70,14 @@ WLED's `/json` shape), the MoonDeck scripts themselves, the browser code under `
 claim that every shipped MoonLive script is valid C++ (`test_scripts_are_cpp.py` hands each one to a
 real compiler). The commit gate and CI run the same two commands; this is the card in front of them.
 JS reports SKIP rather than failing when node is absent, since a Python-only bench is a normal setup.
+
+`--ui` is the odd one and is OPT-IN, which is why a bare run leaves it out. It drives a real browser
+against a running projectMM with [pytest-playwright](https://playwright.dev/python/docs/test-runners),
+performing a [run file](uiscenario/RUNS.md) from `test/uiscenarios/clips/` through the interface and checking each step against the
+device over REST. The run files are the same ones `moondeck/uiscenario/uivideo.py` records the videos from, so a
+failure means the UI no longer does what the video shows. It skips rather than fails when nothing
+answers on `localhost:8080` (override with `PROJECTMM_HOST`), for the same reason the JS lane skips
+without node.
 
 ### run_desktop
 
@@ -858,6 +867,28 @@ uv run moondeck/scenario/run_live_scenario.py --compare-baseline                
 Executes scenario steps (add_module, set_control, delete_module) via REST API. Collects per-step FPS and heap measurements. Compares against stored baselines to detect performance regressions. Use the dropdown to run a single scenario or leave it on **all** to run the full suite.
 
 For a full description of each scenario, see the [scenario inventory](/api/docs/reference/tests/scenario-tests.md), auto-generated from the JSON files.
+
+### ui_clip
+
+Record one UI clip: perform a run file against the interface while Playwright records, then publish a compressed clip for the docs.
+
+```bash
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+```
+
+The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [RUNS.md](uiscenario/RUNS.md).
+
+A run names its own `host` when it drives something other than the desktop UI, so the installer clip records against the installer preview and the audio clip against a board with a microphone. Start what a run needs before recording it.
+
+### ui_project
+
+Cut published clips into one video, on the beat, with a music track.
+
+```bash
+uv run moondeck/uiscenario/uicompose.py --project test/uiscenarios/projects/getting-started.json
+```
+
+The dropdown lists every project under `test/uiscenarios/projects/`. A project is the edit: which clips, in what order, how many BARS each gets, and the audio underneath. Bars rather than seconds, because a cut lands on the music or it does not, and changing the track re-times the whole edit from one number. The finished cut lands in `media/video/<project>.mp4`; the per-segment intermediates are deleted once it exists, and kept only when a cut fails.
 
 ### run_network_live
 

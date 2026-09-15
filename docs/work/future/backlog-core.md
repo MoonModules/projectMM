@@ -2,6 +2,26 @@
 
 Forward-looking to-build items for the **core / infrastructure** domain (`src/core/`, `src/platform/`, build, CI, network, persistence, UI). The light-domain counterpart is [backlog-light.md](backlog-light.md); items that genuinely span both are in [backlog-mixed.md](backlog-mixed.md). Index + overview: [README.md](index.md). Completed items are removed.
 
+### The update overlay's Cancel button does nothing on a plain OTA (2026-09-14)
+
+`showUpdateOverlay` shows a Cancel button on every firmware install and wires it to
+`POST /api/firmware/cancel` (`src/ui/app.js:1479`). Only MoonBase implements that route
+(`moonbase/main/moonbase_main.cpp:532`); the application's dispatch table has none, so the request
+404s and the `.catch(() => {})` swallows it. The button therefore works during the MoonBase phase of
+an install and is inert for a plain app OTA on a device without MoonBase.
+
+A file upload still cancels there, but by a different mechanism: `uploadCtl.abort()` drops the
+connection on the line above. So the two install sources behave differently behind one button, and a
+URL install on a non-MoonBase device is the case where pressing Cancel does nothing at all.
+
+Two ways out, and the choice is the question. Implement the route in the application, which means an
+abort flag the OTA task polls between chunks, the shape MoonBase already uses. Or hide the button
+where it cannot act, which is honest but leaves a long download uninterruptible. The first is the
+better system and the larger change; the second is a few lines. Found while writing
+[Updating firmware](../../how-to/updating-firmware.md), which deliberately does not mention Cancel:
+documenting a button that half-works is worse than leaving it undocumented until it is one thing or
+the other.
+
 ### The audio-sync test waits on the wall clock (2026-09-06)
 
 `test/unit/core/unit_AudioService_sync.cpp` drives the quiet-packet case with `platform::delayMs(1)`

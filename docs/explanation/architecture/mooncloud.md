@@ -25,7 +25,7 @@ flowchart LR
     class db check
 ```
 
-The device talks to one origin and nothing else. A report is one POST; the aggregates come back from the same Worker that stored them.
+The device talks to one origin and nothing else.
 
 ## The decisions that shape it
 

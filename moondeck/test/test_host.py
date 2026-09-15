@@ -9,6 +9,7 @@ C++. The commit gate and CI both run them; this is the same command with a card 
   uv run moondeck/test/test_host.py            # both suites
   uv run moondeck/test/test_host.py --python   # just Python
   uv run moondeck/test/test_host.py --js       # just JS
+  uv run moondeck/test/test_host.py --ui       # just the UI run (needs a running device)
 
 The Python deps ride in a PEP-723 block per test file, so they are named here rather than
 installed: `uv run --with` resolves them per run and leaves no environment behind.
@@ -27,6 +28,12 @@ ROOT = Path(__file__).resolve().parents[2]
 # every other script in MoonDeck reaches one.
 PY_DEPS = ("pytest", "pyserial", "markdown", "wled")
 
+# The UI suite's own deps. Separate because it is the only lane that drives a browser
+# against a RUNNING device: pytest-playwright is Playwright's documented Python runner
+# (per-test browser isolation, auto-retrying expect), and it is dead weight on a bench
+# that only runs the pure suites.
+UI_DEPS = ("pytest", "pytest-playwright", "requests")
+
 
 def run(cmd, label):
     print(f"\n=== {label} ===", flush=True)
@@ -41,8 +48,12 @@ def main() -> int:
     only = ap.add_mutually_exclusive_group()
     only.add_argument("--python", action="store_true", help="run only the Python suite")
     only.add_argument("--js", action="store_true", help="run only the JS suite")
+    only.add_argument("--ui", action="store_true", help="run only the UI suite (needs a device)")
     args = ap.parse_args()
-    both = not (args.python or args.js)
+    # The UI lane is OPT-IN: it needs a projectMM listening, so a bare run stays the
+    # pure suites that work on any machine. It skips rather than fails when asked for
+    # without a device, which is what the tests themselves decide.
+    both = not (args.python or args.js or args.ui)
 
     rc = 0
     if both or args.python:
@@ -68,6 +79,13 @@ def main() -> int:
                 print("\n=== JS (test/js) ===\nSKIP: no test files found", flush=True)
             else:
                 rc |= run(["node", "--test", *tests], "JS (test/js)")
+
+    if args.ui:
+        cmd = ["uv", "run"]
+        for d in UI_DEPS:
+            cmd += ["--with", d]
+        cmd += ["pytest", "test/uiscenarios", "-q"]
+        rc |= run(cmd, "UI (test/uiscenarios)")
 
     print("\nDONE" if rc == 0 else "\nFAILED", flush=True)
     return rc

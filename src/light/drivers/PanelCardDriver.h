@@ -134,7 +134,7 @@ public:
     /// manual setting regardless, as its FIRST source, falling back to discovery only when unset.
     /// v12-and-older FIRST, and the default. A stock card ships on v13, but v13 on v8.x hardware
     /// has a flicker defect with no sending-side workaround, so the documented path is to downgrade
-    /// the card (tutorials/panel-cards.md). Defaulting to the generation the guide leaves you on
+    /// the card (how-to/panel-cards.md). Defaulting to the generation the guide leaves you on
     /// means the setting is already right when you finish, rather than being the last unexplained
     /// step between a downgraded card and a wall that updates once every few seconds.
     static constexpr const char* kFirmwareOptions[] = {"v12 and older", "v13 and newer"};

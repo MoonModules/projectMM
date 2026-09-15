@@ -13,9 +13,13 @@ namespace mm::platform {
 constexpr bool hasPsram = true;
 
 // Not an ESP32-P4, so the P4-specific seams (Ethernet pin map, co-processor WiFi)
-// compile out on desktop. Mirrors the esp32 config, which keeps only isEsp32P4
-// (the general isEsp32/isEsp32S3 family flags had no users and were removed).
+// compile out on desktop. Mirrors the esp32 config, which keeps the three chips that
+// earn a flag: P4 and S3 for their Ethernet defaults, S31 for its RGMII PHY, and now
+// Hub75Driver, which offers a per-chip generic pin set and must know which chip it is
+// on to avoid listing a P4's free GPIOs to an S3.
 constexpr bool isEsp32P4 = false;
+constexpr bool isEsp32S3 = false;
+constexpr bool isEsp32S31 = false;
 
 // RMT channels the host reports. Non-zero for the same reason as the parallel lane counts: the
 // desktop build emulates the peripheral so RmtLedDriver actually RUNS here, rather than guarding

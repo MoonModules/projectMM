@@ -211,8 +211,12 @@ async function handleStats(env, url) {
   for (const role of ["driver", "service", "layout", "effect", "modifier"]) {
     const value = url?.searchParams.get(role);
     if (!value) continue;
-    where.push("(',' || modules || ',') LIKE ?");
-    binds.push(`%,${role}:${value},%`);
+    // ESCAPE, because the value is a module NAME and LIKE reads _ and % as wildcards. Without it
+    // `?effect=A_B` also matches `AxB`, which is a filter quietly answering a different question
+    // than the one asked. The backslash is escaped first, or it would escape the escapes.
+    const literal = value.replace(/([\\%_])/g, "\\$1");
+    where.push("(',' || modules || ',') LIKE ? ESCAPE '\\'");
+    binds.push(`%,${role}:${literal},%`);
   }
   // A bucketed chart filters by BOUNDS: its slices name ranges ("64-128 KB"), and the column holds
   // the raw number, so there is no value to match on. `?freeHeapMin=65536&freeHeapMax=131072`.
@@ -501,11 +505,24 @@ const PAGE = `<!doctype html>
   .legend .n { margin-left: auto; opacity: .6; font-variant-numeric: tabular-nums; padding-left: 1rem; }
   svg .slice { stroke: #fff; stroke-width: 1.5; }
   @media (prefers-color-scheme: dark) { svg .slice { stroke: #111; } }
+  /* A slice inside a link is a control: say so on hover, and leave the read-only ones alone. */
+  svg a { cursor: pointer; }
+  svg a:hover .slice { opacity: .75; }
+  svg a:focus-visible .slice { outline: 2px solid currentColor; }
+  .legend a { text-decoration: none; border-bottom: 1px dotted currentColor; }
+  .legend a:hover { opacity: .7; }
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: -1.5rem 0 2.5rem; }
+  .filter-lead { font-size: .85rem; opacity: .6; }
+  .chip { display: inline-block; font-size: .8rem; padding: .15rem .55rem; border-radius: 1rem;
+          border: 1px solid currentColor; opacity: .75; text-decoration: none; }
+  .chip:hover { opacity: 1; }
+  .chip.clear { border-style: dashed; }
   footer { margin-top: 3.5rem; font-size: .85rem; opacity: .6; }
   a { color: inherit; }
 </style>
 <h1>MoonCloud Stats</h1>
 <div class="sub" id="sub">Loading...</div>
+<div class="filters" id="filters" hidden></div>
 <div class="charts" id="out"></div>
 <footer>
   Opt-in, one report per install or upgrade, plus one whenever a user presses send update on the
@@ -533,7 +550,39 @@ function arc(cx, cy, r, a0, a1) {
          " A " + r + " " + r + " 0 " + (a1 - a0 > Math.PI ? 1 : 0) + " 1 " + x1 + " " + y1 + " Z";
 }
 
-function pie(rows) {
+// The URL a slice navigates to, or null when the slice names no single value to filter by.
+//
+// Navigation IS the state: a filter lives in the query string, so there is no client-side store to
+// keep in sync, the back button undoes a narrowing for free, and a narrowed view is a link someone
+// can send. The server already accepts every one of these parameters (see FILTERABLE and the role
+// and bounds loops above); this only builds the address.
+//
+// Two slices are deliberately NOT links. "other" is the aggregate topSlices folds the long tail
+// into, so it names no value the server could match. A row whose name is empty reads as "unknown",
+// which is the absence of a value rather than a value.
+function filterHref(key, row) {
+  if (!key || !row.name || row.name === "other") return null;
+  const url = new URL(location.href);
+  // A bucketed chart filters by BOUNDS: its slices name ranges, and the column holds the raw
+  // number, so there is no value to match on. The row carries the min/max the server cut it with.
+  if (row.min !== undefined) {
+    url.searchParams.set(key + "Min", row.min);
+    if (row.max !== undefined) url.searchParams.set(key + "Max", row.max);
+    else url.searchParams.delete(key + "Max");   // the open-ended top bucket has no upper bound
+    // The label rides along so the bar can name what was clicked rather than the bounds it became.
+    // The server ignores it; it is the card's own Label-suffix convention, kept identical here.
+    url.searchParams.set(key + "Label", row.name);
+  } else if (key === "dev") {
+    // dev is an integer flag, not a string column: the pie's slices read "development" and
+    // "released", and the server wants 1 and 0. The card's own mapping, kept identical.
+    url.searchParams.set("dev", row.name === "development" ? "1" : "0");
+  } else {
+    url.searchParams.set(key, row.name);
+  }
+  return url.pathname + url.search;
+}
+
+function pie(rows, key) {
   const NS = "http://www.w3.org/2000/svg";
   const total = rows.reduce((s, r) => s + r.count, 0) || 1;
   const svg = document.createElementNS(NS, "svg");
@@ -548,16 +597,28 @@ function pie(rows) {
     path.setAttribute("fill", COLORS[i % COLORS.length]);
     path.setAttribute("class", "slice");
     const title = document.createElementNS(NS, "title");
-    title.textContent = r.name + ": " + r.count +
-                        " (" + Math.round((r.count / total) * 100) + "%)";
+    const pct = Math.round((r.count / total) * 100);
+    const href = filterHref(key, r);
+    title.textContent = r.name + ": " + r.count + " (" + pct + "%)" +
+                        (href ? " — click to filter" : "");
     path.appendChild(title);
-    svg.appendChild(path);
+    // An SVG anchor, not a click handler: a real link gets the browser's own affordances, middle
+    // click, copy address, and keyboard focus, none of which an onclick would give.
+    if (href) {
+      const link = document.createElementNS(NS, "a");
+      link.setAttributeNS("http://www.w3.org/1999/xlink", "href", href);
+      link.setAttribute("href", href);
+      link.appendChild(path);
+      svg.appendChild(link);
+    } else {
+      svg.appendChild(path);
+    }
     a = next;
   });
   return svg;
 }
 
-function legend(rows) {
+function legend(rows, key) {
   const box = document.createElement("div");
   box.className = "legend";
   rows.forEach((r, i) => {
@@ -565,7 +626,11 @@ function legend(rows) {
     const sw = document.createElement("span");
     sw.className = "swatch";
     sw.style.background = COLORS[i % COLORS.length];
-    const name = document.createElement("span");
+    // The legend is the accessible half of the same control: a name is a wider target than a thin
+    // wedge, and it is what a keyboard reaches. The slice and its label go to the same address.
+    const href = filterHref(key, r);
+    const name = href ? document.createElement("a") : document.createElement("span");
+    if (href) name.href = href;
     name.textContent = r.name || "unknown";
     const n = document.createElement("span");
     n.className = "n";
@@ -574,6 +639,41 @@ function legend(rows) {
     box.appendChild(line);
   });
   return box;
+}
+
+// What the reader narrowed to, worded exactly as the device card words it: "Filtered to a, b" and
+// one Clear. The two surfaces answer the same question from the same data, so a reader moving
+// between them should not have to learn a second vocabulary for the same act.
+//
+// Read from the URL rather than from the response, because here the URL IS the filter state: the
+// card holds it in a variable and re-fetches, this page navigates, and both end up asking the
+// server the same question.
+function renderFilterBar() {
+  const bar = document.getElementById("filters");
+  const params = new URL(location.href).searchParams;
+  const parts = [];
+  const seen = new Set();
+  for (const [name, value] of params) {
+    const bound = name.endsWith("Min") || name.endsWith("Max") || name.endsWith("Label");
+    const base = bound ? name.replace(/(Min|Max|Label)$/, "") : name;
+    if (seen.has(base)) continue;
+    seen.add(base);
+    // The slice's own label, not the bounds: the reader clicked "64-128 KB", and "65537 to 131072"
+    // is the same fact in a form nobody chose. The card's rule, and its comment.
+    if (bound) { parts.push(params.get(base + "Label") ?? params.get(base + "Min")); continue; }
+    parts.push(base === "dev" ? (value === "1" ? "development" : "released") : value);
+  }
+  if (!parts.length) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.textContent = "";
+  const what = document.createElement("span");
+  what.className = "filter-lead";
+  what.textContent = "Filtered to " + parts.join(", ");
+  const clear = document.createElement("a");
+  clear.className = "chip clear";
+  clear.href = location.pathname;
+  clear.textContent = "Clear";
+  bar.append(what, clear);
 }
 
 // Everything past the 7th slice becomes one "other" wedge: a pie with twenty slivers is unreadable,
@@ -588,25 +688,40 @@ function topSlices(rows, keep = 7) {
   return tail ? head.concat([{ name: "other", count: tail }]) : head;
 }
 
-fetch("/api/stats").then(r => r.json()).then(d => {
+// The filter rides the URL, so it has to ride the fetch: this page navigates where the device card
+// keeps the same state in a variable, and both must end up asking the server the same question. A
+// page opened at ?chip=arm64 that fetched a bare /api/stats would say "Filtered to arm64" over
+// everybody's numbers, which is worse than not filtering at all.
+fetch("/api/stats" + location.search, { cache: "no-store" }).then(r => r.json()).then(d => {
   document.getElementById("sub").textContent =
     d.installations + " installations, " + d.reports + " reports";
+  renderFilterBar();
   const out = document.getElementById("out");
-  for (const [label, rows] of [["Version", d.versions], ["Chip", d.chips],
-                               ["Board", d.deviceModels], ["Flash", d.flash],
-                               ["PSRAM", d.psram], ["SDK", d.sdk],
-                               ["Event", d.events],
-                               ["Upgraded from", d.previousVersions],
-                               ["Drivers", d.drivers],
-                               ["Services", d.services],
-                               ["Layouts", d.layouts],
-                               ["Effects", d.effects],
-                               ["Modifiers", d.modifiers],
-                               ["Lights", d.lightCounts],
-                               ["Free memory", d.freeMemory],
-                               ["Total memory", d.totalMemory],
-                               ["FPS", d.fps],
-                               ["Build", d.builds], ["Country", d.countries]]) {
+  // A chart with no slices is SKIPPED, never drawn empty (the continue in the loop below). The
+  // device card does the same, so a filter that matches nothing leaves the filter bar and an empty
+  // grid rather than a page of blank circles.
+  // The third entry is the query parameter a clicked slice sets, and it is the whole of what makes
+  // a chart interactive: the server already accepts every one of these names. A null means the
+  // chart is read-only, and Build is null on purpose: its job is to show the released-against-
+  // development split, so filtering it to one side would leave it with nothing to compare.
+  for (const [label, rows, key] of [["Version", d.versions, "version"],
+                               ["Chip", d.chips, "chip"],
+                               ["Board", d.deviceModels, "deviceModel"],
+                               ["Flash", d.flash, "flash"],
+                               ["PSRAM", d.psram, "psram"], ["SDK", d.sdk, "sdk"],
+                               ["Event", d.events, "event"],
+                               ["Upgraded from", d.previousVersions, "previousVersion"],
+                               ["Drivers", d.drivers, "driver"],
+                               ["Services", d.services, "service"],
+                               ["Layouts", d.layouts, "layout"],
+                               ["Effects", d.effects, "effect"],
+                               ["Modifiers", d.modifiers, "modifier"],
+                               ["Lights", d.lightCounts, "lightCount"],
+                               ["Free memory", d.freeMemory, "freeHeap"],
+                               ["Total memory", d.totalMemory, "totalHeap"],
+                               ["FPS", d.fps, "fps"],
+                               ["Build", d.builds, "dev"],
+                               ["Country", d.countries, "country"]]) {
     const shown = topSlices(rows);
     if (!shown.length) continue;
     const section = document.createElement("div");
@@ -614,7 +729,7 @@ fetch("/api/stats").then(r => r.json()).then(d => {
     const title = document.createElement("div");
     title.className = "chart-title";
     title.textContent = label;
-    section.append(title, pie(shown), legend(shown));
+    section.append(title, pie(shown, key), legend(shown, key));
     out.appendChild(section);
   }
 }).catch(() => {

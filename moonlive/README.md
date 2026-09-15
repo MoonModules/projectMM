@@ -161,9 +161,9 @@ class defining several is still legal.
 
 | folder | run by | a script writes |
 |---|---|---|
-| `layouts/` | [MoonLiveLayout](../docs/moonmodules/light/MoonLiveLayout.md) | where the lights physically are — `addLight(x, y, z)` |
+| `layouts/` | [MoonLive](../docs/moonmodules/light/MoonLiveEffect.md#a-layout-written-as-a-script) | where the lights physically are: `addLight(x, y, z)` |
 | `effects/` | [MoonLiveEffect](../docs/moonmodules/light/MoonLiveEffect.md) | a color per light: `setRGB(index, r, g, b)`, or a whole shape at once with `line(x1, y1, x2, y2, r, g, b)` |
-| `modifiers/` | [MoonLiveModifier](../docs/moonmodules/light/MoonLiveModifier.md) | where one light lands: `setXYZ(xPos, yPos, zPos)` |
+| `modifiers/` | [MoonLive](../docs/moonmodules/light/MoonLiveEffect.md#a-modifier-written-as-a-script) | where one light lands: `setXYZ(xPos, yPos, zPos)` |
 
 Each module ships one of these as its default, so the folder doubles as the reference for what a
 working script looks like.

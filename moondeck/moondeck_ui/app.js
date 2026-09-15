@@ -11,6 +11,8 @@ const MOONDECK_MD = "/api/help";
 let scripts = [];
 let firmwares = [];
 let scenarios = [];   // [{name, module, also}]
+let uiClips = [];     // [{name, description}] from test/uiscenarios/clips/*.json
+let uiProjects = [];  // [{name, description}] from test/uiscenarios/projects/*.json
 let testModules = []; // ["CamelCaseName", ...]
 // Device-model catalog loaded from /api/device-models (served by moondeck.py from
 // mooninstaller/deviceModels.json) — the same file the web installer fetches. Empty until
@@ -81,6 +83,16 @@ async function init() {
     const scenResp = await fetch("/api/scenarios");
     const scenData = await scenResp.json();
     scenarios = scenData.scenarios || [];
+
+    // The UI video runs. Failing soft: a bench without them still gets every other
+    // card, and an empty dropdown says so plainly.
+    try {
+        uiClips = (await (await fetch("/api/uiclips")).json()).uiclips || [];
+        uiProjects = (await (await fetch("/api/uiprojects")).json()).uiprojects || [];
+    } catch {
+        uiClips = [];
+        uiProjects = [];
+    }
 
     const modResp = await fetch("/api/test-modules");
     const modData = await modResp.json();
@@ -393,7 +405,8 @@ function renderScripts() {
             const usesSharedModule = !!sharedModuleGroup(script, target);
             const renderOwnModuleRow = script.needs_module && !usesSharedModule;
             const card = document.createElement("div");
-            const hasExtras = script.needs_scenario || renderOwnModuleRow || (script.flags && script.flags.length > 0);
+            const needsUiRun = script.needs_uiclip || script.needs_uiproject;
+            const hasExtras = script.needs_scenario || needsUiRun || renderOwnModuleRow || (script.flags && script.flags.length > 0);
             card.className = "script-card" + (hasExtras ? " script-card--has-select" : "");
             card.innerHTML = `
                 <div class="card-row">
@@ -407,6 +420,9 @@ function renderScripts() {
                 ${script.needs_scenario ? `<div class="scenario-row">
                     <select class="scenario-select"></select>
                     <button class="steps-btn" title="Show the selected scenario's steps">Steps</button>
+                </div>` : ""}
+                ${needsUiRun ? `<div class="scenario-row">
+                    <select class="uirun-select" aria-label="${script.needs_uiclip ? "Clip to record" : "Project to cut"}" title="${script.needs_uiclip ? "Which UI clip to record" : "Which video project to cut"}"></select>
                 </div>` : ""}
                 ${script.flags && script.flags.length > 0 ? `<div class="flag-row"></div>` : ""}
             `;
@@ -457,6 +473,43 @@ function renderScripts() {
                 }
                 sel.dispatchEvent(new Event("change"));
             };
+
+            if (needsUiRun) {
+                const sel = card.querySelector(".uirun-select");
+                const kind = script.needs_uiclip ? "uiclip" : "uiproject";
+                const list = script.needs_uiclip ? uiClips : uiProjects;
+                const stateKey = kind;              // one choice per kind, shared by cards
+                // DOM, not innerHTML: a run file's description is free text, and
+                // escaping it by hand covered quotes and nothing else.
+                sel.replaceChildren();
+                if (list.length) {
+                    for (const r of list) {
+                        const opt = document.createElement("option");
+                        opt.value = r.name;
+                        opt.textContent = r.name;
+                        if (r.description) opt.title = r.description;
+                        sel.appendChild(opt);
+                    }
+                } else {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "(none found)";
+                    sel.appendChild(opt);
+                }
+                if (state[stateKey] && list.some(r => r.name === state[stateKey])) {
+                    sel.value = state[stateKey];
+                } else if (list.length) {
+                    state[stateKey] = list[0].name;
+                } else {
+                    // CLEAR a stale choice. Keeping it sent a name the server no longer
+                    // offers, which the launcher then rejected as unknown.
+                    state[stateKey] = "";
+                }
+                sel.addEventListener("change", () => {
+                    state[stateKey] = sel.value;
+                    saveState();
+                });
+            }
 
             if (script.needs_scenario) {
                 const sel = card.querySelector(".scenario-select");
@@ -596,6 +649,8 @@ async function runScriptOnce(script, btn, extraParams) {
     if (script.needs_firmware) params.firmware = state.firmware;
     if (script.needs_port) params.port = (getActiveNetwork()?.port) || "";
     if (script.needs_scenario) params.scenario = state.scenario;
+    if (script.needs_uiclip) params.uiclip = state.uiclip || "";
+    if (script.needs_uiproject) params.uiproject = state.uiproject || "";
     if (script.needs_module) params.module = state.module;
     if (script.pass_device_model) params.device_model = state.provisionDeviceModel || "";
     for (const flag of (script.flags || [])) {

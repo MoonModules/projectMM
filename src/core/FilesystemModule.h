@@ -39,12 +39,14 @@ struct ControlDescriptor;
 /// are appended. Phases 3+4 cascade into the reconciled tree, so newly-created children
 /// are fully initialised like any other.
 ///
-/// **Boot flow (Scheduler::setup, four phases):**
+/// **Boot flow (Scheduler::setup, five phases):**
 ///   - phase 1 `defineControls()` — every module binds its full control set (incl. hidden)
 ///   - phase 2 `loadAllHook` — this module reads each file and overlays bound variables
 ///   - phase 2b `rebuildControls()` — re-runs defineControls so conditional hidden flags see the persisted values
 ///   - phase 3 `setup()` — modules' own init runs with persisted values in members
-///   - phase 4 `prepare()` — buffers sized to final values
+///   - phase 4 `applyState()`: buffers sized to final values, via the build/teardown router
+///   - phase 5 `reapplyValuesHook`, values only, once: a control that exists only AFTER prepare
+///     (a MoonLive script's declared controls) had none to land on during phase 2
 ///
 /// The Scheduler exposes `setLoadAllHook()` as a function pointer so it stays
 /// independent of this module's type (no circular include); the hook is wired from

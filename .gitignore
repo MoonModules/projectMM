@@ -145,3 +145,15 @@ __pycache__/
 # Root-anchored + dir-scoped, like /build/ above: a bare `.snapshots` would also swallow any
 # nested path of that name anywhere in the tree.
 /.snapshots/
+
+# Video-production OUTPUT: the music a cut is scored against, the raw takes, the
+# finished videos, and the intermediates between them. Nothing here is redistributable
+# (licensed music, large binaries), and a repository is not a media library: what ships
+# to a viewer lives on the video platform.
+#
+# The whole folder, because /media/ is output ONLY. The sources live elsewhere by
+# design: the run files under test/uiscenarios/, the published doc clips under
+# docs/assets/uiscenarios/, the tooling under moondeck/uiscenario/. An earlier version
+# listed media types one by one, to protect run files that used to live here; they no
+# longer do, so the rule can say what it means.
+/media/

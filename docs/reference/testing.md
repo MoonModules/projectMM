@@ -225,7 +225,7 @@ Picking the right mode:
 
 A `mutate` scenario that needs platform-bound modules (Network mDNS, WiFi, OTA) the in-process runner can't honestly stand up should add `"live_only": true`.
 
-**Bespoke convention.** The `mode` + `fixture` + `reset` trinity is projectMM-specific — no off-the-shelf BDD or scenario framework was borrowed wholesale. It exists because the same JSON has to serve both an in-process runner that owns the scheduler and a live runner that doesn't (main.cpp does). The closest analogs from widely-recognised testing patterns: `fixture` ≈ xUnit fixtures (setup-once, replayed per scenario); `reset` ≈ SQL `BEGIN`/`ROLLBACK` (idempotent state restoration); `mode` ≈ pytest's parametrised execution modes (one test runs in different worlds). If a future contributor finds an off-the-shelf scenario framework that captures this construct/mutate asymmetry, that's worth migrating to.
+**Bespoke convention.** The `mode` + `fixture` + `reset` trinity is projectMM-specific: no off-the-shelf BDD or scenario framework was borrowed wholesale. It exists because the same JSON has to serve both an in-process runner that owns the scheduler and a live runner that does not (main.cpp does). The closest analogs from widely recognized testing patterns: `fixture` ≈ xUnit fixtures (setup-once, replayed per scenario); `reset` ≈ SQL `BEGIN`/`ROLLBACK` (idempotent state restoration); `mode` ≈ pytest's parameterized execution modes (one test runs in different worlds). A future contributor who finds an off-the-shelf framework capturing this construct/mutate asymmetry is worth migrating to.
 
 ### Reset block: idempotent scenarios
 
@@ -477,6 +477,21 @@ Scenarios that add modules (e.g. `scenario_Layer_base_pipeline`, `scenario_Layer
 Memory tracking works on ESP32: `freeHeap` and `freeInternalHeap` report real values. Desktop returns 0 (unlimited). The control-change scenario verifies no memory leaks by checking that heap returns to baseline after a mirror toggle.
 
 One live-tier test lives outside the scenario JSON schema because it spans **multiple devices**: `uv run moondeck/scenario/run_network_live.py` runs a lights-over-UDP matrix (ArtNet, E1.31 and DDP) over every online board in moondeck.json — each board is once the sender, all others listen, and reception is asserted by reading each device's `/ws` preview stream (see [MoonDeck.md § run_network_live](../moondeck/MoonDeck.md#run_network_live)). A device matrix needs loops and per-round state the declarative scenario JSON can't express, so it follows the `improv_smoke_test.py` script shape instead.
+
+## UI scenarios
+
+UI scenarios drive the web interface itself: a run file lists what a person does (open a card, add a module through the picker, drag a slider) and each step checks itself by reading the device back over REST.
+
+```bash
+uv run moondeck/test/test_host.py --ui                     # the whole lane
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+```
+
+The runs live in `test/uiscenarios/clips/`, the engine in `moondeck/uiscenario/`. Data under `test/`, runner under `moondeck/`: the same split the pipeline scenarios use. Tests are parameterized over the directory, so a new run file is a new test with nothing to wire up. Format and actions: [RUNS.md](../../moondeck/uiscenario/RUNS.md).
+
+**REST is read-only here.** Every state change goes through the affordance a person uses, because a step that POSTs its way to the outcome proves nothing about the interface. The reads are what `expect` compares against. That lets one file be both a test and a documentation video: the same run recorded produces the clips under `docs/assets/uiscenarios/`. A failing test means the UI no longer does what a published video shows.
+
+**Opt-in, because it needs something running.** A bare `test_host.py` leaves this lane out, and it is never a gate: it runs on request only. `--ui` skips rather than fails when nothing answers, the same way the JS lane skips without node. A run that drives another surface names its own `host` (the installer's preview server). One that needs particular hardware names a `requires` capability resolved against the bench registry.
 
 ## Hardware Verification
 

@@ -4,6 +4,44 @@ The domain-neutral runtime: the platform abstraction, the services that bridge t
 
 The runtime is described from the outside in: what a service is, how several devices behave as one, how a device is named, and last the platform layer every one of them calls through.
 
+```mermaid
+flowchart TB
+    q{"does the module consume<br/>the light output buffer?"}
+    drv["driver<br/>lives in the light domain"]
+    svc["service<br/>lives here, in core"]
+
+    q -->|"yes"| drv
+    q -->|"no"| svc
+
+    subgraph core["MoonCore · knows nothing about lights"]
+        direction TB
+        services["Services<br/>user-added: gyro, mic, relay"]
+        system["System<br/>wired by code: identity, network"]
+        multi["multi-device<br/>discovery, and a shared clock"]
+    end
+
+    plat["platform abstraction<br/>time · memory · allocExec<br/>sockets · scheduling"]
+    hw["ESP32 · Teensy · desktop"]
+
+    svc --> services
+    services --> plat
+    system --> plat
+    multi --> plat
+    drv -.->|"reaches hardware<br/>the same way"| plat
+    plat --> hw
+
+    classDef ask fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef light fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef neutral fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef seam fill:#3d2d61,stroke:#a07bc9,color:#fff
+    class q ask
+    class drv light
+    class svc,services,system,multi neutral
+    class plat,hw seam
+```
+
+One question sorts every module, and it is about the data relationship rather than the connector: a DMX sender speaks over a UART and is still a driver, because it sends the rendered buffer. Everything below the seam is reached only through the platform layer, which is why the same tree runs on a board and on a laptop.
+
 ## Services
 
 A **service** is a MoonModule (role `ModuleRole::Service`) that bridges to the outside world (hardware or network) *independently of the light pipeline*. Examples: a gyro/IMU over I²C, a microphone over I²S, a relay or GPIO toggled out, a status push to Home Assistant. Services are **domain-neutral and live in core**; the platform transport they use (I²C, UART, GPIO) is itself a domain-neutral platform primitive.

@@ -420,6 +420,14 @@ public:
         if (!platform::networkReady()) return;   // nothing to do yet; try again next second
         // Serving our own AP means no route out, so a send would fail and mark itself reported.
         if (inApMode()) return;
+        // Wait for a measured frame rate. Scheduler::fps() divides by tickTimeUs_, which is computed
+        // only when the first 1-second timing window closes, so a report built inside that window
+        // carries fps 0. This tick runs INSIDE it: the automatic report is the one every
+        // installation sends, so every install and upgrade row read 0 while the pie showed a number
+        // only for the rare user who pressed the button. Same "try again next second" shape as the
+        // network guard above, and it costs the report one second on a path that fires once.
+        auto* sched = Scheduler::instance();
+        if (!sched || sched->fps() == 0) return;
         sendReport(dueEvent());
     }
 

@@ -23,32 +23,6 @@ MoonDeck has three tabs:
 
 Script definitions and configuration live in `moondeck/moondeck_config.json` (committed). Script documentation lives in `moondeck/MoonDeck.md`, one section per script. Runtime state (selected devices, ports) persists in `moondeck/moondeck.json` (gitignored).
 
-## Tooling overview
-
-CMake is the sole build system. The source tree is shared across every platform, but build entry points are separate because ESP-IDF wraps CMake with its own conventions (`idf_component_register()` instead of `add_library()`).
-
-```text
-CMakeLists.txt                          ← standard CMake: desktop / RPi + tests
-src/
-  main.cpp                              ← shared pipeline wiring (mm_main), platform-neutral
-  platform/
-    desktop/
-      main_desktop.cpp                  ← desktop entry point: int main() + SIGINT
-      platform_config.h                 ← desktop platform constants
-    esp32/
-      platform_config.h                 ← ESP32 platform constants (reads sdkconfig)
-esp32/
-  CMakeLists.txt                        ← ESP-IDF project root (thin wrapper)
-  main/
-    CMakeLists.txt                      ← idf_component_register() pointing at src/
-    main.cpp                            ← ESP32 entry point: app_main() + Ethernet init
-  sdkconfig.defaults                    ← board-specific defaults
-```
-
-The shared `src/main.cpp` defines `mm_main(keepRunning, gridW, gridH)` — the full pipeline wiring. Each platform provides a thin entry point that does platform-specific init (SIGINT on desktop, Ethernet on ESP32) then calls `mm_main()`.
-
-The project is structured as a small set of CMake libraries: a core library (platform-independent), a platform library (selected at configure time), an application target (links both, provides the entry point). Further decomposition (effects, networking, drivers as separate libraries) happens when the codebase is large enough to justify it.
-
 ## Desktop / Raspberry Pi
 
 Desktop and RPi both build with the root `CMakeLists.txt`. RPi can cross-compile against the same tree or build natively on the device — same source.
@@ -395,29 +369,6 @@ older layout adopts a new one only through a full serial flash (see the note und
 [Firmware variants](#firmware-variants)). On the 4 MB classic that migration also moves the
 filesystem, so the device comes back unprovisioned.
 
-### Why not Arduino
-
-The ESP32 target uses ESP-IDF directly for three reasons:
-
-- **Direct hardware control.** RMT peripheral for LED protocols, FreeRTOS task pinning with explicit stack sizes, `heap_caps_malloc` with SPIRAM/8BIT caps, `esp_timer` microsecond timing. Arduino wraps these with abstractions that add overhead and hide control.
-- **Native CMake.** ESP-IDF's build system *is* CMake (`idf.py` wraps it). No impedance mismatch. Arduino-on-ESP-IDF adds a compatibility layer that complicates the build.
-- **Version stability.** ESP-IDF APIs are stable. Arduino-esp32 version churn caused recurring breakage in MoonLight.
-
-Arduino can be added as an ESP-IDF component later if a specific Arduino library is needed; this is officially supported by Espressif and doesn't require restructuring.
-
-### Third-party libraries
-
-The platform abstraction layer replaces what libraries typically provide. Today no third-party libraries are pulled in:
-
-| Library | Why not | What replaces it |
-|---|---|---|
-| [FastLED](https://github.com/FastLED/FastLED) | Arduino-dependent. LED protocol drivers (RMT, SPI) are available natively in ESP-IDF; FastLED's color math is small enough to reimplement. | Own color math in core. Own LED drivers per platform in `src/platform/`. |
-| [ESPAsyncWebServer](https://github.com/ESP32Async/ESPAsyncWebServer) | Arduino-dependent. Past memory-leak issues. Ties us to Arduino. | Own HTTP server via ESP-IDF's `esp_http_server` (ESP32) or BSD sockets (desktop). Reconsider if Arduino-as-component is added. |
-| [ArduinoJson](https://github.com/bblanchon/ArduinoJson) | Works on ESP-IDF, but heavy: dynamic allocation, large footprint. | Own fixed-size control storage. JSON only for API serialisation, not internal state. |
-
-When a library is genuinely needed (e.g. FastLED for specific hardware support), it lives inside `src/platform/` and is not referenced from core or light-domain code.
-
-Why the trade is worth making, and what it costs: [Why we write our own code](../explanation/why-we-write-our-own.md).
 
 ## Teensy
 

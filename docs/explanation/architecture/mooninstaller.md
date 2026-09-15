@@ -2,9 +2,40 @@
 
 Three words name three different things, and a device is configured by all of them: the firmware it runs, the deviceModel it is, and the board it sits on. Getting a device onto the network is the installer's job; knowing what it is afterwards is this vocabulary.
 
-![The installer picking a device model by picture](../../assets/ui/installer.png)
-
 The three words come first, then where a default legitimately comes from.
+
+```mermaid
+flowchart TB
+    mcu["MCU<br/>classic · S3 · P4"]
+    fw["firmware<br/>the compiled binary"]
+    model["deviceModel<br/>the assembled product<br/>Olimex ESP32-Gateway Rev G"]
+    board["board<br/>the bare PCB, literally"]
+    name["deviceName<br/>which individual unit this is"]
+
+    mcu --> fw
+    fw -->|"seeds a per-chip default"| model
+    board --> model
+    model --> name
+
+    fixes["fixes: which radios, which<br/>ethernet driver, PSRAM"]
+    owns["fixes: the real pin map,<br/>buttons, mic, TX power"]
+
+    fw -.-> fixes
+    model -.-> owns
+
+    classDef silicon fill:#4d3d1f,stroke:#c9a95f,color:#fff
+    classDef product fill:#1f4d3d,stroke:#5fb89a,color:#fff
+    classDef unit fill:#2d3561,stroke:#7b88c9,color:#fff
+    classDef note fill:#3d2d61,stroke:#a07bc9,color:#fff
+    class mcu,fw silicon
+    class model,board product
+    class name unit
+    class fixes,owns note
+```
+
+A default belongs at the level that fixes it, which is the whole rule. The firmware seeds what the silicon decides; the deviceModel overrides it with what the product wired. So the ethernet pins appear at both levels without contradiction: the firmware offers a fallback, the catalog entry states the truth. A control nobody fixed is omitted, and stays unset for the user to wire.
+
+![The installer picking a device model by picture](../../assets/ui/installer.png)
 
 ## The three words
 

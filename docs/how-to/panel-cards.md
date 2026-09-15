@@ -2,7 +2,7 @@
 
 You bought a panel receiving card, most likely a **ColorLight** one, which is the family projectMM supports today. This page takes you from a box of parts to a lit wall, on an ESP32 or from a desktop.
 
-> New here? Start with **[Install & first light](../gettingstarted.md)**, then **[How projectMM works](how-projectmm-works.md)**. This page assumes you can find a card and change a control.
+> New here? Start with **[Install & first light](../gettingstarted.md)**, then **[How projectMM works](../tutorials/how-projectmm-works.md)**. What follows assumes you can find a card and change a control.
 
 ---
 

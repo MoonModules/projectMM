@@ -934,7 +934,7 @@ body.cards-resizing {
 .knob svg, .knob svg * { pointer-events: none; }
 .knob svg { display: block; width: 100%; height: 100%; }
 /* Both arcs are set from JS (dasharray + a rotate transform attribute), because the geometry
-   depends on the radius and the value. Only the colours live here. */
+   depends on the radius and the value. Only the colors live here. */
 .knob-track { fill: none; stroke: var(--border); stroke-width: 4; }
 .knob-fill  { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
 .knob-pointer { stroke: var(--fg); stroke-width: 2; stroke-linecap: round; }
@@ -1231,6 +1231,37 @@ body.cards-resizing {
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 13px;
+}
+
+/* The OPEN menu, styled. A native <select> draws its popup in the OS compositor, so every
+   rule above stops at the closed control: a dark card opens a light system menu, and the
+   emoji and dimension a row carries cannot appear in it at all (which is why the script
+   field above is a button rather than a select). `appearance: base-select` renders the
+   picker in the page instead, where it inherits the card's own colors.
+   Chrome/Edge 135+; everywhere else this is ignored and the native menu is used, so it
+   costs nothing where it is not supported. */
+@supports (appearance: base-select) {
+    .control-row select {
+        appearance: base-select;
+    }
+    .control-row select::picker(select) {
+        background: var(--bg-0);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px;
+        font-size: 13px;
+        box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+    }
+    .control-row select option {
+        color: var(--fg);
+        padding: 4px 8px;
+        border-radius: 3px;
+    }
+    .control-row select option:hover,
+    .control-row select option:checked {
+        background: var(--accent, #a78bfa);
+        color: #fff;
+    }
 }
 
 /* A read-only url control: rendered as a link rather than a text box, since the reason to show

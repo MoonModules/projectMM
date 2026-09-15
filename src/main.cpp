@@ -144,6 +144,13 @@
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
 #include "light/drivers/PanelCardDriver.h"
 #endif
+// HUB75 is a GPIO panel, not a receiver card: it needs LCD_CAM or Parlio silicon and nothing else,
+// so it gates on the chip the way every other LED driver above does. Tying it to MM_PANEL_CARDS
+// hid it from every S3 that is not a panel-card firmware, which is most of them.
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED) || \
+    MM_LINKS_ALL_LED_DRIVERS
+#include "light/drivers/Hub75Driver.h"
+#endif
 #include "core/HttpServerModule.h"
 #include "core/SystemModule.h"
 #include "core/ControlModule.h"
@@ -197,7 +204,8 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::CarLightsLayout>("CarLightsLayout", "light/layouts.md#carlights");
     mm::ModuleFactory::registerType<mm::CubeLayout>("CubeLayout", "light/layouts.md#cube");
     mm::ModuleFactory::registerType<mm::HumanSizedCubeLayout>("HumanSizedCubeLayout", "light/layouts.md#humansizedcube");
-    mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout", "light/MoonLiveLayout.md");
+    mm::ModuleFactory::registerType<mm::MoonLiveLayout>("MoonLiveLayout",
+                                                        "light/MoonLiveEffect.md#a-layout-written-as-a-script");
     mm::ModuleFactory::registerType<mm::PanelsLayout>("PanelsLayout", "light/layouts.md#panels");
     mm::ModuleFactory::registerType<mm::TorontoBarGourdsLayout>("TorontoBarGourdsLayout", "light/layouts.md#torontobargourds");
     mm::ModuleFactory::registerType<mm::GridLayout>("GridLayout", "light/layouts.md#grid");
@@ -285,7 +293,8 @@ static void registerModuleTypes() {
     // Modifiers — alphabetical by display name.
     mm::ModuleFactory::registerType<mm::BlockModifier>("BlockModifier", "light/modifiers.md#block");
     mm::ModuleFactory::registerType<mm::CheckerboardModifier>("CheckerboardModifier", "light/modifiers.md#checkerboard");
-    mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier", "light/MoonLiveModifier.md");
+    mm::ModuleFactory::registerType<mm::MoonLiveModifier>("MoonLiveModifier",
+                                                          "light/MoonLiveEffect.md#a-modifier-written-as-a-script");
     mm::ModuleFactory::registerType<mm::CircleModifier>("CircleModifier", "light/modifiers.md#circle");
     mm::ModuleFactory::registerType<mm::MirrorModifier>("MirrorModifier", "light/modifiers.md#mirror");
     mm::ModuleFactory::registerType<mm::MultiplyModifier>("MultiplyModifier", "light/modifiers.md#multiply");
@@ -308,6 +317,11 @@ static void registerModuleTypes() {
     // Same firmware gate as the include above.
 #if defined(MM_PANEL_CARDS) || MM_LINKS_ALL_LED_DRIVERS
     mm::ModuleFactory::registerType<mm::PanelCardDriver>("PanelCardDriver", "light/drivers.md#panelcard");
+#endif
+    // Same silicon gate as the include above.
+#if defined(CONFIG_SOC_LCDCAM_I80_LCD_SUPPORTED) || defined(CONFIG_SOC_PARLIO_SUPPORTED) || \
+    MM_LINKS_ALL_LED_DRIVERS
+    mm::ModuleFactory::registerType<mm::Hub75Driver>("Hub75Driver", "light/drivers.md#hub75");
 #endif
     // Register only the LED drivers this chip's silicon can run (see the gated
     // includes above) — keeps the type picker honest (no MultiPinLedDriver offered on a

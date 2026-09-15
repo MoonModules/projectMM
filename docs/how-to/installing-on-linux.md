@@ -244,5 +244,5 @@ The realistic limits are architecture and memory, not the kind of device. It nee
 ## Where to go next
 
 - [Install & first light](../gettingstarted.md): the same program on an ESP32.
-- [How projectMM works](how-projectmm-works.md): layouts, layers, effects and drivers.
+- [How projectMM works](../tutorials/how-projectmm-works.md): layouts, layers, effects and drivers.
 - [building.md](../how-to/building.md): building, testing and packaging in depth.

@@ -205,6 +205,8 @@ flowchart LR
 
 Each name is a script under `moondeck/`, run through `uv run`; the command and what it does are in [MoonDeck.md](moondeck/MoonDeck.md), one section per script. 🐢 marks a check costing tens of seconds or more.
 
+**`test_host --ui` is never a gate.** The UI scenario runs drive a real browser against a running device and are what the documentation clips are recorded from, so they cost minutes and skip wholesale without a desktop and a Playwright browser. They run on request only, never as part of pre-commit, pre-merge or pre-release, and the `src/ui` trigger above means `--js` alone.
+
 
 Three checks earn their place for a reason worth knowing. **Repo health** is the only place the creeping numbers are visible: flash and DRAM per target, binary size, the tick matrix, line counts, complexity warnings. Its diff belongs in the commit and its deltas in the commit message. It runs when the code changes rather than on every commit, because its timings drift with the host: on a docs-only diff it records a regression that nothing in the diff caused. **The no-backend build** catches a helper left unused outside its guard, fatal under GCC while clang stays silent. **ESP32 firmware fresh** compares the binary against every source in a tenth of a second and catches the edit that was never compiled; compile for real after an sdkconfig or toolchain change. The [provisioning path](moondeck/MoonDeck.md#improv_smoke_test) is the five files MoonDeck names.
 

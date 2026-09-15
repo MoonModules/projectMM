@@ -1391,6 +1391,12 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/scenarios":
             self._send_json({"scenarios": self._list_scenarios()})
 
+        elif self.path == "/api/uiclips":
+            self._send_json({"uiclips": self._list_ui_runs("clips")})
+
+        elif self.path == "/api/uiprojects":
+            self._send_json({"uiprojects": self._list_ui_runs("projects")})
+
         elif self.path.startswith("/api/scenarios/"):
             self._serve_scenario_steps()
 
@@ -1764,6 +1770,22 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
                     cmd.extend(["--device-model", model])
         if script_def.get("needs_scenario") and params.get("scenario"):
             cmd.extend(["--name", params["scenario"]])
+        # The UI video tools take a PATH, not a name: the dropdown carries the stem and
+        # the folder is implied by which selector it is, so the card cannot point at the
+        # wrong kind of run file.
+        # Checked against the listing, not trusted: the value arrives from a client and
+        # is spliced into a path, so a name that is not one of the run files this server
+        # just offered has no business reaching the filesystem.
+        for flag, key, kind, arg in (("needs_uiclip", "uiclip", "clips", "--run"),
+                                     ("needs_uiproject", "uiproject", "projects",
+                                      "--project")):
+            if not (script_def.get(flag) and params.get(key)):
+                continue
+            name = params[key]
+            if name not in {r["name"] for r in self._list_ui_runs(kind)}:
+                self._send_json({"error": f"unknown {kind[:-1]}: {name}"}, 400)
+                return
+            cmd.extend([arg, f"test/uiscenarios/{kind}/{name}.json"])
         if script_def.get("needs_module") and params.get("module"):
             cmd.extend(["--module", params["module"]])
         # pass_device_model: forward the deviceModel picked in the UI's provisioning
@@ -1968,6 +1990,27 @@ class MoonDeckHandler(http.server.BaseHTTPRequestHandler):
             {"name": s["path"].stem, "module": s["module"] or "", "also": s["also"]}
             for s in test_meta.collect_scenario_files()
         ]
+
+    def _list_ui_runs(self, kind: str):
+        """Return [{name, description}] for every UI clip or project.
+
+        Both live under test/uiscenarios/, the same split the tooling uses: a CLIP is
+        performed against a device and recorded, a PROJECT cuts clips together. The
+        description rides along so the dropdown can say what each one does rather than
+        only naming a file.
+        """
+        folder = SCRIPTS_DIR.parent / "test" / "uiscenarios" / kind
+        out = []
+        for path in sorted(folder.glob("*.json")):
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue          # a malformed run must not empty the whole dropdown
+            if not isinstance(data, dict):
+                continue          # a JSON list or string has no description to read
+            out.append({"name": path.stem,
+                        "description": data.get("description", "")})
+        return out
 
     def _serve_unit_tests_for_module(self):
         """Render a per-module list of unit-test cases as an HTML view.
