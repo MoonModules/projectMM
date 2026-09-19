@@ -4,39 +4,37 @@
 #include <type_traits>
 #include "platform_config.h"
 
-// The foundational coordinate / count / dimension types of the light domain,
-// shared by ~20 files (every effect, modifier, layout, layer, driver, buffer)
-// with no single owner — so they live in one shared header rather than being
-// scattered into an arbitrary one. Symbols that DO have a single owner live
-// there instead (defaultGridSize in GridLayout.h, CoordCallback in Layouts.h).
-// This header includes only the platform layer, never core — the boundary
-// stays one-directional. Core names none of these types: ModuleFactory captures
-// a module's dimensionality via a return-type-agnostic `dimensions()` probe, so
-// even `Dim` stays here.
+/// @defgroup light_types Light-domain foundational types
+/// @{
+/// The coordinate, count and dimension types every effect, modifier, layout and driver shares.
+///
+/// @moreinfo
+///
+/// ## Why they live together
+///
+/// Roughly twenty files name them and none owns them, so a shared header beats scattering them into an arbitrary one.
+/// A symbol that does have a single owner lives with that owner instead.
+///
+/// ## The boundary stays one-directional
+///
+/// This header includes the platform layer and never core, and core names none of these types: a module's dimensionality is captured through a probe instead.
 
 namespace mm {
 
-// A grid coordinate. int16_t everywhere — int8_t can't hold a 128-edge grid,
-// and a smaller type would only save in MappingLUT, which doesn't yet do that
-// size optimisation (it stores nrOfLightsType indices, not coordinates).
+/// A grid coordinate, sixteen bits everywhere, a byte being too narrow for a 128-edge grid.
 using lengthType = int16_t;
 
-// A 3D grid position / size. Modifiers fold one of these in place when building
-// the Layer's mapping (each modifier is a coordinate transform — Multiply does
-// `pos = pos % size`, a mirror folds an axis), so the per-axis `%` `/` `-` `+`
-// operators below let the fold read like the geometry it expresses rather than
-// three separate index lines. A struct, not a class: it's plain data on the cold
-// build path (the hot render path stays on flat nrOfLightsType indices, never
-// these). Operators are per-component (Hadamard), the convention for a grid/size
-// vector — `a % b` is `{a.x%b.x, a.y%b.y, a.z%b.z}`.
+/// A 3D grid position or size, with per-component operators so a fold reads like the geometry.
+///
+/// @moreinfo Each modifier is a coordinate transform, and the operators let it read as one line rather than three.
+/// Plain data, and the per-pixel inner loop stays on flat indices rather than carrying a struct through it.
 struct Coord3D {
-    lengthType x = 0, y = 0, z = 0;
+    lengthType x = 0, y = 0, z = 0;   ///< the three axes
 
     Coord3D operator+(const Coord3D& o) const { return {static_cast<lengthType>(x + o.x), static_cast<lengthType>(y + o.y), static_cast<lengthType>(z + o.z)}; }
     Coord3D operator-(const Coord3D& o) const { return {static_cast<lengthType>(x - o.x), static_cast<lengthType>(y - o.y), static_cast<lengthType>(z - o.z)}; }
     Coord3D operator*(const Coord3D& o) const { return {static_cast<lengthType>(x * o.x), static_cast<lengthType>(y * o.y), static_cast<lengthType>(z * o.z)}; }
-    // Per-axis %/÷ guard against a zero extent (a degenerate axis stays put / 0)
-    // so a modifier can fold without pre-checking every axis for size 1 or 0.
+    // The per-axis forms guard a zero extent, so a modifier folds without pre-checking each axis.
     Coord3D operator%(const Coord3D& o) const { return {modAxis(x, o.x), modAxis(y, o.y), modAxis(z, o.z)}; }
     Coord3D operator/(const Coord3D& o) const { return {divAxis(x, o.x), divAxis(y, o.y), divAxis(z, o.z)}; }
     bool operator==(const Coord3D& o) const { return x == o.x && y == o.y && z == o.z; }
@@ -47,23 +45,16 @@ private:
     static lengthType divAxis(lengthType a, lengthType d) { return d > 0 ? static_cast<lengthType>(a / d) : a; }
 };
 
-// Count of lights, and the index type MappingLUT stores. uint32_t with PSRAM
-// (10K+ lights, large installations), uint16_t without — the narrower index
-// keeps MappingLUT's CSR arrays half the size on no-PSRAM boards. Selected at
-// compile time from platform_config.h's hasPsram flag.
+/// A count of lights, and the index the mapping stores: wider with PSRAM, half the size without.
 using nrOfLightsType = std::conditional_t<platform::hasPsram, uint32_t, uint16_t>;
 
-// Dimensional support. Effects use this to declare which axes they iterate so the
-// Layer can extrude lower-dimensional output across unused axes (D1 column → fill x/z,
-// D2 slice → fill z, D3 → no extrusion). Modifiers use it to advertise which axes
-// they can transform. The UI derives the 📏/🟦/🧊 chip from it (captured generically
-// by core's ModuleFactory, which detects a `dimensions()` method without naming
-// this type — so the enum stays in the light domain). EffectBase and ModifierBase
-// both refer to it without one including the other.
+/// Which axes a module works in, so the layer can extrude lower-dimensional output across the rest.
 enum class Dim : uint8_t {
     D1 = 1,
     D2 = 2,
     D3 = 3,
 };
+
+/// @}
 
 } // namespace mm

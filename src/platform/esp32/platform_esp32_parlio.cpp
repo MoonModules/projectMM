@@ -1,19 +1,29 @@
-// Parlio (Parallel IO) WS2812 output — the peripheral half of the Parlio LED
-// driver (ESP32-P4). The driver (src/light/drivers/ParlioPeripheral.h) does all
-// the domain work: applies Correction and 3-slot-encodes every light into the
-// DMA frame buffer (ParallelSlots.h, the SAME encoder the LCD_CAM driver uses — one
-// bus byte per slot, bit L = data line L). This file owns only the peripheral:
-// the Parlio TX unit, the DMA frame buffer, transmit + wait. No domain logic.
-//
-// Design mirrors the LCD_CAM driver: the whole frame is pre-encoded into ONE
-// buffer and sent as ONE autonomous DMA transfer (single-shot, NOT Parlio's
-// loop-transmission mode) — once started no CPU work remains until the done
-// callback, so there is no refill deadline for WiFi to miss.
-//
-// Simpler than i80: Parlio takes the data GPIOs directly (no sacrificial WR/DC
-// lines — it generates the pixel clock internally) and the bus is always 8
-// lanes wide to match the encoder's 8-bit bus byte; lanes the driver doesn't
-// use get GPIO -1 so they're simply not driven (no all-pins-required rule).
+/// @defgroup platform_esp32_parlio Parallel IO WS2812 output
+/// The peripheral half of the parallel driver on the P4.
+///
+/// The driver above shares its encoder with the other parallel backend, one bus byte per slot; this file owns the transmit unit, the buffer, transmit and wait.
+///
+/// @moreinfo
+///
+/// ## The same one-transfer design, on a simpler peripheral
+///
+/// The whole frame is pre-encoded into one buffer and sent as one autonomous transfer rather than in the peripheral's looping mode.
+/// Once started no processor work remains until the completion callback, so there is no refill deadline for the radio to make it miss.
+/// This peripheral takes the data pins directly, generating the pixel clock internally, so there are no sacrificial control lines.
+/// The bus is always eight lanes wide to match the encoder's bus byte, and an unused lane is simply not driven rather than requiring a spare pin.
+///
+/// ## One transaction means a hard frame ceiling
+///
+/// This peripheral clocks the whole buffer out in one transaction, unlike the streaming and chained backends, so a frame must fit its single-transfer register.
+/// The vendor rejects an over-limit unit outright, and, the trap this guards, a unit created oversized then fails EVERY transmit.
+/// Since the check is on the configured maximum rather than the payload.
+/// Output goes silently dark, so this rejects up front with a clear status instead.
+///
+/// The limit counts buffer bytes and is the same at either bus width.
+/// A light costs far more than its channel count, the buffer holding the waveform rather than the color bytes: one light is its channels times eight bits times three slots.
+/// On the narrow bus a slot is one byte, so a three-channel light costs seventy-two and the ceiling is a few hundred lights a lane.
+/// On the wide bus a slot is two bytes, so the cost per light doubles and the lights per lane halve.
+/// Reaching the higher totals needs the chunked-transfer work, which is backlogged; this is not an input guard, and the driver surfaces it as a status.
 //
 // Compiles on every ESP32 chip: everything is under SOC_PARLIO_SUPPORTED with
 // inert stubs otherwise; the driver never calls in (platform::parlioLanes == 0).
@@ -53,11 +63,8 @@ constexpr size_t kMaxBusWidth = 16;   // both peripherals' physical ceiling
 // the loopback creates its own private unit and needs the constant directly.
 constexpr uint32_t kPclkHz = 2'666'666;
 
-// Two DMA frame buffers for the async deferred-wait double-buffer (same shape as the i80 driver —
-// see platform_esp32_i80.cpp for the rationale). buf[1] is null when the second allocation didn't
-// fit (single-buffer mode). Parlio completes queued transfers in enqueue order, and its done-event
-// carries no per-transfer token, so the same 2-slot completion FIFO routes each done-signal to the
-// buffer that finished.
+// Two frame buffers for the deferred-wait double buffer, the same shape the sibling backend uses, the second null when its allocation did not fit.
+// Transfers complete in order and the event carries no token, so the same two-slot queue routes each signal to the buffer that finished.
 struct ParlioState {
     parlio_tx_unit_handle_t unit = nullptr;
     SemaphoreHandle_t done[2] = {nullptr, nullptr};
@@ -116,12 +123,9 @@ void destroyState(ParlioState* st) {
 // async double-buffer's second frame buffer (best-effort); false → buffer 0 only.
 ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
                          uint32_t pclkHz, size_t bufferBytes, bool wantSecond) {
-    // INTERNAL RAM, not plain `new`: with CONFIG_SPIRAM_USE_MALLOC the default allocator can hand
-    // back PSRAM, and parlioDoneCb runs as a cache-safe ISR (PARLIO_TX_ISR_CACHE_SAFE) — it fires
-    // with the flash cache disabled, when PSRAM is unreachable. Every field it touches must be
-    // internal. Placement-new because heap_caps gives raw memory.
-    // ALIGNED: the struct holds 64-bit timestamps, so alignof is 8 while heap_caps_malloc only
-    // promises word alignment — the static_assert below pins that, and this allocator honours it.
+    // Internal memory rather than a plain allocation, since the default allocator may hand back external memory while the completion callback runs cache-safe and fires when that is unreachable.
+    // Every field it touches must therefore be internal, and construction is in place because the allocator gives raw memory.
+    // Aligned explicitly: the struct holds wide timestamps while the allocator promises only word alignment, which the assertion below pins.
     void* mem = heap_caps_aligned_alloc(alignof(ParlioState), sizeof(ParlioState),
                                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!mem) return nullptr;
@@ -163,22 +167,15 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
     }
     if (parlio_tx_unit_enable(st->unit) != ESP_OK) { destroyState(st); return nullptr; }
 
-    // DMA-capable draw buffer, PSRAM-first (with an internal fallback). The intent is to keep the
-    // large 16-bit-wide 16-lane frame off scarce internal DRAM. MALLOC_CAP_CACHE_ALIGNED lets the
-    // allocator apply the PSRAM cache-line alignment the ext-mem GDMA needs (wider than the fixed 64
-    // the internal path uses). **Measured reality (performance.md § Multi-pin):** on the P4 this
-    // SPIRAM request evidently doesn't satisfy — the fallback governs, so the frame lands in internal
-    // SRAM and the ~368 KB largest-contiguous-internal-block caps 16-lane at ~4096 lights (unlike the
-    // S3 LCD path, whose esp_lcd_i80 PSRAM buffer is proven to 16384). So this is allocate-and-degrade
-    // that currently degrades on P4; lifting it to a real PSRAM frame is the chunked-transfer backlog
-    // item. Zeroed so the trailing latch pad holds lines LOW.
+    // The draw buffer, external memory first with an internal fallback, to keep a wide frame off scarce internal memory, asking for the cache alignment the external engine needs.
+    // Measured reality: on this chip the external request does not satisfy.
+    // So the fallback governs and the largest internal block caps the wide bus well below what the sibling path reaches.
+    // So this is allocate-and-degrade that currently degrades here, and lifting it to a real external frame is the backlogged chunked-transfer work.
     st->buf[0] = static_cast<uint8_t*>(heap_caps_malloc(
         bufferBytes, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED));
-    // Internal fallback — guarded by the SAME reserve rule buf[1] uses below. Without the guard this
-    // is the hole the init gate can't see: the gate admits the config because PSRAM reports room, the
-    // SPIRAM malloc then fails anyway (the measured P4 reality above), and an unguarded fallback drops
-    // internal RAM below HEAP_RESERVE — starving WiFi/HTTP. Failing here instead degrades honestly:
-    // createState returns null and the driver reports the init failure as a status.
+    // The internal fallback under the same reserve rule the second buffer uses, which is the hole the init gate cannot see.
+    // The gate admits the config because external memory reports room, that allocation then fails anyway.
+    // And an unguarded fallback would drop internal memory below the reserve and starve the network stack.
     if (!st->buf[0]
         && heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                >= bufferBytes + HEAP_RESERVE) {
@@ -219,22 +216,7 @@ ParlioState* createState(const uint16_t* dataPins, uint8_t laneCount,
 
 }  // namespace
 
-// Parlio clocks the WHOLE buffer out in ONE transaction (unlike RMT's streaming ping-pong or i80's
-// chained DMA), so a frame must fit the peripheral's single-transfer register: PARLIO_LL_TX_MAX_BITS_
-// PER_FRAME = 0x7FFFF (524287) bits = 65535 bytes on every current Parlio-capable target (P4/C6/H2/…).
-// The IDF rejects an over-limit unit with ESP_ERR_INVALID_ARG, and — the trap this guards — a unit
-// created oversized then fails EVERY transmit (the check is on the unit's configured max, not the
-// payload), so output goes silently dark. We reject up front with a clear status instead.
-//
-// The limit is a total-BUFFER byte limit (0x7FFFF bits / 8 = 65535 bytes — buffer bits = bytes × 8
-// regardless of data_width, so this ceiling is the same at 8 or 16 lanes). A light costs FAR more
-// than its channel count in the DMA buffer: the buffer holds the WS2812 *waveform*, not the color
-// bytes. One light = channels × 8 bits × 3 slots (the encoder shapes each bit into 3 bus-word slots
-// for the 800 kHz NRZ pulse). On the 8-bit bus a slot is 1 byte → 24 bytes/channel: RGB = 72 B/light,
-// so max ≈ (65535 − 864 pad)/(3×24) = 897 RGB lights/lane. On the 16-BIT bus (>8 lanes) a slot is 2
-// bytes → 48 bytes/channel, so the byte cost per light DOUBLES and the lights/lane HALVES: ~448 RGB,
-// ~336 RGBW. Reaching the higher per-lane totals needs the chunked-transfer enhancement (backlog).
-// Not a UI input guard — the driver surfaces it as a status.
+// The single-transfer ceiling: @xref{one-transaction-means-a-hard-frame-ceiling|the limit, and what a light really costs}.
 inline constexpr size_t kParlioMaxTransferBytes = 0x7FFFF / 8;   // 65535 (buffer bytes, width-invariant)
 
 bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
@@ -245,11 +227,8 @@ bool parlioWs2812Init(ParlioWs2812Handle& h, const uint16_t* dataPins,
     // unit would fail every transmit silently (see kParlioMaxTransferBytes). The driver reports the
     // init failure as a status; the fix for the user is fewer lights/lane or the start/count window.
     if (bufferBytes > kParlioMaxTransferBytes) return false;
-    // Can the frame be placed AT ALL? Mirror what createState actually does: it allocates PSRAM-first
-    // (the P4's GDMA reaches external RAM) and only falls back to internal. Gating on internal alone
-    // rejected frames PSRAM could hold — a real capacity loss, since PSRAM is where the big frames go.
-    // The HEAP_RESERVE condition applies only to the INTERNAL path: an internal frame must not eat the
-    // WiFi/HTTP reserve (degrade with a status instead), while a PSRAM frame never touches it.
+    // Can the frame be placed at all? This mirrors what the allocation actually does, external first and only then internal.
+    // Gating on internal alone rejected frames external memory could hold, a real capacity loss, and the reserve applies only to the internal path.
     const bool fitsPsram = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM) >= bufferBytes;
     const bool fitsInternal = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL)
                               >= bufferBytes + HEAP_RESERVE;
@@ -277,19 +256,14 @@ bool parlioWs2812Transmit(ParlioWs2812Handle& h, uint8_t buffer, size_t bytes) {
     if (!st || buffer >= 2 || !st->buf[buffer] || bytes == 0 || bytes > st->cap) return false;
     parlio_transmit_config_t xcfg = {};
     xcfg.idle_value = 0;   // lines rest LOW between/after the frame (the latch)
-    // Push this buffer onto the completion FIFO BEFORE enqueuing (see the i80 driver for the full
-    // rationale): the ISR only reads slot `fifoTail`, the push writes slot `fifoHead`, and head != tail
-    // while a transfer is in flight, so they touch different slots — safe without a lock. **Do NOT wrap
-    // parlio_tx_unit_transmit in a critical section:** it blocks on an internal FreeRTOS queue, and a
-    // blocking RTOS call inside taskENTER_CRITICAL panics. Push, then enqueue outside any CS.
+    // Push onto the completion queue before enqueuing, the push and the pop touching different slots while a transfer is in flight, so it is safe without a lock.
+    // Do not wrap the transmit in a critical section: it blocks on an internal queue, and a blocking call with interrupts off panics.
     const uint8_t slot = st->fifoHead;
     const bool wireIdle = (st->fifoHead == st->fifoTail);   // nothing in flight → this one starts NOW
     st->fifo[slot] = buffer;
-    // Stamp the wire-time start only when the wire is IDLE — then enqueue == hardware-start. When a
-    // transfer is already clocking out, this one does not start until that one finishes, so stamping
-    // here would fold the predecessor's remaining wire time into this buffer's measured duration
-    // (inflating frameTime for the second buffer of the double-buffer pair). In that case the done-callback
-    // stamps this slot's start as it completes the predecessor — the moment the hardware really starts it.
+    // Stamp the start only when the wire is idle, where enqueuing IS the hardware start.
+    // Otherwise this transfer waits for the one clocking out, so stamping here would fold that one's remaining time into this buffer's measurement.
+    // The callback stamps it instead, as it completes the predecessor.
     if (wireIdle) st->txStartUs[slot] = esp_timer_get_time();
     st->fifoHead = (st->fifoHead + 1u) & 1u;
     // payload length is in BITS; the buffer is bytes × 8 lanes-worth of slots.
@@ -319,18 +293,10 @@ void parlioWs2812Deinit(ParlioWs2812Handle& h) {
     h.impl = nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Loopback self-test: a private Parlio TX unit on the driver's data pins
-// transmits the CALLER'S real frame — full size, real DMA transfer, real latch
-// pad — back to back like the render loop, while an RMT RX channel
-// (rmtWs2812RxCapture with the DMA backend — transmitter-agnostic, reused from
-// the RMT/LCD rigs) captures the WHOLE frame off the jumpered rxGpio and
-// verifies every bit. This is the LCD loopback (platform_esp32_i80.cpp) with
-// the i80 transmit swapped for Parlio's: no WR/DC pins, and the payload goes
-// out via parlio_tx_unit_transmit (length in BITS) instead of
-// esp_lcd_panel_io_tx_color. The RX capture half is byte-for-byte identical —
-// the wire signal is the same WS2812 the encoder produced for either bus.
-// ---------------------------------------------------------------------------
+// The loopback self-test: a private transmit unit on the driver's data pins sends the caller's real frame back to back like the render loop.
+// While a receive channel captures it and verifies every bit.
+// This is the sibling backend's loopback with its transmit swapped for this one's: no control pins, and the length given in bits.
+// The capture half is identical, the wire signal being the same whichever bus produced it.
 
 // loopbackJumperOk + captureAndVerifyFrame live in platform_esp32_rmt.cpp (the
 // shared continuity check and the shared capture+bit-verify all three loopback
@@ -342,11 +308,8 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r, bool rideMode = false,
                            uint32_t* rxSymbols = nullptr);
-// Pre-allocate the capture buffer captureAndVerifyFrame needs (one contiguous DMA-capable internal
-// block, sized from dataBytes) so a caller can grab it BEFORE its own allocations fragment the heap
-// (largest-first allocation order). Pass the result as `rxSymbols`; ownership transfers to
-// captureAndVerifyFrame regardless of outcome. nullptr on alloc failure is fine to pass through —
-// the helper then retries the alloc itself and reports the failure.
+// Pre-allocate the capture buffer, one contiguous internal block, so a caller can take it before its own allocations fragment the heap.
+// Ownership transfers regardless of outcome, and passing nothing on failure is fine: the helper retries and reports it.
 uint32_t* allocLoopbackCapture(size_t dataBytes);
 }
 

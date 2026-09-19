@@ -14,7 +14,9 @@ namespace mm {
 ///
 /// @moreinfo
 ///
-/// Wire layout of one encoded frame, outermost first:
+/// ## The wire layout
+///
+/// One encoded frame, outermost first:
 ///
 ///   for each bit plane p (0 = least significant)
 ///     for each scan row r
@@ -23,12 +25,16 @@ namespace mm {
 ///       one blanking word           -> OE high (dark) while the row address
 ///                                     changes and the shift register latches
 ///
-/// The row address and the control lines ride the SAME bus word as the color bits.
-/// The peripheral clocks one word per slot, and a HUB75 panel wants address and data at once.
+/// ## Address rides with the data
+///
+/// The row address and the control lines share the bus word that carries the color bits.
+/// The peripheral clocks one word per slot, and a panel wants address and data at once.
 /// `Hub75Layout` says which bus bit each line sits on, the one thing a board's wiring changes.
 /// How a panel scans, and why brightness is time, is on the driver's page under "HUB75, details".
 ///
-/// Prior art: mrcodetastic/ESP32-HUB75-MatrixPanel-DMA, hzeller/rpi-rgb-led-matrix and ESPHome's hub75.
+/// ## Prior art
+///
+/// mrcodetastic/ESP32-HUB75-MatrixPanel-DMA, hzeller/rpi-rgb-led-matrix and ESPHome's hub75.
 /// The scan and bit-plane structure is the panel's, and the encoder is written from that behavior.
 
 /// Which bus bit each HUB75 line occupies. The peripheral drives one 16-bit bus word per slot.

@@ -1,15 +1,20 @@
-// IR receive — the platform::irRead seam (declared in platform.h), decoding the NEC remote
-// protocol off the RMT RX peripheral. A persistent RX channel runs on the IR pin; its done ISR
-// only records how many symbols arrived and signals a queue (ISR-minimal: no decode, no driver
-// call in interrupt context — the same discipline as rmtWs2812RxCapture). irRead(), on the render
-// task, drains that signal non-blocking, decodes the captured symbols, and re-arms the channel.
-// InfraredService is the sole caller.
-//
-// NEC protocol: a 9 ms lead mark + 4.5 ms space, then 32 bits LSB-first (address, ~address,
-// command, ~command), each a 560 µs mark followed by a 560 µs space (0) or a 1690 µs space (1),
-// then a final 560 µs stop mark. A repeat frame (9 ms mark + 2.25 ms space) is ignored — we
-// surface distinct presses, not auto-repeat. Prior art: the ESP-IDF ir_nec_transceiver example;
-// the timing is the published NEC standard.
+/// @defgroup platform_esp32_ir IR receive
+/// The read seam, decoding the NEC remote protocol off the RMT receiver.
+///
+/// A persistent channel runs on the pin, and the render task drains it, decodes and re-arms.
+///
+/// @moreinfo
+///
+/// ## The interrupt does almost nothing
+///
+/// Its handler records how many symbols arrived and signals a queue: no decode and no driver call in interrupt context.
+/// The task re-arms only after copying the buffer, so a capture cannot overwrite a decode in progress.
+///
+/// ## The protocol
+///
+/// A lead mark and space, then 32 bits sent least significant first as an address and command with each inverted, then a stop mark.
+/// A bit is a fixed mark followed by a short space for zero or a long one for one.
+/// A repeat frame is ignored, since what this surfaces is distinct presses rather than auto-repeat.
 
 #include "platform/platform.h"
 
@@ -32,15 +37,13 @@ constexpr uint32_t kZeroSpace = 560;
 constexpr uint32_t kOneSpace  = 1690;
 constexpr uint32_t kResolutionHz = 1000000;   // 1 tick = 1 µs
 
-// A symbol duration falls within ±30 % of `target`. Task-context only (called from the decode in
-// irRead, never the ISR), so no IRAM requirement.
+/// Whether a symbol duration is within 30 percent of the target; task context only.
 inline bool nearUs(uint32_t d, uint32_t target) {
     const uint32_t tol = target * 3 / 10;
     return d + tol >= target && d <= target + tol;
 }
 
-// Decode NEC symbols → 32-bit code. True + code on a well-formed data frame; false on a repeat
-// frame or malformed input. Runs on the render task (from irRead), not the ISR.
+/// Decode symbols into a code; false on a repeat frame or malformed input.
 bool decodeNec(const rmt_symbol_word_t* sym, size_t n, uint32_t& out) {
     if (n < 34) return false;                                 // repeat (2 symbols) or truncated
     if (!nearUs(sym[0].duration0, kLeadMark)) return false;
@@ -56,16 +59,14 @@ bool decodeNec(const rmt_symbol_word_t* sym, size_t n, uint32_t& out) {
     return true;
 }
 
-// Persistent channel + state. Opened lazily on the first irRead for a pin; reopened if the pin
-// changes. One IR receiver per device, so a single static channel suffices.
+// Opened lazily and reopened when the pin changes; one receiver per device, so one channel.
 rmt_channel_handle_t rxChan_ = nullptr;
 QueueHandle_t doneQueue_ = nullptr;    // ISR → task: how many symbols the last frame captured
 int currentPin_ = -1;
 rmt_symbol_word_t rxBuf_[68];          // NEC = 34 symbols (lead + 32 bits + stop); slack for noise
 rmt_receive_config_t rxCfg_ = {};
 
-// ISR: record the symbol count and wake the task. No decode, no rmt_* re-arm here — the task
-// re-arms after it has copied the buffer, so the DMA target is never overwritten mid-decode.
+// Record the count and wake the task; the re-arm happens there, after the buffer is copied.
 bool IRAM_ATTR rxDoneCb(rmt_channel_handle_t, const rmt_rx_done_event_data_t* edata, void*) {
     size_t n = edata->num_symbols;
     BaseType_t high = pdFALSE;
@@ -102,12 +103,7 @@ bool ensureChannel(int pin) {
     cbs.on_recv_done = rxDoneCb;
     rmt_rx_register_event_callbacks(rxChan_, &cbs, nullptr);
 
-    // A pulse SHORTER than min_ns is filtered as a glitch; a pulse LONGER than max_ns ends the frame
-    // (the inter-frame idle). The IDF ir_nec_transceiver reference uses 1250 ns / 12 ms; the previous
-    // 200 ns min was too aggressive (sub-µs ringing on the receiver's rising edge registered as a real
-    // pulse, so the RMT split the lead burst and completed the frame after ONE symbol — the debug
-    // capture showed lastSyms=1, which decodeNec rejects). 1250 ns is well under a 560 µs NEC mark yet
-    // above the receiver's edge ringing.
+    // The glitch floor sits above the receiver's edge ringing: a lower one split the lead burst.
     rxCfg_.signal_range_min_ns = 1250;        // glitch filter — below a 560 µs NEC mark, above edge ring
     rxCfg_.signal_range_max_ns = 12000000;    // > the 9 ms lead — the inter-frame idle ends the frame
     if (rmt_enable(rxChan_) != ESP_OK || !arm()) {
@@ -127,8 +123,7 @@ bool irRead(uint16_t pin, uint32_t& codeOut) {
     size_t n = 0;
     if (xQueueReceive(doneQueue_, &n, 0) != pdTRUE) return false;
 
-    // Decode the captured buffer (task context), then re-arm for the next frame. Re-arming here —
-    // not in the ISR — guarantees the decode reads a stable buffer the next capture can't clobber.
+    // Decode, then re-arm: doing it here rather than in the handler keeps the buffer stable.
     const bool ok = decodeNec(rxBuf_, n, codeOut);
     if (!arm()) {
         // Re-arm failed → the channel is enabled but not receiving, and ensureChannel() would

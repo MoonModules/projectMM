@@ -409,20 +409,6 @@ def on_files(files, config):
     _add("reference/tests/unit-tests.md", render_unit_tests(collect_unit_files()))
     _add("reference/tests/scenario-tests.md", render_scenarios(collect_scenario_files()))
 
-    # The MoonLive SCRIPT-LANGUAGE reference. It lives at moonlive/README.md — beside the
-    # scripts it documents, where someone browsing that folder finds it — so it is staged
-    # here rather than duplicated into docs/. Distinct from the MoonLive* module pages: this
-    # is the LANGUAGE (classes, entry points, members, the role extensions), those are the
-    # cards that run it, and they cross-link.
-    #
-    # Its links are authored relative to moonlive/ (`../docs/moonmodules/light/X.md`). Staged
-    # under moonmodules/light/ they become plain siblings, so the prefix is dropped — without
-    # this the three module links 404 and mkdocs warns on every one.
-    _readme = _HERE.parent.parent / "moonlive" / "README.md"
-    if _readme.is_file():
-        _add("moonmodules/light/writing-scripts.md",
-             _readme.read_text(encoding="utf-8").replace("(../docs/moonmodules/light/", "("))
-
     # Source-generated technical pages. gen_api.generate() writes each to disk under
     # docs/moonmodules/<domain>/moxygen/<Module>.md (gitignored, so a human can preview
     # the .md directly) and returns {uri: markdown}. We still inject via _add so THIS

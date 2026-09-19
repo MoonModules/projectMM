@@ -2,8 +2,7 @@
 
 #include "light/effects/EffectBase.h"   // pulls in platform_config.h via light_types.h
 
-// Compiled only where the SoC declares a hardware FPU, for the reason raymarch.h carries.
-#if MM_HEAVY_COMPUTE
+#if MM_HEAVY_COMPUTE   // only where the SoC declares a hardware FPU, for the reason raymarch.h carries
 
 #include "core/util/math16.h"              // BeatPhase
 #include "light/powerfunctions/raymarch.h"

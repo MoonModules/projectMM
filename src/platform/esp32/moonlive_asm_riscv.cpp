@@ -5,9 +5,10 @@
 
 #if defined(__riscv)   // the RISC-V assembler is only built for RISC-V targets (ESP32-P4)
 
-// MoonLive RISC-V assembler — RV32 named instructions, encodings verified against
-// riscv32-esp-elf-as (see the plan / commit). Fixed 4-byte little-endian instructions; the
-// standard call ABI (args a0.., result a0, ra = return). Branch offsets are back-patched.
+/// @defgroup moonlive_asm_riscv_impl MoonLive RISC-V encodings
+/// Named instructions for the 32-bit variant, verified against the assembler.
+///
+/// Fixed-width little-endian instructions on the standard calling convention, with branch offsets back-patched.
 
 namespace mm::moonlive {
 
@@ -16,11 +17,9 @@ namespace mm::moonlive {
 // scratch (store8 address, call address build + result stash), not a vreg.
 static constexpr uint8_t kRvReg[kRegCount] = {10, 11, 12, 13, 14, 5, 6, 7, 28, 29, 30, 15,
                                               16, 17};
-// BOUNDS-CHECKED. The inline ops address their scratch as `vregsUsed + n`, so an index one past the
-// map is reachable whenever the reservation and the map disagree — and an out-of-bounds read returns
-// whatever byte follows the array, making the emitted instruction name a register chosen by
-// accident. Clamping turns that into a wrong-but-safe register instead of undefined behaviour; the
-// static_assert below and the lowerer's reservation are what stop it happening at all.
+// Bounds-checked: the inline operations address their scratch past the map whenever the reservation and the map disagree.
+// An out-of-bounds read returns whatever byte follows, so the emitted instruction names a register by accident; clamping makes that wrong but safe.
+// The assertion below and the lowering's reservation are what stop it happening at all.
 static uint8_t xr(Reg r) { return kRvReg[r < kRegCount ? r : kRegCount - 1]; }
 // t6 is the ONLY caller-saved register outside kRvReg, so it is the only safe scratch: every other
 // free register is callee-saved (s0/s1, s6..s11) and would have to be preserved. Both uses below are
@@ -53,16 +52,10 @@ Label RiscvAssembler::newLabel() {
 }
 void RiscvAssembler::bind(Label l) { if (l < kMaxLabels) labelPos_[l] = static_cast<int32_t>(len_); }
 
-// jal ra, <label>: a call to a function in THIS block: the script-to-script call.
-//
-// `jal` links the return address into ra (x1); the callee's prologue saves ra into its own frame,
-// which is what lets the call nest and therefore recurse.
-//
-// Pass the host arguments on (the contract is with IrOp::CallScript in core). The RISC-V delta:
-// there is no window rotation, so the values go straight into the argument registers the callee's
-// prologue reads.
-// The encoders below are defined with the arithmetic ops further down; declared here so callLabel
-// can sit with its sibling call-related routines rather than after them.
+// A call to a function in this block, the script-to-script call, linking the return address into the standard register.
+// The callee's prologue saves it into its own frame, which is what lets calls nest and therefore recurse.
+// The host arguments pass straight into the argument registers, there being no window rotation here.
+// The encoders are declared here so this can sit with its sibling call routines rather than after them.
 static uint32_t encAddi(uint8_t rd, uint8_t rs1, int32_t imm);
 static uint32_t encSw(uint8_t rs2, uint8_t rs1, int32_t imm);
 static uint32_t encLw(uint8_t rd, uint8_t rs1, int32_t imm);
@@ -144,14 +137,9 @@ static uint32_t encBranch(uint8_t rs1, uint8_t rs2, uint8_t f3, int32_t off) {  
            (f3 << 12) | (((o >> 1) & 0xf) << 8) | (((o >> 11) & 1) << 7) | 0x63;
 }
 
-// --- the call frame: the register allocator's overflow storage ---------------------------------
-//
-// s0/fp (x8) is the standard RISC-V frame pointer: callee-saved, outside kRvReg and outside the t6
-// scratch, so nothing this backend emits disturbs it — and the routine saves and restores it, which
-// is what makes using a callee-saved register legal here (the reason the map itself stops at the
-// caller-saved set, see moonlive_asm_riscv.h).
-//
-// Layout, sp growing down: sp = s0 - frameBytes, saved s0 at [s0-4], slot n at [s0 - frameBytes + n*4].
+// The call frame, the register allocator's overflow storage.
+// The frame pointer is the standard callee-saved one, outside both the register map and the scratch, so nothing emitted here disturbs it.
+// The routine saves and restores it, which is what makes using a callee-saved register legal at all.
 static constexpr uint8_t kFramePtr = 8;   // s0/fp
 
 void RiscvAssembler::prologue(uint8_t slots) {
@@ -270,22 +258,10 @@ void RiscvAssembler::load8Idx(Reg d, Reg base, Reg off) {
     emit32(encAdd(kScratchAddr, xr(base), xr(off)));                              // t6 = base + off
     emit32((uint32_t(kScratchAddr) << 15) | (4 << 12) | (xr(d) << 7) | 0x03);     // lbu d, 0(t6)
 }
-// A conditional branch to `l`, RELAXED: emitted as the inverted condition jumping over an
-// unconditional `jal` that carries the real target.
-//
-//     b<!cond> rs1, rs2, +8      skip the jal when the branch is not taken
-//     jal      x0, l             ... otherwise go, with a +/-1 MB reach
-//
-// Two words instead of one, always, because the alternative is worse. A B-type branch reaches
-// +/-4 KB; metal.mle compiles to 5652 bytes, so its loop branches fell outside and the patcher
-// silently truncated the offset to 13 bits, landing on 0x230c and 0xfffff5e8: an Illegal
-// instruction panic on an S31, and nothing at all on the host, where the same script runs fine.
-// Choosing the short or the long form per branch needs the final layout, which is not known while
-// emitting (patching happens after, when moving code would shift every later address), so this
-// takes the uniform form and pays one extra word per conditional branch.
-//
-// funct3 inversion: the low bit of the field is the sense, so ^1 turns beq<->bne, blt<->bge,
-// bltu<->bgeu. That is an encoding property of the ISA, not an arithmetic trick.
+// A relaxed conditional branch: the inverted condition jumping over an unconditional jump that carries the real target.
+// Two words instead of one, always: the short form reaches a few kilobytes, one shipped script outgrew it, and the patcher then truncated the offset silently and panicked a board.
+// Choosing per branch needs the final layout, unknown while emitting, so this takes the uniform form and pays one extra word.
+// The condition inverts by flipping the field's low bit, an encoding property rather than an arithmetic trick.
 void RiscvAssembler::branchRelaxed(uint8_t rs1, uint8_t rs2, uint8_t f3, Label l) {
     emit32(encBranch(rs1, rs2, f3 ^ 1, 8));            // b<!cond> rs1, rs2, +8  (over the jal)
     addFixup(len_, l, FixKind::Jal);
@@ -305,15 +281,9 @@ void RiscvAssembler::branchNe(Reg a, Reg b, Label l) {
     branchRelaxed(xr(a), xr(b), 1, l);                 // bne
 }
 
-// Standard call to a host built-in: d = fn(a). All vreg temps are caller-saved, so a value
-// live across the call must be preserved — save the whole pool + ra + the host args around the
-// call (mirrors the host backend). The fn address is built with lui+addi (the hi/lo split, +1
-// to the upper when the low 12 bits' sign bit is set). 64-byte frame, 16-byte aligned.
-// movPtr: a 32-bit address into a register, lui + addi.
-//
-// The same pair call() builds for its target, parameterized on the destination. The +0x800 rounds
-// for addi's SIGN EXTENSION: without it an address whose low half has bit 11 set lands one 4 KB
-// page low, which is the classic RISC-V hi/lo bug and is silent until the pointer is dereferenced.
+// A standard call to a host built-in. Every temporary is caller-saved, so the whole pool, the return address and the host arguments are preserved around it.
+// The target address is built as an upper and lower half, and the rounding compensates for the lower half's sign extension.
+// Without it an address whose low half has its top bit set lands one page low, the classic split-immediate bug, silent until the pointer is used.
 void RiscvAssembler::movPtr(Reg d, const void* p) {
     const uint32_t addr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
     const uint32_t hi = (addr + 0x800) >> 12;
@@ -364,11 +334,8 @@ void RiscvAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 void RiscvAssembler::ret() { emit32(0x00008067u); }    // ret = jalr x0, ra, 0
 
 void RiscvAssembler::patchBranches() {
-    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
-    // stated rather than left to the reader to derive from fixupCount_ being 0. And an
-    // OVERFLOWED compile is refused after finalize(), so patching it is pointless — and unsafe:
-    // a fixup recorded just before the emit dropped its instruction points at the buffer's end,
-    // and patching there writes past buf_. Same shape on every backend.
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch, stated rather than left to be derived from a zero count.
+    // An overflowed compile is refused afterwards, so patching it is pointless and unsafe: a fixup recorded just before a dropped instruction points past the buffer's end.
     if (!buf_ || overflow_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];
@@ -376,13 +343,9 @@ void RiscvAssembler::patchBranches() {
         int32_t off = labelPos_[f.label] - static_cast<int32_t>(f.at);
         uint32_t w; std::memcpy(&w, buf_ + f.at, 4);
         if (f.kind == FixKind::Branch) {
-            // A B-type branch reaches +/-4 KB and no further. Past that the mask below silently
-            // truncates the offset and the branch lands on whatever address the low 13 bits
-            // happen to name: metal.mle compiled to 5652 bytes and jumped to 0x230c and
-            // 0xfffff5e8, which is an Illegal instruction panic on the board and nothing at all
-            // on the host. Fail the compile instead, exactly as the J-type path below does: the
-            // module then reports the error and renders dark, which is a message rather than a
-            // reboot.
+            // The short branch reaches a few kilobytes and no further, past which the mask below truncates the offset silently and the branch lands on whatever the low bits name.
+            // That is a panic on a board and nothing at all on the host.
+            // So the compile fails instead and the module reports it and renders dark: a message rather than a reboot.
             if (off < -4096 || off > 4094) { overflow_ = true; return; }
             // re-scatter the offset into the B-type immediate fields, keeping the rest.
             w &= ~((1u<<31) | (0x3fu<<25) | (0xfu<<8) | (1u<<7));

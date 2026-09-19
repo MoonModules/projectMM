@@ -1,14 +1,11 @@
 #pragma once
 
-// One include writes an effect: this file brings EffectBase and every helper an effect may use.
-
 #include "core/module/MoonModule.h"
 #include "light/util/light_types.h" // lengthType, nrOfLightsType, Dim
 
 #include <cstdint>
 
-// draw.h is included at the bottom, so Canvas is forward-declared for the accessor's return type.
-namespace mm::draw { struct Canvas; }
+namespace mm::draw { struct Canvas; }   // draw.h comes in at the bottom, so the accessor's return type is declared here
 
 namespace mm {
 
@@ -36,6 +33,10 @@ class Layer; // forward declaration, defined in light/layers/Layer.h and include
 /// Multiply a time offset by the panel dimension, or a large display looks sluggish.
 /// Drive animation off `elapsed()` rather than a frame count, so speed holds at any frame rate.
 /// The speed control sets the dynamics and never the frame rate, which stays maximal.
+///
+/// ## One include writes an effect
+///
+/// This file brings `EffectBase` and every helper an effect may use, so an effect includes it alone.
 ///
 /// ## Why the helper includes sit at the bottom
 ///

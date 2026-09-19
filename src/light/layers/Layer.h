@@ -7,8 +7,8 @@
 #include "light/layers/MappingLUT.h"
 #include "light/layers/BlendMap.h"   // BlendOp, for blendOp()
 #include "light/modifiers/ModifierBase.h"
-#include "light/powerfunctions/draw.h"              // draw::fade — the once-per-frame collected fade (fadeToBlackBy)
-#include "light/powerfunctions/particles.h"       // particles::FrameTime, the shared elapsed-to-scale conversion
+#include "light/powerfunctions/draw.h"        // draw::fade, the collected once-per-frame fade
+#include "light/powerfunctions/particles.h"   // particles::FrameTime, the elapsed-to-scale conversion
 #include "platform/platform.h"
 
 #include <cstdio>
@@ -16,115 +16,100 @@
 
 namespace mm {
 
-/// A `Layer` MoonModule (role `ModuleRole::Layer`, child of the `Effects` container) owns a buffer, a mapping LUT, an ordered effect list, and an ordered modifier list, and references the shared `Layouts` that describes the physical topology.
+/// One rendering layer: a buffer, a mapping onto physical lights, and the effects that fill it.
 ///
-/// **Ownership:** a `Buffer` (logical light data, sized to the logical box); a `MappingLUT` (logical lights to physical positions); effects (write lights into the buffer, dynamic heap-grown list, no fixed max); modifiers (transform the LUT or light values, same dynamic list).
-///
-/// **Composition:** two controls, `blendMode` and `opacity`, govern how this Layer composites onto the layers below it. They are inert on the Layer — it never reads them; a Layer can't know its position in the stack or what's beneath it. The `Drivers` container reads each enabled Layer's two values plus the container child order and does the compositing (bottom layer overwrites, each layer above blends per its mode and opacity). The value lives here so it travels with the Layer through add / delete / reorder — no separate sync-prone blend list on Drivers. The blend math itself lives in `BlendMap`.
-///
-/// **Buffer persistence:** the buffer persists frame-to-frame — the Layer does NOT clear it. This is the FastLED / WLED / MoonLight convention: the buffer holds the previous frame so an effect can fade it for trails (`fadeToBlackBy`) or read prior pixels (a scroll, Game-of-Life). Each effect owns its background. `rebuildLUT` clears once on the cold path so a freshly added effect starts black.
-///
-/// **rebuildLUT (cold path):** called when a layout or modifier control changes. Reads physical dimensions from `Layouts`, folds the box through each enabled static modifier to compute the logical box, allocates the buffer and LUT, and for the common case (no modifier, dense grid in natural order) skips the table entirely with an identity mapping. The general path folds each physical light through the static chain to its logical cell via a textbook counting-sort CSR build.
-///
-/// **render (hot path):** runs each enabled effect in order (all write the same buffer), calls `extrude` after each effect to duplicate its written slice across the axes it doesn't iterate, then ticks each enabled modifier. A live (animated) modifier triggers the per-frame `applyLivePass` backward gather; a beat-driven one asks for a single coalesced rebuild.
-///
-/// **extrude:** lets a low-dimensional effect work on a higher-dimensional layer without per-effect changes — a D2 effect on a 3D layer has its z=0 slice copied across z, a D1 effect its x=0 column copied across x, then that row across the rest. Cost is zero for D3 effects (the default, an early return) and zero when the layer's unused axes are size 1 (a D2 effect on a 2D layer). Real `memcpy` work only happens when the layer has more dimensions than the effect writes.
-///
-/// **Status:** the status slot shows the LOGICAL box the effects render into (`` `<w>×<h>×<d>` ``), which can differ from the physical box shown on `Layouts` (a Mirror-XY modifier folds a 128×128 physical layout into a 64×64 logical box). The same slot carries memory-degradation warnings when a build can't fit (`modifier mapping skipped`, `buffer reduced`, `buffer allocation failed`, all `— not enough memory`), and a warning wins over the neutral box line.
-///
-/// **Prior art:** MoonLight's `VirtualLayer` — `oneToOneMapping` fast-path flag, `virtualChannels` per-layer buffer, `effectDimension`, a `nodes` vector for effects/modifiers, and `forEachLight` per-logical-light iteration that asks the modifier for physical destinations (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
+/// The unit the render loop iterates, turning coordinates into lights.
+/// Effects write the buffer, modifiers reshape it, and `Drivers` composites the stack.
 /// @card Layer.png
+///
+/// @moreinfo
+///
+/// ## What it owns
+///
+/// A buffer sized to the logical box, a `MappingLUT` onto physical positions, and two child lists.
+///
+/// ## Compositing happens elsewhere
+///
+/// `blendMode` and `opacity` are inert here: a layer cannot know its place in the stack.
+/// `Drivers` reads both, plus the child order, and composites.
+///
+/// ## The buffer persists
+///
+/// Nothing clears it per frame, which is what makes trails possible.
+///
+/// ## Two paths
+///
+/// The cold path folds the box through the static modifiers, then builds the table.
+/// The hot path runs each effect, extrudes, then applies the live modifiers.
+///
+/// Details: [the supporting page](https://moonmodules.org/projectMM/moonmodules/light/supporting.html#layer-details).
 class Layer : public MoonModule {
 public:
     ModuleRole role() const MM_NONBLOCKING override { return ModuleRole::Layer; }
+    /// The child roles a layer accepts: effects that write it, modifiers that reshape it.
     const char* acceptsChildRoles() const override { return "effect,modifier"; }
 
+    /// Release the live-pass scratch this layer allocated.
     ~Layer() override { if (liveScratch_) platform::free(liveScratch_); }
 
 
-    // Composition parameters — INERT on the Layer (it never reads them; a Layer
-    // can't know its position in the stack or what's beneath it). The Drivers
-    // container reads each enabled Layer's blendMode + opacity and composites the
-    // layers in container order into the physical buffer (see Drivers::tick). The
-    // value lives here so it travels with the Layer through add/delete/reorder —
-    // no separate, sync-prone blend list on Drivers. The bottom (first-composited)
-    // layer's blendMode is moot: it fills the cleared buffer regardless.
-    // Default additive (index 1): a newly-added layer ADDS light onto the layers below and never
-    // blacks them out, which matches the common case (a sparse effect — sparks, a comet, text —
-    // stacked over a background). Alpha (over, index 0) is opt-in for full-frame layers that MEAN to
-    // cover what's below, where its black pixels are intended, not a surprise. Index order is fixed by
-    // kBlendModeOptions (alpha=0, additive=1) so a persisted preset's stored index keeps its meaning.
-    uint8_t blendMode = 1;     // index into kBlendModeOptions; 1 = additive
-    uint8_t opacity = 255;     // 0 = invisible, 255 = full
+    // Index order is fixed by kBlendModeOptions, so a persisted preset keeps its meaning.
+    /// How this layer composites onto those below it, as an index into `kBlendModeOptions`.
+    uint8_t blendMode = 1;     // 1 = additive
+    /// How strongly this layer composites, from 0 for invisible to 255 for full.
+    uint8_t opacity = 255;
 
+    /// Publish the two composition controls the `Drivers` container reads.
     void defineControls() override {
         static constexpr const char* kBlendModeOptions[] = {"alpha", "additive"};
         controls_.addSelect("blendMode", blendMode, kBlendModeOptions, 2);
         controls_.addControl("opacity", opacity, 0, 255);
-        // Cascade to children (effects and modifiers) — preserves the default
-        // base behaviour we just overrode.
+        // Cascade to the children, preserving the base behavior this overrode.
         MoonModule::defineControls();
     }
 
-    /// How this Layer composites when stacked above another (read by Drivers).
-    /// Maps the blendMode select index to the BlendMap op. Index order must match
-    /// kBlendModeOptions above.
+    // Index order must match kBlendModeOptions.
+    /// The `BlendMap` op this layer's `blendMode` selects, read by `Drivers`.
     BlendOp blendOp() const {
         return blendMode == 1 ? BlendOp::Additive : BlendOp::Alpha;
     }
 
+    /// Point this layer at the shared `Layouts` describing the physical topology.
     void setLayouts(Layouts* lg) { layouts_ = lg; }
-    // The active Layouts, for consumers that need per-light coordinates (e.g.
-    // PreviewDriver builds its coordinate table from layouts()->placeLights).
+    /// The active `Layouts`, for a consumer that needs per-light coordinates.
     Layouts* layouts() const { return layouts_; }
-    /// Channels per light (3 = RGB, 4 = RGBW, more for fixture profiles). Zero is not a valid
-    /// light: it would allocate a zero-byte buffer and make every effect's per-light stride 0, so
-    /// it is rejected here rather than defended against downstream. Enforcing the invariant at the
-    /// one entry point is what lets effects and draw primitives assume `cpl >= 1`.
+    // Rejecting zero at the one entry point lets every effect and draw primitive assume cpl >= 1.
+    /// Set channels per light: 3 for RGB, 4 for RGBW, more for a fixture profile.
     void setChannelsPerLight(uint8_t cpl) { if (cpl > 0) channelsPerLight_ = cpl; }
 
-    /// Where this layer's fixtures keep their motion channels (pan/tilt/zoom/...). Set by whoever
-    /// knows the fixture profile; every offset is absent by default, so an effect's setPan() is a
-    /// harmless no-op on a plain LED strip.
+    // Every offset is absent by default, so setPan() is a no-op on a plain LED strip.
+    /// Set where this layer's fixtures keep their motion channels.
     void setFixtureChannels(const FixtureChannels& fc) { fixture_ = fc; }
+    /// Where this layer's fixtures keep their motion channels.
     const FixtureChannels& fixtureChannels() const { return fixture_; }
 
+    /// Cold path: size the box from the layouts, build the mapping, and clear the buffer.
     void prepare() override {
-        // Restart discards the elapsed gap. Without this the first tick after a re-prepare sees the
-        // whole idle interval as one step and jumps the trail forward: the guarantee
-        // LissajousEffect::prepare used to give for its own trail, now given once for every effect.
+        // Restart discards the elapsed gap, so the first tick after a re-prepare cannot jump a trail.
         fadeTime_.reset();
         fadeCarry_ = 0;
-        // Treat "no layouts wired" the same as "every layout child disabled" —
-        // either way the Layer should be empty (no LUT, no buffer, zero dims).
-        // Returning early here used to leave stale state from a previous build,
-        // which Drivers then read as a sized LUT pointing at a null buffer.
+        // No layouts wired reads the same as every layout disabled: the layer ends up empty.
         const nrOfLightsType physicalCount = layouts_ ? layouts_->totalLightCount() : 0;
 
-        // Empty layout (every layout child disabled, or no layouts wired): tear
-        // down the LUT and buffer and report zero dims. Bailing out without
-        // dropping the old state left the LUT sized for the previous layout
-        // while Drivers reallocated its output buffer to 0 bytes (a stale LUT
-        // + null output buffer = blendMap dereferences null on the next tick).
-        // After this branch hasLUT() is false and physicalLightCount() is 0,
-        // so Drivers::prepare takes the "no LUT" path and Drivers::tick
-        // skips blendMap entirely.
+        // Tear the old state down: a stale LUT beside a zero-byte buffer makes blendMap fault.
         if (physicalCount == 0) {
             physicalWidth_ = physicalHeight_ = physicalDepth_ = 0;
             width_ = height_ = depth_ = 0;
             lut_.free();
             buffer_.free();
             setDynamicBytes(0);
-            // Clear stale degrade state from a previous build — both the status
-            // string AND lutSkipped_. Without resetting the flag, lutSkipped()
-            // keeps reporting true even though we just freed the LUT.
+            // Clear the status string AND the flag: a stale flag reports a LUT already freed.
             lutSkipped_ = false;
             clearStatus();
             return;   // applyState() recurses to the effects next
         }
 
-        // Compute physical dimensions from layout. Gaps count toward the box (a black pixel occupies a
-        // real position), so one callback handles both kinds — blackCb null → blackPixel falls back.
+        // A gap counts toward the box, occupying a real position, so one callback handles both.
         struct DimCtx { lengthType maxX, maxY, maxZ; };
         DimCtx dctx{0, 0, 0};
         layouts_->placeLights(CoordSink{[](void* ctx, nrOfLightsType, lengthType x, lengthType y, lengthType z) {
@@ -138,19 +123,11 @@ public:
         physicalDepth_ = dctx.maxZ + 1;
 
         rebuildLUT();
-        // Start from a clean frame on every (re)build: adding, replacing, or reconfiguring an effect
-        // rebuilds the Layer, and the buffer no longer clears per frame (it persists for trails/scroll)
-        // — so without this a freshly added effect would inherit the previous effect's last frame. One
-        // clear here (cold path, not per frame) means a new effect starts black; then persistence takes
-        // over frame to frame.
+        // One clear on the cold path, so a freshly added effect starts black rather than inheriting.
         buffer_.clear();
         ensureLiveScratch();   // size the live-pass snapshot here, on the cold path
 
-        // Neutral status: the LOGICAL box the effects render into (width_×height_×
-        // depth_) — this is what start/end region carving and modifiers reshape,
-        // so it can differ from the physical box (shown on Layouts). Only set it
-        // when rebuildLUT left the status clear; a degrade path (LUT skipped /
-        // buffer reduced) sets its own Warning, which must win over this line.
+        // Only when rebuildLUT left the status clear: a degrade path's warning must win over this.
         if (status() == nullptr) {
             std::snprintf(statusBuf_, sizeof(statusBuf_), "%u×%u×%u",
                           static_cast<unsigned>(width_),
@@ -159,42 +136,19 @@ public:
             setStatus(statusBuf_);
         }
 
-        // applyState() recurses to the effects next — they allocate against the LUT/buffer just built.
+        // applyState() recurses to the effects next, which allocate against the LUT built here.
     }
 
     void tick() MM_NONBLOCKING override {
-        // Scheduler already gates the Layer itself by enabled() via respectsEnabled().
-        // We still gate per-effect-child explicitly because Layer iterates its own
-        // children rather than going through the Scheduler.
-        //
+        // Gated per child here because the layer iterates its own children, not through the Scheduler.
         elapsed_ = platform::millis();
-        // The buffer PERSISTS frame-to-frame — the Layer does NOT clear it. This is the FastLED /
-        // WLED / MoonLight convention: the buffer holds the previous frame so an effect can fade it
-        // for trails (fadeToBlackBy, a "tail" control) or read prior pixels (draw::get, Game-of-Life,
-        // a scroll). Each effect owns its background: a full-grid effect overwrites every pixel, a
-        // trail effect fades then paints, a sparse effect that wants a clean frame calls draw::fill
-        // itself. An auto-clear here would make trails and read-prior effects impossible.
-        //
-        // Consume the collected fade ONCE per frame, before the effects run — the MoonLight model
-        // (VirtualLayer): effects call layer()->fadeToBlackBy(amt) which MINs into fadeBy_, so N
-        // fading effects on one layer cost ONE buffer pass (the gentlest amount wins, preserving the
-        // most light / longest trail) instead of each effect fading the whole shared buffer itself.
-        // Scale the requested RATE by the fraction of a reference frame this frame covered, and
-        // CARRY the remainder rather than flooring it to 1: at high frame rates the per-frame
-        // amount is legitimately below one unit, and a floor of 1 would apply many times the decay
-        // the effect asked for, which is the bug that made trails visibly shorter on a fast device.
-        // ALWAYS advance the clock, even on a frame nobody asked to fade. Only a quarter of the
-        // effects fade at all, so leaving it frozen means the next request sees the whole idle gap
-        // as one step: five seconds away and a gentle trail is wiped black in a single frame. That
-        // is reachable by switching to a fading effect, re-enabling one, or resuming StarField,
-        // whose paused path returns before it asks.
+        // Advance on every frame: a frozen clock spends a whole idle gap at once and wipes the trail.
         const uint32_t frameScale = fadeTime_.advance(elapsed_);
         if (fadeBy_ > 0) {
             fadeCarry_ += static_cast<uint32_t>(fadeBy_) * frameScale;
             uint32_t amt = fadeCarry_ / particles::FrameTime::kOne;
             fadeBy_ = 0;
-            // A stall TOPS UP, it never bursts: spending a whole gap at once is the wipe described
-            // above. Dropping the remainder with it keeps the next frame from repeating the burst.
+            // A stall tops up rather than bursting, and drops the remainder so the next frame is clean.
             if (amt > 255) {
                 amt = 255;
                 fadeCarry_ = 0;              // the gap is spent, not banked for the next frame
@@ -206,14 +160,7 @@ public:
                 bufferGen_++;
             }
         }
-        // A degenerate grid has nothing to draw. This is orchestration — the Layer owns the
-        // decision to run the effect pass at all, the same way it owns the enabled/role gates
-        // below — so it is checked ONCE here rather than repeated as a guard clause in every
-        // effect's tick(). Effects may assume width/height/depth are all >= 1.
-        //
-        // It gates only the EFFECT pass, not the whole tick: the modifier pass below advances
-        // per-frame state (a beat-driven RandomMap) that must keep running so the chain is in
-        // the right phase when the grid comes back.
+        // Gated once here, so every effect may assume the box is at least 1 on every axis.
         const bool hasGrid = width_ > 0 && height_ > 0 && depth_ > 0 && buffer_.count() > 0;
         for (uint8_t i = 0; hasGrid && i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Effect) continue;
@@ -221,18 +168,12 @@ public:
             auto* eff = static_cast<EffectBase*>(child(i));
             uint32_t start = platform::micros();
             eff->tick();
-            // Extrude a lower-dimensional effect across the unused axes so a D1
-            // or D2 effect "just works" on a higher-dimensional grid. The effect
-            // only writes its own slice (D1 → column x=0,z=0; D2 → slice z=0); the
-            // framework duplicates that across the rest of the buffer.
+            // The effect writes only its own slice; the framework duplicates it across the rest.
             extrude(eff->dimensions());
             bufferGen_++;   // this effect wrote the shared buffer; see bufferGen()
             eff->addAccumUs(platform::micros() - start);
         }
-        // Tick EVERY enabled modifier AFTER the effect pass (the frame's buffer is
-        // fully written before any modifier acts). A static modifier's tick() is empty;
-        // a beat-driven one (RandomMap) sets a rebuild flag we coalesce below; a live
-        // one (Rotate) advances its angle here and remaps in the live pass that follows.
+        // After the effect pass, so the frame's buffer is fully written before any modifier acts.
         bool rebuild = false;
         for (uint8_t i = 0; i < childCount(); i++) {
             if (child(i)->role() != ModuleRole::Modifier || !child(i)->enabled()) continue;
@@ -240,23 +181,15 @@ public:
             m->tick();
             rebuild |= m->consumeNeedsRebuild();
         }
-        // One rebuild per frame even if several modifiers asked (no re-entrant rebuild
-        // from inside a modifier's tick()). applyState() rebuilds the whole pipeline —
-        // re-runs rebuildLUT() with the modifiers' fresh state, then recurses to the effects.
+        // One rebuild per frame however many modifiers asked, and never from inside a tick.
         if (rebuild) { applyState(); return; }
 
-        // Live pass: remap the logical buffer per frame for dynamic modifiers (Rotate).
-        // Skipped entirely when no modifier is live — a static-only chain pays nothing,
-        // the buffer goes straight to the driver scatter (the pay-for-what-you-use rule).
-        // hasGrid too: applyLivePass walks the mapping into the buffer, and an empty layout has
-        // neither. The effect pass above is already gated the same way.
+        // Skipped when nothing is live, so a static-only chain pays nothing for this.
         if (hasGrid && hasLive_) { applyLivePass(); bufferGen_++; }
     }
 
-    // COLD path (called from prepare after rebuildLUT): (re)size the live-pass
-    // snapshot buffer to the current logical buffer, or free it when no modifier is live.
-    // Keeping the alloc here means applyLivePass() on the render path only memcpys —
-    // never allocates — and the scratch isn't held pinned once live modifiers are removed.
+    // Allocating here is what lets the render path only copy, never allocate.
+    /// Size the live-pass snapshot to the current buffer, or free it when nothing is live.
     void ensureLiveScratch() {
         const size_t bytes = hasLive_ ? buffer_.bytes() : 0;
         if (bytes == liveScratchBytes_ && (bytes != 0) == (liveScratch_ != nullptr)) return;
@@ -267,14 +200,8 @@ public:
         if (liveScratch_) liveScratchBytes_ = bytes;  // alloc-fail → applyLivePass no-ops, static frame shows
     }
 
-    // Per-frame backward gather for live (animated) modifiers. For each DESTINATION
-    // logical cell, fold its coordinate through the enabled live modifiers to the SOURCE
-    // cell it samples, and copy that source pixel in — so no destination is left torn
-    // (backward mapping, the textbook reason image warping samples backward). Reads from
-    // a snapshot (liveScratch_) so a source already overwritten this pass isn't re-read.
-    // Out-of-box sources leave the destination dark (cleared). Cold relative to the build
-    // but on the hot path — runs only because hasLive_ gated it, and only the live
-    // modifiers participate (static ones are already baked into lut_).
+    // A backward gather, the textbook reason image warping samples backward: no destination tears.
+    /// Remap the buffer through the live modifiers, once per frame.
     void applyLivePass() {
         uint8_t* buf = buffer_.data();
         if (!buf || !liveScratch_) return;   // scratch is sized on the cold path (ensureLiveScratch)
@@ -308,15 +235,8 @@ public:
         }
     }
 
-    /// Copy the effect's written slice to fill the unused axes. Called after each
-    /// effect's tick(). Buffer layout is (z * h + y) * w + x channels per light.
-    ///
-    /// Hot-path shape: D3 effects (the default) take the early return and pay
-    /// nothing beyond one comparison and a branch. On a 2D layout (depth=1) the
-    /// z-fill is naturally a no-op regardless of effectDim — the `` `depth_ > 1` ``
-    /// guard short-circuits. Same for D1 on a 1D layout. Real work only happens
-    /// when the effect declared fewer axes than the layout has. See
-    /// EffectBase § Dimensions and auto-extrusion for the effect-side contract.
+    // Real work happens only when the effect declares fewer axes than the layout has.
+    /// Copy the effect's written slice across the axes it does not iterate.
     void extrude(Dim effectDim) {
         if (effectDim == Dim::D3) return;
         uint8_t* buf = buffer_.data();
@@ -325,10 +245,7 @@ public:
         const size_t rowBytes = static_cast<size_t>(width_) * cpl;
         const size_t sliceBytes = rowBytes * height_;
 
-        // 1D runs along Y: a D1 effect wrote the (x=0) column down y in z=0. Duplicate that column
-        // across all x > 0, so a 1D effect expands into 2D by *adding columns to the right* — the
-        // 1D output is literally the first column of its 2D form (see architecture.md §
-        // Dimensionality). cpl bytes per pixel copied from the x=0 pixel of each row.
+        // A 1D effect expands into 2D by adding columns: its output is the first column.
         if (effectDim == Dim::D1 && width_ > 1) {
             for (lengthType y = 0; y < height_; y++) {
                 const uint8_t* src = buf + static_cast<size_t>(y) * rowBytes;   // the x=0 pixel
@@ -338,8 +255,7 @@ public:
                 }
             }
         }
-        // D1 and D2: z=0 now holds a complete (possibly extruded) slice — the (x,y) front face.
-        // Duplicate it across all z > 0, so a 2D effect expands into 3D by adding depth slices.
+        // A 2D effect expands into 3D by adding depth slices behind the front face.
         if (depth_ > 1) {
             for (lengthType z = 1; z < depth_; z++) {
                 std::memcpy(buf + z * sliceBytes, buf, sliceBytes);
@@ -347,78 +263,56 @@ public:
         }
     }
 
+    /// The logical light data every effect writes into.
     Buffer& buffer() { return buffer_; }
+    /// The logical light data, for a reader that does not write it.
     const Buffer& buffer() const { return buffer_; }
+    /// The mapping from logical cells to physical light positions.
     const MappingLUT& lut() const { return lut_; }
 
     // Effects see logical dimensions
+    /// The logical box width, which is what effects iterate.
     lengthType width() const { return width_; }
+    /// The logical box height.
     lengthType height() const { return height_; }
+    /// The logical box depth.
     lengthType depth() const { return depth_; }
+    /// Bytes per light: 3 for RGB, 4 for RGBW, more when fixtures carry motion channels.
     uint8_t channelsPerLight() const { return channelsPerLight_; }
+    /// Milliseconds at the start of this frame, the clock every effect animates against.
     uint32_t elapsed() const { return elapsed_; }
 
-    // Request a fade-to-black of amt/255 PER REFERENCE FRAME (1/60 s): a trail or tail. Effects call
-    // this instead of fading the buffer themselves: the Layer collects the amount (MIN across all
-    // fading effects, the gentlest fade wins so the longest requested trail is honoured) and applies
-    // ONE buffer pass at the start of the next frame, then resets. MoonLight's
-    // VirtualLayer::fadeToBlackBy model: N fading effects on one layer cost one pass, not N, and
-    // never fade each other's fresh pixels.
-    //
-    // The amount is a RATE, not a per-frame constant. The Layer scales it by the time this frame
-    // actually covered, so a trail is the same length on a 470 fps ESP32 and a 140,000 fps desktop.
-    // Three effects used to carry that conversion themselves and had already drifted into two
-    // different versions of it (one carried the fraction, two floored to 1 and so applied many
-    // times the intended decay at high fps). Owning it here is core enforcing the rule on the path
-    // it already owns rather than every effect re-deriving it. See architecture.md, the tick-rate
-    // rule, and particles::FrameTime for the shared conversion.
-    //
-    // Every amount is a rate, with no exception. An effect that wants the buffer blank NOW calls
-    // draw::fill instead: a clear is not a fast fade, and giving 255 a second meaning put a
-    // discontinuity in kind at the top of six user-facing fade sliders.
+    // Every amount is a rate, without exception: an effect wanting the buffer blank calls draw::fill.
+    /// Ask for a fade of `amt`/255 per reference frame, collected as the gentlest across effects.
     void fadeToBlackBy(uint8_t amt) { fadeBy_ = fadeBy_ ? (amt < fadeBy_ ? amt : fadeBy_) : amt; }
 
-    /// How many times anything has written this layer's shared buffer. The buffer PERSISTS between
-    /// frames (see tick), so an effect that holds a previous frame — a network receiver, a still —
-    /// can re-lay it only when something actually disturbed it, instead of re-copying every tick.
-    /// Bumped by the collected fade, by every effect's tick, and by the live-modifier pass, so
-    /// "unchanged" means the bytes are exactly as that effect left them. A new writer of `buffer_`
-    /// must bump it too, the same discipline the fade follows.
+    // Every new writer of buffer_ bumps it too, the discipline the fade already follows.
+    /// How many times anything has written the shared buffer, so a holder knows it is untouched.
     uint32_t bufferGen() const { return bufferGen_; }
 
+    /// How many physical lights the mapping covers.
     nrOfLightsType physicalLightCount() const {
         return layouts_ ? layouts_->totalLightCount() : 0;
     }
 
-    // Physical dimensions match the actual LED arrangement (computed in prepare from
-    // the Layouts). PreviewDriver and any future driver that needs to describe the LED
-    // shape should read these rather than caching values from main.cpp startup.
+    // A driver describing the LED shape reads these rather than caching a startup value.
+    /// The physical box width, before any modifier reshapes it.
     lengthType physicalWidth() const { return physicalWidth_; }
+    /// The physical box height.
     lengthType physicalHeight() const { return physicalHeight_; }
+    /// The physical box depth.
     lengthType physicalDepth() const { return physicalDepth_; }
 
+    /// Whether a mapping was wanted but could not be built, so the layer degraded to identity.
     bool lutSkipped() const { return lutSkipped_; }
 
-    /// Cold path, called from prepare after physical dimensions are known.
-    /// Applies each enabled static modifier to compute the logical box, allocates
-    /// the buffer and LUT, and for each logical light asks the modifier chain for
-    /// physical destinations. Without a modifier AND with a dense grid in natural
-    /// order (no sparse, no serpentine, x-then-y-then-z) it sets an identity mapping
-    /// and skips the table entirely (the FPS floor for the common case).
-    /// Precondition: physicalWidth_/Height_/Depth_ must be set (call from prepare).
+    // Precondition: the physical dimensions are set, so this is called from prepare.
+    /// Fold the box through the static modifiers and build the mapping, on the cold path.
     void rebuildLUT() {
         lutSkipped_ = false;
         clearStatus();  // re-evaluated below if a degrade path is taken
 
-        // Fold the box through each enabled STATIC modifier in child order — no fixed
-        // chain array (Dynamic over fixed-size, architecture.md): the size pass here and
-        // the per-light fold below both iterate the Layer's own (dynamic, heap-grown)
-        // child list, filtering for enabled static modifiers inline, the way MoonLight's
-        // `for node : nodes` does. modifyLogicalSize mutates the running box AND lets the
-        // modifier stash its own output size (MoonLight's modifierSize cache), so in the
-        // per-light fold each modifier reads the box at ITS OWN stage from itself.
-        // A dynamic modifier (Rotate, hasModifyLive) is excluded — it remaps per frame in
-        // Layer::tick's live pass, not baked into the mapping.
+        // Each modifier stashes its output size, so the per-light fold reads the box at its stage.
         uint8_t staticCount = 0;
         hasLive_ = false;
         Coord3D box{physicalWidth_, physicalHeight_, physicalDepth_};
@@ -440,30 +334,19 @@ public:
         const nrOfLightsType logicalCount = cellCount(logical);
         const nrOfLightsType driverCount = physicalLightCount();   // == Layouts::totalLightCount()
         const bool dense = (driverCount == boxCount);
-        // A gap fills a box cell (dense stays true) but must NOT receive that cell's color, so the
-        // identity map — which lights every cell — is wrong when gaps exist. Route to the folded
-        // build, which drops the gap slots from the LUT (they stay black). No gaps → unchanged.
+        // A gap fills a cell but must not receive its color, so the identity map is wrong here.
         const bool anyGap = layouts_ && layouts_->hasBlackPixels();
 
-        // Fast path — no static modifiers, dense grid in natural order, no gaps: box cell i
-        // IS driver light i, so the mapping is the identity memcpy. This is the FPS
-        // floor for the common case; keep it before any allocation.
+        // The frame-rate floor for the common case: box cell i is driver light i. Keep it first.
         if (staticCount == 0 && dense && !anyGap && isNaturalOrder()) {
             lut_.setIdentity(boxCount);
             allocateBuffer(boxCount);
             return;
         }
 
-        // General build — fold each PHYSICAL light through the static chain to its
-        // logical cell, accumulating the physical (driver) index onto that cell.
-        // N physical lights folding onto one logical cell IS the fan-out (Multiply),
-        // so each physical light contributes at most ONE destination — maxDest is
-        // exactly driverCount, no product, no overflow ceiling.
+        // Each physical light contributes at most one destination, so driverCount is the ceiling.
         if (!buildFoldedLUT(logical, logicalCount, driverCount)) {
-            // OOM in the fold build — degrade to identity (safe, not crash). One visual caveat: a
-            // gapped layout's dark columns light up in this degraded state (the identity map has no
-            // way to drop them), but a Warning is surfaced and the device keeps running — the
-            // robustness principle's "degraded, not crashed" applied to an out-of-memory build.
+            // Degrade to identity rather than crashing, at the cost of lighting a gapped layout.
             lutSkipped_ = true;
             setStatus("modifier mapping skipped — not enough memory", Severity::Warning);
             width_ = physicalWidth_; height_ = physicalHeight_; depth_ = physicalDepth_;
@@ -477,17 +360,12 @@ public:
     // Sentinel: a box cell that is not a real light (no driver index).
     static constexpr nrOfLightsType kNoDriver = static_cast<nrOfLightsType>(-1);
 
-    // Does the layout emit lights in natural box order — driver index i == box cell i (x fastest,
-    // then y, then z)? Measured, not declared: one allocation-free placeLights pass over the same
-    // coords the build would walk, so there's a single source of truth (the coords) and no
-    // per-layout hint to keep in sync. True → the dense memcpy fast path is valid; false → a
-    // reordered grid (serpentine) needs the folded LUT. Only meaningful for a dense layout
-    // (boxCount == driverCount); a sparse layout always routes to the folded build.
+    // Measured over the same coords the build walks, so the coords stay the single source.
+    /// Whether the layout emits lights in box order, which is what validates the dense fast path.
     bool isNaturalOrder() const {
         struct Ctx { lengthType w, h; bool ok; };
         Ctx ctx{physicalWidth_, physicalHeight_, true};
-        // Only reached for a gap-free layout (a gap routes to the folded build before this is asked),
-        // so blackCb is null and gaps, were there any, would fall back to the same order check.
+        // Reached only for a gap-free layout, so blackCb is null.
         layouts_->placeLights(CoordSink{[](void* c, nrOfLightsType driverIdx, lengthType x, lengthType y, lengthType z) {
             auto* k = static_cast<Ctx*>(c);
             if (!k->ok) return;   // once a mismatch is found the answer is settled; skip the rest
@@ -498,21 +376,12 @@ public:
         return ctx.ok;
     }
 
-    // Build the mapping by folding PHYSICAL lights to LOGICAL cells (physical→logical).
-    // Our MappingLUT is a CSR keyed by logical index, and setMapping demands sequential
-    // in-order writes — but folding scatters onto arbitrary, repeated logical indices.
-    // So this is the textbook counting-sort CSR build: pass A counts destinations per
-    // logical cell, prefix-sum to offsets, pass B scatters, then replay through
-    // setMapping in logical order. Two placeLights passes + a counts/dests scratch,
-    // all on the cold rebuild path; the hot-path read (forEachDestination) is unchanged.
-    // Returns false on OOM (caller degrades to identity).
+    // A counting-sort CSR build: folding scatters, while setMapping demands sequential writes.
     bool buildFoldedLUT(const Coord3D& logical,
                         nrOfLightsType logicalCount, nrOfLightsType driverCount) {
         if (logicalCount == 0 || driverCount == 0) { lut_.setIdentity(0); return true; }
 
-        // Scratch: per-logical-cell counts (then reused as the write cursor) and the
-        // scattered driver indices. Each physical light yields ≤1 destination, so the
-        // dests array is driverCount-sized — the tight, overflow-free ceiling.
+        // Each physical light yields at most one destination, the tight overflow-free ceiling.
         auto* counts = static_cast<nrOfLightsType*>(
             platform::alloc(static_cast<size_t>(logicalCount + 1) * sizeof(nrOfLightsType)));
         auto* dests = static_cast<nrOfLightsType*>(
@@ -524,18 +393,13 @@ public:
         }
         for (nrOfLightsType i = 0; i <= logicalCount; i++) counts[i] = 0;
 
-        // One callback does both passes. It folds the physical coord through the chain
-        // (the Layer's own children — enabled static modifiers, in order, no array) to a
-        // logical index (or skips it if a modifier rejects it or it lands out of box —
-        // guarded, never trusted), then either counts it (pass A) or writes the driver
-        // index at the cell's cursor (pass B). Everything travels through the placeLights
-        // void* ctx, so the lambda captures nothing (it's a function ptr).
+        // One callback does both passes through the placeLights ctx, so it captures nothing.
         struct FoldCtx {
             Layer* self;   // for the dynamic child list (the modifier chain)
             Coord3D logical; nrOfLightsType logicalCount;  // final box, for the flatten + guard
             nrOfLightsType* counts;   // pass A: per-cell count.  pass B: per-cell write cursor.
             nrOfLightsType* dests;    // pass B only.
-            nrOfLightsType destCap;   // what dests actually holds — pass B must not exceed it.
+            nrOfLightsType destCap;   // what dests holds, which pass B must not exceed
             bool scatter;
         } fctx{this, logical, logicalCount, counts, dests, driverCount, /*scatter=*/false};
 
@@ -547,7 +411,7 @@ public:
                 if (self->child(i)->role() != ModuleRole::Modifier || !self->child(i)->enabled()) continue;
                 auto* m = static_cast<ModifierBase*>(self->child(i));
                 if (m->hasModifyLive()) continue;                 // dynamic: not in the static fold
-                if (!m->modifyLogical(pos)) return;               // rejected — no logical source
+                if (!m->modifyLogical(pos)) return;               // rejected: no logical source
             }
             if (pos.x < 0 || pos.x >= f->logical.x || pos.y < 0 || pos.y >= f->logical.y ||
                 pos.z < 0 || pos.z >= f->logical.z) return;                          // defensive
@@ -556,12 +420,7 @@ public:
                 static_cast<nrOfLightsType>(pos.y) * static_cast<nrOfLightsType>(f->logical.x) +
                 static_cast<nrOfLightsType>(pos.x);
             if (li >= f->logicalCount) return;                                       // defensive
-            // Pass B writes where pass A counted — safe only while both passes see the SAME
-            // coordinates. A scripted layout compiles lazily inside placeLights, so a control
-            // edited between the two passes makes pass B emit more lights than pass A counted and
-            // the scatter runs past dests. That corrupts the heap; the failure then surfaces in an
-            // unrelated allocation, which is what made resizing a scripted layout crash at random.
-            // The bound makes a disagreement cost a dropped destination, never memory.
+            // The bound makes a disagreement between the two passes cost a destination, not memory.
             if (f->scatter) {
                 const nrOfLightsType slot = f->counts[li];
                 if (slot >= f->destCap) return;
@@ -572,15 +431,11 @@ public:
             }
         };
 
-        // A GAP (black pixel) is DROPPED from the LUT: its physical slot is already counted in
-        // driverCount, but no logical cell maps to it, so the scatter never writes it and it stays
-        // black (blendMap clears first). The black handler is therefore a no-op — this is exactly the
-        // "physical pixel that stays black" the feature is: a wire slot present, but no source. So both
-        // passes use one sink whose blackCb does nothing.
+        // A gap is dropped from the LUT and stays black: a wire slot present, with no source.
         static constexpr CoordCallback kDropGap =
             [](void*, nrOfLightsType, lengthType, lengthType, lengthType) {};
 
-        // Pass A — count.
+        // Pass A: count.
         layouts_->placeLights(CoordSink{onCoord, kDropGap, &fctx});
 
         // Prefix-sum counts → offsets (counts[li] becomes the start of cell li's run).
@@ -592,15 +447,11 @@ public:
         }
         counts[logicalCount] = running;   // total destinations
 
-        // Pass B — scatter. counts[] is now the per-cell write cursor (offsets advance).
+        // Pass B: scatter. counts[] is now the per-cell write cursor.
         fctx.scatter = true;
         layouts_->placeLights(CoordSink{onCoord, kDropGap, &fctx});
 
-        // Pass B advanced each cell's cursor to the END of its run, so counts[i] now
-        // holds the end offset of cell i — which equals the START offset of cell i+1.
-        // The run for cell i is therefore [counts[i-1], counts[i]) with counts[-1]=0,
-        // i.e. the `start` cursor below. dests[] is already laid out in this exact CSR
-        // order, so replaying it through setMapping in logical order is a straight copy.
+        // Each cell's cursor now holds its end offset, which is the next cell's start.
         if (!lut_.build(logicalCount, running)) {   // running == total destinations
             platform::free(counts);
             platform::free(dests);
@@ -619,14 +470,14 @@ public:
     }
 
     // Cells in a box (the flat light count). 0 on any 0-extent axis.
+    /// How many cells a box holds.
     static nrOfLightsType cellCount(const Coord3D& box) {
         return static_cast<nrOfLightsType>(box.x) * static_cast<nrOfLightsType>(box.y) *
                static_cast<nrOfLightsType>(box.z);
     }
 
-    // A modifier's modifyLogicalSize must not collapse an axis the physical box has:
-    // a 0-width logical box would blank the layer with no source for any effect. Clamp
-    // each axis to ≥1 where the physical box is non-empty (keep a genuinely 0 axis 0).
+    // A zero-width logical box would blank the layer, leaving no source for any effect.
+    /// Hold a folded box inside its legal bounds, so a modifier cannot size it away.
     void clampLogical(Coord3D& logical) const {
         if (physicalWidth_  > 0 && logical.x < 1) logical.x = 1;
         if (physicalHeight_ > 0 && logical.y < 1) logical.y = 1;
@@ -669,8 +520,7 @@ private:
         return budget >= bytesNeeded && platform::maxAllocBlock() >= bytesNeeded;
     }
 
-    /// The channel count this layer's fixtures need: RGBW plus one byte per motion role, or 0 when
-    /// nothing in the rig moves. Read from the offsets Drivers derived from the light preset.
+    /// The channel count this layer's fixtures need, or 0 when nothing in the rig moves.
     uint8_t requiredChannels() const {
         const FixtureChannels& f = fixture_;
         uint8_t top = 0;
@@ -680,11 +530,7 @@ private:
     }
 
     void allocateBuffer(nrOfLightsType count) {
-        // A light must be wide enough to hold the motion channels the rig's fixtures carry, or an
-        // effect's setPan() writes past the end of the light and is silently dropped. Widening
-        // HERE (cold path, before the allocation) rather than from Drivers is deliberate: changing
-        // the width after the buffer exists resizes it under whoever is holding it, which segfaults.
-        // A rig with no motion is untouched, so a plain LED strip keeps its 3 or 4 bytes per light.
+        // Widened before the allocation: changing the width afterwards resizes it under its holder.
         if (const uint8_t need = requiredChannels(); need > channelsPerLight_) channelsPerLight_ = need;
 
         // Try to allocate buffer, halve dimensions if needed
@@ -697,7 +543,7 @@ private:
                     if (reduced) setStatus("buffer reduced — not enough memory", Severity::Warning);
                     return;
                 }
-                // allocate returned false despite canAllocate check — degrade
+                // allocate refused despite the canAllocate check, so degrade
                 std::printf("  DEGRADE  buffer_.allocate failed for %u lights\n",
                             static_cast<unsigned>(count));
             }
@@ -730,9 +576,8 @@ inline lengthType EffectBase::height() const { return layer()->height(); }
 inline lengthType EffectBase::depth() const { return layer()->depth(); }
 inline uint8_t EffectBase::channelsPerLight() const { return layer()->channelsPerLight(); }
 
-/// Write one non-color channel of light `index`. Silently does nothing when the fixture has no
-/// such channel (offset absent) or the write would fall outside the light, which is what makes a
-/// moving-head effect harmless on an LED strip. Never scaled by brightness: see architecture.md.
+// Never scaled by brightness, and a missing channel makes the write a no-op.
+/// Write one non-color channel of light `index`, such as pan or tilt.
 inline void effectSetChannel(Layer* l, nrOfLightsType index, uint8_t offset, uint8_t value) {
     if (offset == FixtureChannels::kAbsent || !l) return;
     const uint8_t cpl = l->channelsPerLight();
@@ -759,10 +604,7 @@ inline void EffectBase::setGobo(nrOfLightsType index, uint8_t value) {
 }
 inline bool EffectBase::movable() const { return layer()->fixtureChannels().movable(); }
 inline bool EffectBase::hasBeam() const {
-    // Null-checked, unlike the accessors above, because this one is called from defineControls():
-    // /api/types and /api/modules build a PARENTLESS probe instance to read an effect's control set
-    // (ModuleFactory::registerType), and a bare layer() there dereferences null. An unparented
-    // effect has no fixture, so it has no beam.
+    // Null-checked because a probe instance is parentless, and an unparented effect has no beam.
     const Layer* l = layer();
     if (!l) return false;
     const FixtureChannels& fc = l->fixtureChannels();

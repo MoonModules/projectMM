@@ -5,35 +5,32 @@
 
 namespace mm {
 
-// DDP (Distributed Display Protocol, 3waylabs) wire format — the one place the
-// layout lives, shared by NetworkSendDriver (build) and NetworkReceiveEffect
-// (parse); a unit test round-trips build→parse. Same shape as ArtNetPacket.h.
-//
-// DDP is the high-throughput choice: a 10-byte header and 1440-byte payload
-// carry 480 RGB lights per packet vs ArtNet's 170 — and per-packet cost is
-// what dominates the wire time (~280 µs Ethernet / ~1140 µs WiFi per packet).
-//
-// Layout (10-byte header + data; multi-byte fields BIG-endian):
-//   0    flags: VV=01 in the top bits (0x40), 0x01 = push (last packet of frame)
-//   1    sequence (low 4 bits; 0 = unused)
-//   2    data type (0x01 = RGB convention; receivers accept loosely)
-//   3    destination id (1 = default display)
-//   4-7  data offset — BYTE position in the display buffer
-//   8-9  data length
-//   10+  data
-//
-// Validation is deliberately thin: the 2-bit version field is the only magic,
-// so a stray non-DDP datagram with byte0 ≈ 0x4x can parse "successfully" with
-// a garbage offset — the receiver's offset bound check absorbs that, and the
-// real protocol discriminator is the dedicated port (4048), not the header.
+/// @defgroup ddp_packet DDP wire format
+/// @{
+/// The one place the Distributed Display Protocol layout lives, shared by the sender and the receiver.
+///
+/// @moreinfo
+///
+/// ## The high-throughput choice
+///
+/// A short header and a large payload carry 480 lights a packet against ArtNet's 170.
+/// Per-packet cost dominates the wire time, measured around 280 microseconds over Ethernet and 1140 over WiFi.
+///
+/// ## The packet
+///
+/// A ten-byte header precedes the data, and the multi-byte fields are big-endian.
+/// It carries flags with a version and a push bit, a sequence, a data type, a destination, then the offset and length.
+///
+/// ## Validation is deliberately thin
+///
+/// The two-bit version is the only magic, so a stray datagram can parse with a garbage offset.
+/// The receiver's bound check absorbs that, and the real discriminator is the dedicated port rather than the header.
 
 constexpr uint16_t DDP_PORT = 4048;
 constexpr size_t DDP_HEADER_SIZE = 10;
 constexpr size_t DDP_MAX_PAYLOAD = 1440;  // 480 RGB / 360 RGBW lights; divisible by 3 and 4
 
-// Build a DDP data packet. outBuf must be at least DDP_HEADER_SIZE + dataLen.
-// `push` marks the last packet of a frame (receivers that double-buffer show
-// the frame on push; ours streams into staging and doesn't need it).
+/// Build a data packet; `push` marks a frame's last packet, which a double-buffering receiver shows on.
 inline size_t buildDdpPacket(uint8_t* outBuf, uint32_t offset, bool push,
                              const uint8_t* data, uint16_t dataLen) {
     outBuf[0] = static_cast<uint8_t>(0x40 | (push ? 0x01 : 0x00));
@@ -50,11 +47,7 @@ inline size_t buildDdpPacket(uint8_t* outBuf, uint32_t offset, bool push,
     return DDP_HEADER_SIZE + dataLen;
 }
 
-// Parse + validate a DDP data packet: version bits and a declared length that
-// fits the datagram. Sequence, data type, destination and the push flag are
-// deliberately ignored (hold-last-frame staging makes push moot; last write
-// wins — the same stance as ArtNet's ignored sequence). dataOut points into
-// pkt (zero copy).
+/// Parse and validate a data packet, zero-copy; everything but the version and length is ignored.
 inline bool parseDdpPacket(const uint8_t* pkt, size_t len, uint32_t& offsetOut,
                            const uint8_t*& dataOut, uint16_t& dataLenOut) {
     if (!pkt || len < DDP_HEADER_SIZE) return false;
@@ -67,5 +60,7 @@ inline bool parseDdpPacket(const uint8_t* pkt, size_t len, uint32_t& offsetOut,
     dataLenOut = dataLen;
     return true;
 }
+
+/// @}
 
 } // namespace mm

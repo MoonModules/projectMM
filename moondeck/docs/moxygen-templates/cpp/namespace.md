@@ -2,13 +2,9 @@
 
 # {{shortname name}}
 
-{{#if (eq kind "group")}}
-{{summary}}
-{{else}}
 {{briefdescription}}
 
 {{detaileddescription}}
-{{/if}}
 
 {{#with (compoundsOfKind filtered.compounds "namespace") as |namespaces|}}
 {{#if namespaces}}

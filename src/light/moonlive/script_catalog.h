@@ -1,18 +1,23 @@
-// Auto-generated from moonlive/ by catalog_scripts.cmake. Do not edit; rebuild to update.
-//
-// The CATALOG, not the library: names only. A device carries this list and the UI fetches a
-// script's text from GitHub the first time someone picks it, so flash scales with how many
-// scripts exist rather than how large they are, and the filesystem holds only what is used.
-//
-// One array per role: the folder a script lives in is implied by its role and the role by its
-// extension, so neither is stored per entry.
 #pragma once
+
+/// @defgroup script_catalog The factory script catalog
+/// @{
+/// The names of every script a device knows about.
+///
+/// Generated from `moonlive/` by `catalog_scripts.cmake`: do not edit, rebuild to update.
+///
+/// @moreinfo
+///
+/// This is the catalog rather than the library: names only.
+/// A device carries the list, and the UI fetches a script's text from GitHub the first time someone picks it.
+/// Flash therefore scales with how many scripts exist rather than how large they are, and the filesystem holds only what is used.
+///
+/// There is one array per role, because the folder a script lives in is implied by its role and the role by its extension, so neither is stored per entry.
 #include <cstddef>
 
 namespace mm::moonlive {
 
-/// Every factory effect, by file name. They live in `moonlive/effects/`
-/// upstream and in the factory script directory on the device.
+/// Every factory effect by file name, from `moonlive/effects/` upstream.
 constexpr const char* kEffectCatalog[] = {
     "aurora.mle",
     "ballpit.mle",
@@ -49,8 +54,7 @@ constexpr const char* kEffectCatalog[] = {
     "trails.mle",
 };
 constexpr size_t kEffectCatalogCount = 33;
-/// What each effect above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+/// What each effect above declares about itself, in the same order, 0 meaning it says nothing and the device decides.
 constexpr unsigned char kEffectCatalogDim[] = {
     3,
     2,
@@ -124,8 +128,7 @@ constexpr const char* kEffectCatalogTags[] = {
 };
 constexpr const char* kEffectFolder = "effects";   ///< its directory upstream
 
-/// Every factory layout, by file name. They live in `moonlive/layouts/`
-/// upstream and in the factory script directory on the device.
+/// Every factory layout by file name, from `moonlive/layouts/` upstream.
 constexpr const char* kLayoutCatalog[] = {
     "diagonal.mll",
     "grid.mll",
@@ -139,8 +142,7 @@ constexpr const char* kLayoutCatalog[] = {
     "two-rows.mll",
 };
 constexpr size_t kLayoutCatalogCount = 10;
-/// What each layout above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+/// What each layout above declares about itself, in the same order, 0 meaning it says nothing and the device decides.
 constexpr unsigned char kLayoutCatalogDim[] = {
     2,
     2,
@@ -168,16 +170,14 @@ constexpr const char* kLayoutCatalogTags[] = {
 };
 constexpr const char* kLayoutFolder = "layouts";   ///< its directory upstream
 
-/// Every factory modifier, by file name. They live in `moonlive/modifiers/`
-/// upstream and in the factory script directory on the device.
+/// Every factory modifier by file name, from `moonlive/modifiers/` upstream.
 constexpr const char* kModifierCatalog[] = {
     "mirror.mlm",
     "shift.mlm",
     "transpose.mlm",
 };
 constexpr size_t kModifierCatalogCount = 3;
-/// What each modifier above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+/// What each modifier above declares about itself, in the same order, 0 meaning it says nothing and the device decides.
 constexpr unsigned char kModifierCatalogDim[] = {
     2,
     2,
@@ -191,16 +191,14 @@ constexpr const char* kModifierCatalogTags[] = {
 };
 constexpr const char* kModifierFolder = "modifiers";   ///< its directory upstream
 
-/// Every factory service, by file name. They live in `moonlive/services/`
-/// upstream and in the factory script directory on the device.
+/// Every factory service by file name, from `moonlive/services/` upstream.
 constexpr const char* kServiceCatalog[] = {
     "button.mls",
     "power.mls",
     "sweep.mls",
 };
 constexpr size_t kServiceCatalogCount = 3;
-/// What each service above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+/// What each service above declares about itself, in the same order, 0 meaning it says nothing and the device decides.
 constexpr unsigned char kServiceCatalogDim[] = {
     0,
     0,
@@ -214,8 +212,7 @@ constexpr const char* kServiceCatalogTags[] = {
 };
 constexpr const char* kServiceFolder = "services";   ///< its directory upstream
 
-/// Every factory palette, by file name. They live in `moonlive/palettes/`
-/// upstream and in the factory script directory on the device.
+/// Every factory palette by file name, from `moonlive/palettes/` upstream.
 constexpr const char* kPaletteCatalog[] = {
     "beat-flash.mlp",
     "drift.mlp",
@@ -224,8 +221,7 @@ constexpr const char* kPaletteCatalog[] = {
     "temperature.mlp",
 };
 constexpr size_t kPaletteCatalogCount = 5;
-/// What each palette above declares about itself, in the same order.
-/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.
+/// What each palette above declares about itself, in the same order, 0 meaning it says nothing and the device decides.
 constexpr unsigned char kPaletteCatalogDim[] = {
     0,
     0,
@@ -245,4 +241,5 @@ constexpr const char* kPaletteFolder = "palettes";   ///< its directory upstream
 
 constexpr size_t kCatalogCount = 54;   ///< every factory script, all roles
 
+/// @}
 } // namespace mm::moonlive

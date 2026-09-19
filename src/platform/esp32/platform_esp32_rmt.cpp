@@ -1,15 +1,70 @@
-// RMT WS2812 LED output: the peripheral half of the LED driver.
-//
-// The driver (src/light/drivers/RmtLedDriver.h) does all the domain work: it applies Correction and
-// hands us the WIRE BYTES, the finished per-channel values the strip expects. This file owns only
-// the peripheral: channel setup, the bit expansion, transmit + wait, and the RX side the on-device
-// loopback test uses. No domain logic here.
-//
-// Wire-byte path: each byte becomes eight symbols on the way to the peripheral, MSB-first, using
-// the two bit shapes rmtWs2812SetBitTiming programs (makeRmtSymbol in RmtSymbol.h packs that 32-bit
-// format). The IDF bytes encoder does it where RMT has DMA; the classic ESP32's level-5 refill does
-// it inline in rmtHiFill. So the caller keeps 3-4 bytes per light rather than 32 bytes per byte of
-// it: a long strand no longer outgrows the internal RAM the refill is restricted to.
+/// @defgroup platform_esp32_rmt RMT WS2812 output
+/// The peripheral half of the symbol-based LED driver.
+///
+/// The driver above applies correction and hands down the wire bytes; this file owns the channel, the bit expansion, transmit and wait, and the receive side the loopback test uses.
+///
+/// @moreinfo
+///
+/// ## The wire-byte path
+///
+/// Each byte becomes eight symbols on the way to the peripheral, most significant first, using the two bit shapes the timing call programs.
+/// Where the peripheral has its own memory access the SDK's encoder does it; on the classic chip the high-priority refill does it inline.
+/// So the caller keeps three or four bytes per light rather than thirty-two bytes for each byte of it.
+/// And a long strand no longer outgrows the internal memory the refill is restricted to.
+///
+/// ## The high-priority refill
+///
+/// The SDK driver keeps everything about the channel and is bypassed for the transmit itself.
+/// Its interrupt runs at a level every critical section masks, and that is what let a refill arrive late.
+/// The interrupt source on the second core is rerouted by hand to a high-priority vector, which the allocator refuses as special.
+/// And this code plays each frame out of the channel's memory one half-block at a time, straight from the driver's frame buffer.
+///
+/// It lives at file scope outside every namespace, since the assembly bridge calls the handler by its plain name and the peripheral memory is a linker symbol.
+/// Both need external linkage an anonymous namespace would silently remove.
+/// Everything the handler touches is in internal memory, so it also runs through a cache-off window, which a flash write opens on both cores.
+///
+/// ## The channel is created on the second core
+///
+/// A channel's refill interrupt binds to whichever core creates it, and initialization is reached from the main task, which is pinned to the first core alongside the radio.
+/// So the driver ticked on one core while its interrupt lived with the radio on the other.
+/// And every radio burst above the interrupt's ceiling delayed a refill past its deadline.
+/// A chip without transfer hardware keeps clocking the stale block, so the strand shows a few wrong lights at any light count and any transmit power.
+///
+/// On the bench, more memory blocks softened it, raising the priority did nothing, and halving the lights changed nothing.
+/// The vendor's own maintainer names this exact fix: create the channel on the core the radio is not on.
+/// A pinned one-shot task rather than the inter-processor call, whose task has a small stack while channel creation allocates and installs an interrupt.
+/// Teardown needs no counterpart, the free hopping to the allocating core itself, and a chip with transfer hardware gains nothing but loses nothing either, so the hop is unconditional.
+///
+/// ## Re-routing after every channel creation
+///
+/// Creating a channel routes the source back to the driver's own vector each time, and a config change re-creates the channel.
+/// A once-only guard let the second initialization hand the threshold events to the driver's handler, which has no transaction and dereferences nothing.
+/// A boot loop some ten seconds in, when the network coming up triggered the second sweep.
+///
+/// ## A timed-out transfer is left alone
+///
+/// Cancelling one on the classic chip while it is still active triggers a watchdog panic, which is a worse failure than a dropped frame.
+/// It self-heals: the next tick re-encodes and transmits again, and if the channel is still busy the call fails and the driver skips waiting on it.
+/// The result still matters, though, because a timeout leaves the frame in flight and re-encoding would rewrite bytes the peripheral is still clocking out.
+/// Which shows as a few lights in the wrong color rather than a dropped frame.
+///
+/// ## Riding a live pipeline means re-arming until a whole frame lands
+///
+/// Each capture takes ONE run of pulses ending at the next long gap, which is the strand's reset.
+/// With a controlled transmit the run starts at the frame start, so one arm yields the whole frame.
+/// Riding a free-running pipeline, an arm lands mid-frame and captures only the tail.
+/// So it re-arms until a run long enough arrives, meaning one that happened to land at or before a frame start.
+/// The pipeline transmits continuously, so a full frame is caught within a few arms, and the budget is bounded so a dead wire still times out rather than looping forever.
+/// That budget must fit INSIDE the outer ceiling, or the caller frees the capture buffer while this task is still writing into it.
+///
+/// ## The first pulse of a frame is short behind an expander
+///
+/// The register's outputs are still settling as the first latch fires, so the very first bit comes back as a zero when the strand sent a one.
+/// Measured on one strand: exactly one mismatch in over two thousand bits, always that bit, always short-clipped, while every other bit and both pulse-width classes are textbook.
+/// It costs the first light's most significant color bit and nothing else, which is invisible, so a lone short-clipped first bit is the expander's frame-start settling rather than bad output.
+/// Any second mismatch, or a first-bit miss that is not short-clipped, still fails.
+/// Direct mode drives the pin straight with no latch, so its first bit is clean.
+/// And the exception is gated on the expander mode so a real fault on a direct path can never be excused through it.
 
 #include "platform/platform.h"
 
@@ -48,23 +103,7 @@
 #include <new>      // std::nothrow
 
 #if CONFIG_IDF_TARGET_ESP32
-// ---------------------------------------------------------------------------------------------
-// Level-5 refill. The IDF driver keeps everything about the channel (GPIO, clock, memory blocks,
-// power) and is bypassed for the transmit itself: its interrupt runs at level 1-3, which every
-// critical section masks, and that is what let a refill arrive late (see rmt_hi_vector.S). The
-// RMT interrupt source on core 1 is rerouted to vector 26 (level 5, refused by esp_intr_alloc as
-// "special", so routed by hand), and this code plays each frame ping-pong out of the channel's
-// memory, one half-block per threshold interrupt, straight from the driver's frame buffer.
-//
-// At file scope, outside every namespace: the assembly bridge calls rmtHiIsr by its C name, and
-// RMTMEM is the linker's symbol, so both need external C linkage, which an anonymous namespace
-// would silently take away.
-//
-// Everything the ISR touches lives in internal RAM: the channel state (DRAM), the symbol buffer
-// (the driver allocates it internal-first and the transmit refuses anything else), RMT registers
-// and RMTMEM (peripheral). So it also runs through a flash-cache-off window, which a flash write
-// opens on both cores.
-// ---------------------------------------------------------------------------------------------
+// The high-priority refill: @xref{the-high-priority-refill|why it bypasses the driver's own interrupt}.
 struct RmtHiChannel {
     const uint8_t* cur = nullptr;    // next WIRE BYTE to expand
     const uint8_t* end = nullptr;    // one past the last
@@ -90,14 +129,10 @@ static void IRAM_ATTR rmtHiFill(uint8_t ch) {
     RmtHiChannel& c = s_hi[ch];
     volatile uint32_t* dst = &RMTMEM.chan[ch].data32[c.offset];
     uint32_t n = c.half;
-    // Expand WIRE BYTES to symbols here, MSB-first, rather than copying symbols a caller
-    // pre-expanded. Eight symbols per byte, so the resident buffer is the 3-4 bytes per light the
-    // correction already produces instead of 8 words (32 bytes) per byte of it: 3 KB for 1024
-    // lights where the pre-expanded form wanted 96 KB. That buffer has to be internal RAM (this
-    // runs with the flash cache possibly off), and 96 KB of internal RAM is what a classic ESP32
-    // does not have, so above ~800 lights the pre-expanded form fell back to PSRAM and the
-    // transmit refused every frame: issue #94's frozen strip. The work per half-block is a shift
-    // and a select per bit, well inside the ~40 us deadline.
+    // Expand the wire bytes here rather than copying symbols a caller pre-expanded, which keeps the resident buffer at a few bytes per light instead of thirty-two per byte.
+    // That buffer must be internal memory, which a classic chip has too little of for the expanded form.
+    // So a long strand fell back to external memory and the transmit refused every frame.
+    // The work per half-block is a shift and a select per bit, well inside the deadline.
     const uint32_t s0 = c.sym0, s1 = c.sym1;
     while (n >= 8 && c.cur != c.end) {
         uint8_t data = *c.cur++;
@@ -135,16 +170,9 @@ static uint8_t rmtHiChannelOf(uint8_t gpio) {
            ? static_cast<uint8_t>(sig - RMT_SIG_OUT0_IDX) : 0xFF;
 }
 
-// Route the RMT interrupt source on THIS core to vector 26 and enable it. Runs on core 1 (inside
-// the init hop) because INTENABLE is per core. After this the IDF driver's own level-1 handler
-// on this core never fires again, which is intended: nothing here calls rmt_transmit any more,
-// so nothing waits on it.
-//
-// Called after EVERY channel creation, not once: rmt_new_tx_channel routes the source back to the
-// driver's own vector each time (intr_alloc.c), and a config change re-creates the channel. A
-// once-only guard here let the second init hand the threshold events to the driver's handler,
-// which has no transaction and dereferences null: a boot loop ~10 s in, when the network coming
-// up triggered the second prepare sweep. Bench-found on the second Dig-Next-2.
+// Route this core's interrupt source to the high-priority vector and enable it, on the second core because the enable register is per core.
+// The driver's own handler never fires here again, which is intended, nothing calling its transmit any more.
+// Called after EVERY channel creation: @xref{re-routing-after-every-channel-creation|what a once-only guard cost}.
 static void rmtHiRouteOnThisCore() {
 #if defined(CONFIG_ESP_SYSTEM_CHECK_INT_LEVEL_5) || defined(CONFIG_BTDM_CTRL_HLI)
 #error "level 5 is taken on this config (system check or Bluetooth HLI); the RMT refill needs it free"
@@ -188,24 +216,7 @@ struct RmtTxState {
 
 } // namespace
 
-// The channel is created on CORE 1, and that is the whole point of the detour below.
-//
-// An RMT TX channel's refill interrupt is bound to whichever core calls rmt_new_tx_channel
-// (esp_intr_alloc pins to the calling core; esp_intr_alloc_info_t has no core field). Init is
-// reached from the prepare sweep on the main task, and CONFIG_ESP_MAIN_TASK_AFFINITY_CPU0 puts
-// that on core 0, where the WiFi task is also pinned. So the driver TICKED on core 1 while its
-// interrupt lived with WiFi on core 0, and every WiFi burst that ran above the RMT's level-3
-// ceiling delayed a refill past the 64-symbol deadline: a DMA-less chip keeps clocking the
-// stale block and the strip shows a few wrong lights, at any light count, at any TX power.
-// Bench (QuinLED Dig-Next-2, 256 WS2812): more memory blocks softened it, priority 3 did
-// nothing (WiFi's ISR is above 3 on the same core), halving the lights changed nothing.
-// Espressif's RMT maintainer names this exact fix on esp-idf#5173: create the channel on the
-// core WiFi is not on. Core 1 here carries only the encode task, so the refill runs undisturbed.
-//
-// A pinned one-shot task, not esp_ipc_call_blocking: the IPC task has a 1 KB stack and channel
-// creation allocates and installs an interrupt. Deinit needs no counterpart: esp_intr_free hops
-// to the allocating core itself (intr_alloc.c, via IPC). Chips with RMT DMA gain nothing from
-// the hop but lose nothing either, so it is unconditional.
+// The channel is created on the second core, which is the whole point of the detour below: @xref{the-channel-is-created-on-the-second-core|the measurement behind it}.
 namespace {
 struct RmtInitJob {
     RmtTxState* st;
@@ -224,22 +235,14 @@ void rmtInitOnThisCore(void* arg) {
     txCfg.resolution_hz = job->resolutionHz;
     txCfg.trans_queue_depth = 4;
     txCfg.flags.invert_out = job->invert ? 1 : 0;
-    // One memory block per channel, the chip's own size (64 words classic, 48 on the S3: a
-    // hardcoded 64 makes rmt_new_tx_channel reject the S3), so all eight RMT channels stay
-    // available to an eight-pin board. On the classic ESP32 the block is the refill deadline
-    // (~40 us per half-block), and with the refill at interrupt level 1 that deadline was missed
-    // under WiFi: four blocks softened it, eight made it worse. With the refill at level 5
-    // (below) one block is flicker-free, bench-verified on two Dig-Next-2 boards, so the extra
-    // blocks bought nothing but lost pins.
+    // One memory block per channel at the chip's own size, since a hardcoded one is rejected elsewhere, so every channel stays available to a fully populated board.
+    // The block is the refill deadline, and extra blocks only softened a deadline the high-priority refill removes entirely, so they bought nothing and lost pins.
     txCfg.mem_block_symbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (rmt_new_tx_channel(&txCfg, &st->channel) != ESP_OK) { job->ok = false; return; }
 
-    // A BYTES encoder, the IDF's own WS2812-shaped one: it expands each wire byte to eight symbols
-    // as it feeds the peripheral, so the caller keeps only the 3-4 bytes per light the correction
-    // produces. The copy encoder this replaces required the caller to pre-expand every bit into a
-    // 32-bit symbol first, 96 bytes per RGB light, which is the buffer that outgrew internal RAM.
-    // The bit timings are placeholders: the driver's `timing` control is live, so
-    // rmtWs2812SetBitTiming rewrites them (rmt_bytes_encoder_update_config) before each frame.
+    // The SDK's own byte encoder, which expands each wire byte as it feeds the peripheral, so the caller keeps only the few bytes per light the correction produces.
+    // The copy encoder it replaces made the caller pre-expand every bit first, which is the buffer that outgrew internal memory.
+    // The timings here are placeholders, the driver's control being live and rewriting them before each frame.
     rmt_bytes_encoder_config_t bytesCfg = {};
     bytesCfg.flags.msb_first = 1;          // WS2812 clocks the most significant bit first
     if (rmt_new_bytes_encoder(&bytesCfg, &st->encoder) != ESP_OK) {
@@ -359,36 +362,17 @@ bool rmtWs2812Transmit(RmtWs2812Handle& h, const uint8_t* wire, size_t byteCount
 bool rmtWs2812Wait(RmtWs2812Handle& h, uint32_t timeoutMs) {
     auto* st = static_cast<RmtTxState*>(h.impl);
     if (!st) return true;
-    // Finite timeout so a wedged DMA can't hang the render tick forever. Even the
-    // longest realistic frame (thousands of pixels) clocks out well under 1 s; a
-    // timeout here means the peripheral is stuck, and the driver re-encodes the
-    // whole frame next tick anyway, so a dropped frame self-heals.
-    //
-    // We deliberately do NOT cancel a timed-out transfer with rmt_disable(): on
-    // classic ESP32, rmt_disable() while a transmission is still active triggers an
-    // interrupt-WDT panic (espressif/esp-idf#17692, classic-only — S3/C6/P4 are
-    // unaffected). A panic is a worse failure than a dropped frame, so we leave the
-    // stuck transfer alone. It self-heals safely: the next tick re-encodes the frame buffer
-    // and calls rmt_transmit again; if the channel is still busy, rmt_transmit
-    // returns an error, rmtWs2812Transmit returns false, and RmtLedDriver::tick()
-    // skips waiting on that channel (its started[] guard) — no crash, no corruption.
-    // The RESULT is what the caller needs: a timeout leaves the frame in flight, and re-encoding
-    // into the frame buffer next tick would rewrite bytes the peripheral is still clocking out. That is a
-    // silent corruption rather than a dropped frame, and it shows on the strip as a few lights in
-    // the wrong color, independent of light count.
+    // A finite timeout, so a wedged transfer cannot hang the render tick forever; even the longest realistic frame clocks out well inside it.
+    // A timed-out transfer is deliberately left alone rather than canceled: @xref{a-timed-out-transfer-is-left-alone|why, and what the result costs}.
 #if CONFIG_IDF_TARGET_ESP32
     if (st->channelId != 0xFF) {
         // TX_DONE clears `busy` from the level-5 handler. Polled with a yield, not a semaphore:
         // the handler runs where no RTOS call is allowed, so it cannot signal one.
         const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeoutMs) * 1000;
-        // SPIN first, yield only if the frame is genuinely long. `vTaskDelay(1)` sleeps a whole
-        // scheduler tick, 10 ms at CONFIG_FREERTOS_HZ=100, so a frame that clocks out in 240 us
-        // still cost 10 ms: the tick measured a FLAT ~9,600 us on a Dig-Octa whether it drove 8
-        // lights or 256, on one lane or eight, which is the scheduler and not the wire (bench
-        // 2026-09-09). A WS2812 frame is bounded and short (1.25 us per bit: 1.9 ms for 64 lights,
-        // 7.7 ms for 256), so busy-waiting to about one tick and only then sleeping keeps the CPU
-        // for the case that is over in microseconds while still yielding on a long strand rather
-        // than burning a core.
+        // Spin first and yield only if the frame is genuinely long, since the shortest sleep is a whole scheduler tick.
+        // A frame clocking out in a fraction of a millisecond still cost the full tick, measured flat on the bench whatever the light or lane count.
+        // That is the scheduler rather than the wire, and a frame here is bounded and short.
+        // So busy-waiting to about one tick keeps the processor for the case that is over in microseconds, while still yielding on a long strand.
         const int64_t spinUntil = esp_timer_get_time() + 10000;   // ~1 scheduler tick
         while (s_hi[st->channelId].busy) {
             const int64_t now = esp_timer_get_time();
@@ -419,11 +403,7 @@ void rmtWs2812Deinit(RmtWs2812Handle& h) {
     h.impl = nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// RX loopback capture — on-device test only. Opens a one-shot RX channel on the
-// jumpered pin, captures raw pulse symbols, returns how many landed. The test
-// decodes those symbols back to bytes and asserts == sent.
-// ---------------------------------------------------------------------------
+// Loopback capture, an on-device test only: a one-shot receive channel on the jumpered pin, returning how many symbols landed for the test to decode and compare.
 
 namespace {
 
@@ -450,11 +430,9 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     rxCfg.gpio_num = static_cast<gpio_num_t>(gpio);
     rxCfg.clk_src = RMT_CLK_SRC_DEFAULT;
     rxCfg.resolution_hz = resolutionHz;
-    // The RX channel's internal memory block must be even and >= one hardware
-    // block (IDF requirement; 64 words classic, 48 on the S3 — a hardcoded 64
-    // would silently claim part of a second S3 channel's memory). Round
-    // maxSymbols up to that floor; the actual capture buffer (outSymbols /
-    // maxSymbols) is separate and can be smaller.
+    // The receive channel's block must be even and at least one hardware block, whose size differs per chip.
+    // So a hardcoded one would silently claim part of a second channel's memory.
+    // The capture buffer itself is separate and may be smaller.
     size_t memBlock = static_cast<size_t>(maxSymbols);
     if (memBlock < SOC_RMT_MEM_WORDS_PER_CHANNEL) memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
     if (memBlock & 1) memBlock++;
@@ -465,12 +443,8 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
     // internal RAM.
     rxCfg.flags.with_dma = maxSymbols > SOC_RMT_MEM_WORDS_PER_CHANNEL;
 #else
-    // No RMT DMA (classic ESP32): mem_block_symbols larger than one hardware
-    // channel silently claims neighbouring channels' memory and fails to
-    // allocate ("no free rx channels"). Cap to a single channel — the caller
-    // gets at most one channel's worth of symbols per capture. A whole-frame
-    // check on such a chip must therefore use a frame that fits one channel
-    // (the frame loopback sizes itself to maxLaneLights accordingly).
+    // Without transfer hardware, asking for more than one channel's memory silently claims a neighbour's and then fails to allocate, so this caps at a single channel.
+    // A whole-frame check on such a chip must therefore use a frame that fits one, which the frame loopback sizes itself to.
     if (memBlock > SOC_RMT_MEM_WORDS_PER_CHANNEL)
         memBlock = SOC_RMT_MEM_WORDS_PER_CHANNEL;
 #endif
@@ -511,13 +485,8 @@ size_t rmtWs2812RxCapture(uint8_t gpio, uint32_t resolutionHz,
 }
 
 
-// ---------------------------------------------------------------------------
-// Loopback self-test (runnable from the live firmware via RmtLedDriver's
-// loopbackTest control). TX a known WS2812 pattern on txGpio, capture it back on
-// rxGpio (user jumpers them), decode, compare. The WS2812 symbol build is inlined
-// here (trivial — two symbol shapes) so the platform stays self-contained and
-// src/light/ keeps no platform dependency.
-// ---------------------------------------------------------------------------
+// The loopback self-test, runnable from the live firmware: send a known pattern, capture it back on the jumpered pin, decode and compare.
+// The symbol build is inlined here, being two shapes, so this layer stays self-contained and the domain keeps no dependency on it.
 
 namespace {
 
@@ -552,18 +521,10 @@ bool loopbackJumperOk(uint8_t txGpio, uint8_t rxGpio) {
     return hi == 1 && lo == 0;
 }
 
-// Shared frame-capture + bit-verify for the two parallel LED loopbacks (LCD_CAM
-// i80 and Parlio). They differ only in the transmit call (esp_lcd_panel_io_tx_color
-// vs parlio_tx_unit_transmit) and the private-bus state type; everything else —
-// the capture buffer, the RX task, the timed-first/back-to-back transmit cadence,
-// and the whole per-bit verification — was byte-for-byte identical, so it lives
-// here once. The caller has already done the jumper pre-check and built its
-// private TX bus on the data pins; it passes `transmitOnce` (transmit the frame
-// AND wait for its done-callback) and the params needed to size the capture and
-// log the granted clock. `r` is filled in place (jumperDetected already set).
-// The capture buffer: one symbol per WS2812 bit plus slack, 64-aligned, DMA-capable internal — the
-// single biggest contiguous block the loopback needs, which is why callers may allocate it FIRST
-// (before their private bus fragments the heap) and hand it in via `rxSymbols`.
+// The shared capture and bit-verify for both parallel loopbacks, which differ only in their transmit call and private state type while everything else was identical.
+// The caller has already done the jumper pre-check and built its bus, and passes a transmit-and-wait callback plus what is needed to size the capture.
+// The capture buffer is one symbol per bit plus slack, aligned and internal: the single biggest contiguous block needed.
+// Which is why a caller may allocate it first and hand it in.
 uint32_t* allocLoopbackCapture(size_t dataBytes) {
     const size_t capMax = dataBytes / 3 + 16;
     return static_cast<uint32_t*>(heap_caps_aligned_alloc(
@@ -574,13 +535,9 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
                            uint8_t rowBits, uint32_t pclkHz, bool pinExpanderMode, const char* tag,
                            const std::function<void()>& transmitOnce,
                            RmtLoopbackResult& r, bool rideMode, uint32_t* rxSymbols) {
-    // Capture at 40 MHz. The decode threshold is DERIVED from the strand's slot rate, not a
-    // constant: a "0" is HIGH for one slot, a "1" for two, so the midpoint (1.5 slots) separates
-    // them at ANY rate — 375 ns direct slots give 15/30 ticks (threshold 22), the shift expander's
-    // 300 ns slots give 12/24 (threshold 18). A hardcoded direct-mode threshold of 25 sat ABOVE the
-    // shift-mode "1" (24 ticks), decoding every 1-bit as 0 — the first pattern bit failed and the
-    // verdict blamed the transport for a decode fault. One symbol per WS2812 bit; the frame's
-    // zeroed latch pad is the >100 µs idle that ends the capture.
+    // The decode threshold is derived from the strand's slot rate rather than fixed.
+    // A zero is high for one slot and a one for two, so the midpoint separates them at any rate.
+    // A hardcoded threshold sat above the expander's one-bit and decoded every one as zero, and the verdict then blamed the transport for a decode fault.
     constexpr uint32_t kCapResHz = 40'000'000;
     const uint16_t slotTicks = static_cast<uint16_t>(kCapResHz / pclkHz);
     const uint16_t threshTicks = static_cast<uint16_t>(slotTicks + slotTicks / 2);
@@ -602,19 +559,11 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
     // the context alongside rxSymbols (the deliberate failure mode) instead of dangling it.
     auto* cap = new (std::nothrow) Cap{static_cast<uint8_t>(rxGpio), rxSymbols, capMax, kBits, rideMode};
     if (!cap) { heap_caps_free(rxSymbols); return; }
-    // Each rmt_receive captures ONE run of pulses ending at the next >100 µs gap (the WS2812 reset). With a
-    // controlled transmit the run starts at frame start, so one arm yields the whole frame. RIDING a
-    // free-running pipeline, an arm lands mid-frame and captures only the tail (< kBits) before the reset —
-    // so re-arm until a run of >= kBits arrives, i.e. an arm that happened to land at/before a frame start.
-    // The ring transmits continuously (~100 fps), so a full frame is caught within a few arms; bounded so a
-    // dead wire still times out instead of looping forever.
+    // Re-arm until a whole frame lands: @xref{riding-a-live-pipeline-means-re-arming-until-a-whole-frame-lands|why one arm is not enough here}.
     auto rxTask = [](void* arg) {
         auto* c = static_cast<Cap*>(arg);
-        // The retry budget must fit INSIDE the outer wait ceiling below, or the function frees rxSymbols
-        // while this task is still capturing into it. Ride: 40 arms × 100 ms = 4 s worst (< the 6 s
-        // ceiling) — a live pipeline delivers a frame within a few ms, so 100 ms per arm is already
-        // generous slack, and a dead wire exhausts the budget in bounded time. Controlled transmit keeps
-        // the single 1000 ms arm (< its 2 s ceiling).
+        // The retry budget fits inside the outer ceiling below, or the caller frees the buffer while this task is still writing into it.
+        // A live pipeline delivers a frame within milliseconds, so the per-arm wait is already generous slack and a dead wire exhausts the budget in bounded time.
         const int attempts = c->ride ? 40 : 1;
         const uint32_t perArmTimeoutMs = c->ride ? 100 : 1000;
         for (int a = 0; a < attempts; a++) {
@@ -682,15 +631,7 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
             r.got[(b - rowStart) / 8] =
                 static_cast<uint8_t>((r.got[(b - rowStart) / 8] << 1) | bit);
         }
-        // The FRAME'S FIRST pulse is one slot short with a '595 expander: the register's outputs are
-        // still settling as the first RCLK latch fires, so bit 0 of light 0 comes back ~12 ticks (a
-        // "0") when the strand sent a "1". Measured on strand 15: EXACTLY 1 mismatch in 2304, always
-        // bit 0, always short-clipped — the other 2303 bits and both pulse-width classes are textbook.
-        // It costs the very first pixel's most-significant color bit and nothing else (invisible), so a
-        // lone short-clipped bit 0 is the '595's frame-start settling, not bad output — accept it. Any
-        // second mismatch, or a bit-0 miss that is not short-clipped, still fails. Direct mode drives
-        // the pin straight (no latch) so its bit 0 is clean — the exception is gated on `pinExpanderMode` so a
-        // real first-bit fault on the direct i80 / Parlio paths can never be excused through it.
+        // The frame's first pulse is one slot short behind an expander: @xref{the-first-pulse-of-a-frame-is-short-behind-an-expander|the measurement, and what still fails}.
         const bool onlyBit0Clip = pinExpanderMode && mismatchCount == 1 && mismatch == 0
                                 && (static_cast<uint16_t>(rxSymbols[0] & 0x7FFF) < threshTicks);
         r.pass = (mismatch == SIZE_MAX) || onlyBit0Clip;
@@ -721,11 +662,10 @@ void captureAndVerifyFrame(uint16_t rxGpio, size_t frameBytes, size_t dataBytes,
 
 } // namespace detail
 
-// INTRUSIVE loopback (driver-agnostic; see platform.h). No bus, no transmit of our own — the live pipeline
-// is already clocking `sent` past `rxGpio` every frame, so we only arm the RMT-RX (a NO-OP transmitOnce) and
-// let one of those live frames land in the capture, then bit-verify it. Shares detail::captureAndVerifyFrame
-// with every family's own loopback, so the decode/threshold/verdict logic is identical whatever drove the
-// wire. Zero extra RAM — the reason this exists over the private-bus loopback that fragments the heap.
+// The intrusive loopback, driver-agnostic: no bus and no transmit of our own.
+// The live pipeline already clocking frames past the receive pin, so this only arms the capture and lets one land.
+// It shares the capture and verify helper with every family's own loopback, so the decode and verdict are identical whatever drove the wire.
+// And it costs no extra memory, which is why it exists beside the private-bus one.
 RmtLoopbackResult ws2812LoopbackRide(uint16_t rxGpio, const uint8_t* sent, uint8_t sentLen,
                                      size_t dataBytes, uint8_t rowBits, uint8_t clockMultiplier) {
     RmtLoopbackResult r;
@@ -804,12 +744,9 @@ RmtLoopbackResult rmtWs2812Loopback(uint8_t txGpio, uint8_t rxGpio) {
     return r;
 }
 
-// Whole-frame variant: transmit a real `lights`-light frame back to back and
-// bit-verify the WHOLE capture. The per-light pattern is 0xA5/0x00/0xFF (the
-// sent[] bytes), zero-padded for any 4th (white) channel, repeated for every
-// light. Unlike the 24-bit burst above, this drives the sustained DMA path and
-// a long wire under whatever RF the device is doing — so it catches the
-// frame-rate corruption and interference the short test is blind to.
+// The whole-frame variant: transmit a real frame back to back and verify the whole capture, one fixed pattern repeated for every light and padded for a fourth channel.
+// Unlike the short burst above, this drives the sustained transfer path and a long wire under whatever the radio is doing.
+// So it catches the frame-rate corruption and interference the short test is blind to.
 RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
                                          uint16_t lights, uint8_t channels) {
     RmtLoopbackResult r;
@@ -825,11 +762,8 @@ RmtLoopbackResult rmtWs2812LoopbackFrame(uint8_t txGpio, uint8_t rxGpio,
                         | (static_cast<uint32_t>(kPeriod - kT1H) << 16);
     const uint8_t bitsPerLight = static_cast<uint8_t>(channels * 8);
 #if !SOC_RMT_SUPPORT_DMA
-    // No RMT DMA (classic ESP32): the RX capture can hold at most one hardware
-    // channel's symbols, so cap the verified frame to what fits whole lights in
-    // that block. The frame is still transmitted back to back (the sustained-
-    // output stress that exposes RF interference); we just verify a prefix that
-    // the no-DMA receiver can actually capture.
+    // Without transfer hardware the capture holds at most one channel's symbols, so the verified frame is capped to whole lights within that block.
+    // The frame is still transmitted back to back, which is the stress that exposes interference; only the verified part is a prefix.
     const uint16_t maxLights =
         static_cast<uint16_t>(SOC_RMT_MEM_WORDS_PER_CHANNEL / bitsPerLight);
     if (lights > maxLights) lights = maxLights ? maxLights : 1;

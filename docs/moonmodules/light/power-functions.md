@@ -11,7 +11,7 @@ Three consumers share this vocabulary, and each uses a different slice of it:
 - **[Modifiers](modifiers.md)** fold coordinates through `modifyLogical` and never draw, so they
   reach for almost none of it. That asymmetry is the architecture, not a gap: **an effect decides
   what a pixel looks like, a modifier decides where a pixel comes from.**
-- **[MoonLive](MoonLiveEffect.md)** scripts reach the same routines through the builtin table
+- **[MoonLive](moonlive.md)** scripts reach the same routines through the builtin table
   (`core/moonlive/MoonLiveBuiltins.h`), which carries plain scalar arguments — so a script sees the
   flat form of a function, not the C++ callback form a compiled effect can use.
 
@@ -67,6 +67,30 @@ These act on the grid as a surface rather than on a shape. Between them they cov
 | `draw::splat` | Draws a point at a fractional position, splitting its light across neighbouring pixels so motion is smooth on a coarse grid | *(no caller yet — the particle kernel is its consumer)* | — |
 
 </div>
+
+### The Canvas, and why it is passed by value
+
+Every draw call once took a `Buffer&` and a `Coord3D dims` as two independent arguments that nothing checked for agreement. Passing dims from one layer with a buffer from another, or a dims computed with the depth guard beside one without, misaddressed silently. Binding them into one `Canvas` makes that mismatch unrepresentable rather than merely detectable.
+
+The Canvas also owns the depth guard: `depth()` is 0 on a 2D layer, which would zero the z stride, so sixteen effects each carried a private `depthDim()` helper. Constructing a Canvas applies it once.
+
+It is passed **by value** in the per-pixel fill, which is a measured choice rather than a stylistic one. It is a small POD, a pointer plus three int16 and two small ints, and in that loop it measured 62 instructions against 67 for the separate arguments and 69 for a `const Canvas&`. APIs that do more per call, `draw::text` among them, take a `const Canvas&`. A reference member forces the extents to be re-read from memory, because the compiler must assume they alias the buffer being written, while a by-value POD stays in registers. The abstraction is a small win, not a cost.
+
+### Fading a trail, and why 8 bits is not enough
+
+`draw::fade` takes *how much to lose this frame*, so the same setting is a long tail at 60 fps and an instant clear at 1200. `draw::decay` takes a half-life instead, so the picture is identical on any device and the elapsed time does the work. Reach for `decay` on state that persists across frames: a trail plane, an advected field.
+
+An 8-bit buffer cannot hold that decay at a high framerate, and no rounding rule fixes it. Decaying 200 over a 500 ms half-life, across 500 ms of frames, where the exact answer is 100:
+
+| frame | truncating | rounding | a 16-bit accumulator |
+|---|---|---|---|
+| 50 ms | 96 | 100 | 100 |
+| 5 ms | 73 | 100 | 101 |
+| 1 ms | **0** | **200** | 102 |
+
+Truncating loses a fraction every frame until a fast device erases the trail outright. Rounding puts it back every frame until the trail never decays and the effect turns solid, which is the symptom `fade` already has. Both failures are the quantization rather than the weight: the value is re-rounded to a byte hundreds of times a second.
+
+So an effect whose trail must survive at any framerate keeps its plane wider than the layer, at 16 bits per channel in its own ScratchBuffer, and narrows once on the way out. `decay` on a byte plane is honest for a slow cadence, which is what the Layer's collected `fadeToBlackBy` already does. Measured 2026-09-04; `decay16` in [draw.h](../../../src/light/powerfunctions/draw.h) is the 16-bit form.
 
 ## Geometry
 
@@ -134,6 +158,25 @@ One sample is a soft blur; the character comes from composing them. Summing octa
 
 </div>
 
+### The fluid solver
+
+Every other flow here is a *function* of position and time: noise, curl, a wind. A fluid is the other kind. Its velocity is state that evolves from its own past, so pushing the medium in one place changes where everything downstream goes, and a vortex forms because the maths says it must rather than because a rule drew one. A curl field is beautiful and unchanging in character; a fluid reacts.
+
+The algorithm is Stam's ("Stable Fluids", SIGGRAPH 1999), chosen for one reason: it cannot blow up. An explicit solver has a timestep small enough to stay stable, and a frame that runs long breaks it. Stam's is unconditionally stable, so a device that stalls for a second resumes with a plausible field instead of a screenful of infinities. On a fixture that must never look broken, that is worth more than accuracy.
+
+Four steps a frame, and the order is the algorithm:
+
+1. `diffuse`: viscosity, each cell relaxing toward its neighbours' average.
+2. `project`: make it divergence-free, the step that turns a set of arrows into a flow.
+3. `advect`: the velocity carries itself, which is what makes a vortex persist and travel.
+4. `project` again, because advection reintroduces divergence.
+
+The caller then advects its own dye along the finished field with `draw::advect16`.
+
+**Q16.16 throughout, not float.** The render path is integer by contract, and a fluid is the hardest case for it: `project` solves a linear system by relaxation, so an error a float would absorb accumulates over iterations. Sixteen fraction bits is what makes the pressure solve converge at all, where eight would quantize the gradient to nothing on a slow flow.
+
+The cost is per cell per iteration across several passes, so this is a desktop and P4 effect; an S3 runs it on a small grid or not at all. [fluid.h](../../../src/light/powerfunctions/fluid.h) is the implementation.
+
 ## Transport
 
 A field says where things go; these carry light along one, frame after frame. The state they move is
@@ -184,7 +227,7 @@ The 16-bit forms matter here: the 8-bit versions step visibly on a large fixture
 
 Two related problems. First, motion: raw linear movement reads as mechanical, so easings shape it, followers smooth it, and peak-hold gives a meter its characteristic instant-rise slow-fall. Second, randomness that is *reproducible* — addressed by position rather than drawn from a stream, so the same pixel gets the same value on every device and every frame.
 
-The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../explanation/architecture/moonlight.md#effects)).
+The framerate rule lives here too: everything in this group is driven by elapsed time, never by frame count ([architecture](../../explanation/architecture/moonlight.md#effects)). The shapes themselves live in [oscillators](../core/moxygen/oscillators.md), which traces one over a cycle.
 
 <div class="mm-pf" markdown="1">
 
@@ -211,9 +254,13 @@ Storage is structure-of-arrays over the caller's own buffers, so a pass that tou
 
 Frame order matters and is the caller's to get right: forces, then `collide()`, then `step()`, then walls, then `age()`, then `render()`. Collisions run *before* the move because resolving an overlap afterwards can shove a particle through a wall the bounce pass already checked.
 
+**Time is scaled, not quantised.** A pool advanced by a fixed amount each frame has physics that belong to the hardware: the desktop renders tens of thousands of frames a second and an ESP32 a few hundred, so one gravity setting is an explosion on one and a drift on the other. Running a fixed 60 Hz simulation and skipping the frames between is the obvious fix and the wrong one for a light effect, because it throws away exactly the smoothness those extra frames were rendered for.
+
+So every force and velocity is expressed per reference frame (1/60 s), and `FrameTime::scale()` reports how much of a reference frame this one covered, in 8.8 fixed point: 256 at exactly 60 fps, 26 at 600 fps, and 2048 after a sixteen-frame stall, which is the eight-reference-frame ceiling `advance()` caps a long stall to. A faster device takes many small steps where a slow one takes a few large ones: the same trajectory, at more resolution along it.
+
 Prior art: the [WLED Particle System](https://github.com/wled/WLED) by Damian Schneider ([@DedeHai](https://github.com/DedeHai)), whose vocabulary of emitters, forces and walls over one shared pool is the shape this follows, and Reeves 1983 for the name. The fixed-point implementation and the elapsed-time scaling are ours. His system also settled a design question by having answered it already: he documents trying y-binning in the collision broad phase and measuring it not worth the bookkeeping at these pool sizes, so `collide` keeps the cheaper sweep along X deliberately rather than by omission.
 
-A script reaches the same kernel through [MoonLive](MoonLiveEffect.md#the-vocabulary-what-a-script-can-call)'s `pool` / `emit` / `step` builtins.
+A script reaches the same kernel through [the script vocabulary](moonlive.md#the-vocabulary)'s `pool`, `emit` and `step` builtins.
 
 <div class="mm-pf" markdown="1">
 

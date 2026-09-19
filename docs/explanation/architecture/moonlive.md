@@ -43,21 +43,37 @@ The IR is the seam, and it is what keeps the three tiers from knowing about each
 
 ## A native-codegen compiler
 
-MoonLive lets you author an effect (later: a layout, modifier, driver, or core rule) as **text** and run it on a running device, with no recompile-and-flash cycle. Its standout property is *how* it runs the script. It is a **native-codegen compiler** rather than a bytecode interpreter: source text is lexed, parsed, lowered to a typed IR, and assembled to real machine code. The render loop calls that through a plain function pointer, so a scripted effect runs at near-hand-written speed in the hot path. This is the core construct; a scripted effect (`MoonLiveEffect`) is the thin binding that gives it the MoonModule lifecycle.
+MoonLive lets you author an effect, a layout, a modifier, a palette or a service (later: a driver, or a core rule) as **text** and run it on a running device, with no recompile-and-flash cycle. Its standout property is *how* it runs the script. It is a **native-codegen compiler** rather than a bytecode interpreter: source text is lexed, parsed, lowered to a typed IR, and assembled to real machine code. The render loop calls that through a plain function pointer, so a scripted effect runs at near-hand-written speed in the hot path. This is the core construct; a scripted effect (`MoonLiveEffect`) is the thin binding that gives it the MoonModule lifecycle.
 
 The engine is a **domain-neutral core** with one narrow seam, structured as three tiers so adding a CPU is additive, never a rewrite:
 
-- **Front-end** (`src/core/moonlive/`, platform-independent): a recursive-descent lexer and parser over an expression grammar, where every function argument is a literal or a nested call. It lowers each statement to a typed **IR**, a flat list of three-address ops over virtual registers. The IR is the seam: it knows *operations*, never an ISA and never a domain. It is compile-time only, consumed during lowering and discarded, so it costs nothing at run time. The CPU executes only the final native instructions.
+- **Front-end** (`src/core/moonlive/`, platform-independent): a recursive-descent lexer and parser over an expression grammar, where every function argument is an expression. It lowers each statement to a typed **[IR](../../moonmodules/core/moxygen/MoonLiveIr.md)**, a flat list of three-address ops over virtual registers. The IR is the seam: it knows *operations*, never an ISA and never a domain. It is compile-time only, consumed during lowering and discarded, so it costs nothing at run time. The CPU executes only the final native instructions.
 - **Host builtin table** (the domain seam): the core owns no function names. A *host* registers `{name → descriptor}`, `setRGB`/`fill`/`random16` for LEDs (`src/light/moonlive/`), something else for a display or sensor. A descriptor is either a `Call` (a generic call to a host C function pointer, a pure helper like `random16`) or an `Inline` op (a neutral opcode tag the backend emits inline, a buffer writer, no per-pixel call). This is the ESPLiveScript / ARTI bound-function model; it is what keeps the core LED-free while the hot path stays inline. The LED *names* and the "an element is 3 RGB bytes" meaning live only in the light-domain registration and the per-ISA lowering, never in core.
-- **Per-ISA backend** (`src/platform/`, behind the boundary): a tiny named-instruction MacroAssembler (the textbook V8 / LLVM / asmjit shape, append one instruction, back-patch label offsets) plus the IR→bytes lowering that drives it. Xtensa (classic ESP32 / S3), RISC-V (P4), and the host ISA (desktop arm64/x86-64) each are *a new backend file behind the unchanged IR*, the front-end and IR never branch on ISA. Emitted code goes into an `allocExec` block (see [Platform abstraction](mooncore.md#platform-abstraction)) and is called each tick.
+- **Per-ISA backend** (`src/platform/`, behind the boundary): a tiny named-instruction MacroAssembler (the textbook V8 / LLVM / asmjit shape, append one instruction, back-patch label offsets) plus the IR→bytes lowering that drives it, against [the register budget](../../moonmodules/core/moxygen/moonlive_emit.md) the target allows. Xtensa (classic ESP32 / S3), RISC-V (P4), and the host ISA (desktop arm64/x86-64) each are *a new backend file behind the unchanged IR*, the front-end and IR never branch on ISA. Emitted code goes into an `allocExec` block (see [Platform abstraction](mooncore.md#platform-abstraction)) and is called each tick.
 
 ## The domain seam
 
-**The core knows expressions plus a generic call mechanism; the host registers its functions.** Every argument parses as an expression, so a literal and a nested call are the same shape, and the LED names and RGB meaning live only in the light-domain registration. The core sees a neutral `BuiltinTable` of `{name -> Call(fn ptr) | Inline(opcode tag)}`: a buffer writer is `Inline` (the hot-path fast path), a pure helper is `Call`. Adding a domain function is a table entry, never a change to the language.
+**The core knows expressions plus a generic call mechanism; the host registers its functions.** Every argument parses as an expression, so a literal and a nested call are the same shape, and the LED names and RGB meaning live only in the light-domain registration. The core sees a neutral [`BuiltinTable`](../../moonmodules/core/moxygen/MoonLiveBuiltins.md) of `{name -> Call(fn ptr) | Inline(opcode tag)}`: a buffer writer is `Inline` (the hot-path fast path), a pure helper is `Call`. Adding a domain function is a table entry, never a change to the language.
 
 ## A script reaches the device like any other control change
 
-A recompile is the normal cold-path rebuild. Editing the `source` control routes through the same `prepare()` sweep every control change uses, so a new script swaps in live with no reboot. A parse error surfaces in the module status while the layer renders dark, which is the robustness rule applied to text a user typed. The module contract is [MoonLiveEffect](../../moonmodules/light/MoonLiveEffect.md).
+A recompile is the normal cold-path rebuild. Editing the `script` control routes through the same `prepare()` sweep every control change uses, so a new script swaps in live with no reboot. A parse error surfaces in the module status while the layer renders dark, which is the robustness rule applied to text a user typed. The module contract is the [scripted effect card](../../moonmodules/light/effects.md#moonlive).
+
+## The executable-memory seam
+
+Three platform functions carry every quirk of writing code a CPU will fetch.
+`allocExec` and `freeExec` take memory the core can execute from, which is IRAM on an ESP32 and an mmap page on desktop.
+`writeExec` copies emitted code in, which on an ESP32 means aligned stores plus an instruction-cache sync so the core fetches fresh code.
+The engine stays target-agnostic because all three live behind the platform boundary.
+
+## Prior art
+
+Compiling a small language straight to machine code, so a live-authored effect runs at the speed of a compiled one, was pioneered by Yves Bazin in [ESPLiveScript](https://github.com/hpwit/ESPLiveScript).
+That work drives a 12,288-light panel at around 85 fps where interpreted languages managed 3 to 10, which is what makes native codegen the right call here.
+MoonLive is written fresh against projectMM's architecture, with ESPLiveScript as the reference it is checked against.
+
+The live-scripting idea in this ecosystem descends from ARTI, the interpreted-effects runtime in WLED MoonModules, which proved the load-and-run loop end to end.
+The host-binding surface follows the [MoonLight effects tutorial](https://moonmodules.org/MoonLight/moonlight/effects-tutorial/).
 
 ## A scripted module is still a module
 

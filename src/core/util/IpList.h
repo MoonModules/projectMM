@@ -6,28 +6,33 @@
 
 namespace mm {
 
-// Domain-neutral core primitive: parse a destination list of IPv4 addresses from one text control.
-// Sits beside parsePinList (the GPIO-CSV parser) as the same shape of thing — a human-typed list of
-// hardware endpoints — so a driver that fans one buffer out to N receivers reads its destinations
-// the same way a driver that fans one buffer out to N GPIO lanes reads its pins.
-//
-// Why a LIST rather than one IP per driver instance: Art-Net 4 requires ArtDmx to be unicast to the
-// node that owns each universe ("There are no conditions in which broadcast is allowed"), so driving
-// N receivers means N destinations. Expressing that as one control keeps the common case (a row of
-// identical tubes on consecutive addresses) to a single field instead of N driver instances.
-//
-// Two syntaxes, both accepted, and mixable:
-//   "192.168.1.60-70"        → a RANGE: .60 .61 … .70 (last octet only; the first three must match)
-//   "192.168.1.60,61,62,65"  → a LIST: after a full dotted quad, a bare number is the next host on
-//                              the SAME /24 (the shorthand people actually type), and a further full
-//                              quad switches subnet.
-//   "192.168.1.60, 10.0.0.5" → explicit full quads, any subnets.
-//
-// Returns nullptr on success, or a static error literal the caller feeds straight to setStatus().
-// Host-tested by unit_IpList.cpp.
+/// @defgroup IpList Parsing a destination list of IPv4 addresses
+/// @{
+/// One human-typed text control turned into the list of addresses a driver sends to.
+///
+/// @moreinfo
+///
+/// ## Why a list rather than one address per driver
+///
+/// This sits beside `parsePinList`, the GPIO CSV parser, as the same shape of thing: a human-typed list of hardware endpoints.
+/// A driver that fans one buffer out to several receivers therefore reads its destinations the way a driver fanning out to several GPIO lanes reads its pins.
+///
+/// Art-Net 4 requires ArtDmx to be unicast to the node that owns each universe, stating that there are no conditions in which broadcast is allowed.
+/// Driving several receivers therefore means several destinations.
+/// Expressing that as one control keeps the common case, a row of identical tubes on consecutive addresses, to a single field instead of one driver instance each.
+///
+/// ## The two syntaxes, which mix freely
+///
+/// | Written | What it means |
+/// |---------|---------------|
+/// | `192.168.1.60-70` | a range over the last octet alone, giving `.60` through `.70`, the first three octets having to match |
+/// | `192.168.1.60,61,62,65` | a list where, after one full dotted quad, a bare number is the next host on the same `/24`, and a further full quad switches subnet |
+/// | `192.168.1.60, 10.0.0.5` | explicit full quads, across any subnets |
+///
+/// The parser returns null on success, or a static error literal the caller hands straight to `setStatus`.
+/// `unit_IpList.cpp` pins it on the host.
 
-// Parse one dotted quad (or a bare last-octet shorthand continuing `prev`) starting at *p.
-// Advances *p past the token. Returns false on a malformed token.
+/// Parse one quad, or a bare last-octet shorthand continuing `prev`, advancing `p` past the token.
 namespace detail {
 inline bool parseOneIp(const char*& p, const uint8_t prev[4], bool havePrev, uint8_t out[4]) {
     long o[4];
@@ -57,9 +62,7 @@ inline bool parseOneIp(const char*& p, const uint8_t prev[4], bool havePrev, uin
 }
 }  // namespace detail
 
-// Parse `s` into out[0..maxIps) as 4-byte quads. `nOut` receives the count.
-// An empty/blank string is NOT an error — it yields nOut == 0, the "unconfigured, idle" state
-// (a driver with no destination must do nothing, never fall back to broadcasting).
+/// Parse `s` into `out` as 4-byte quads, `nOut` receiving the count, a blank string yielding none.
 inline const char* parseIpList(const char* s, uint8_t (*out)[4], uint8_t maxIps, uint8_t& nOut) {
     nOut = 0;
     if (!s) return nullptr;
@@ -107,4 +110,5 @@ inline const char* parseIpList(const char* s, uint8_t (*out)[4], uint8_t maxIps,
     }
 }
 
+/// @}
 }  // namespace mm

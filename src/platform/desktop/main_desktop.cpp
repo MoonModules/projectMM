@@ -1,3 +1,8 @@
+/// @defgroup main_desktop The desktop entry point
+/// The process wrapper: signal handling, the exit path, and the call into the firmware.
+///
+/// Everything a host gives a program and a device does not, kept here so the firmware itself is the same code on both.
+
 #include <csignal>
 #include <cstdint>   // mm_main() takes uint16_t; <unistd.h> used to pull this in on POSIX
 #include <cstdio>
@@ -16,15 +21,11 @@ extern void mm_main(volatile bool& keepRunning, uint16_t httpPort);
 static volatile bool running = true;
 static bool cleanExit = false;
 
-// Write s to stderr without stdio — safe inside a signal handler.
-// Write a string LITERAL to stderr from a signal handler: the length comes from the array bound,
-// so it is a compile-time constant and can never drift from the text.
+// Write a string literal to the error stream from a signal handler, its length taken from the array bound so it can never drift from the text.
 template <size_t N>
 static void safeWrite(const char (&s)[N]);
 
-// Write to stderr from a signal handler. `len` is passed in rather than measured: strlen is not
-// on POSIX's async-signal-safe list, and while a literal makes it harmless in practice, taking the
-// length at the call site (where it is a compile-time constant) makes the guarantee real.
+// The length is passed rather than measured, since measuring it is not on the async-signal-safe list and taking it at the call site makes the guarantee real.
 static void safeWrite(const char* s, size_t len) {
     while (len > 0) {
 #ifdef _WIN32
@@ -84,13 +85,9 @@ static void atExitHandler() {
     }
 }
 
-// Show the UI the moment the server is up. A desktop user launching from Finder or a file manager
-// has no terminal to read a URL out of, and typing localhost:8080 is exactly the step that loses
-// someone on their first run. Best effort: a failure is silent, because the banner above already
-// printed the address and a missing browser must not stop the server.
-//
-// --no-browser opts out, for a headless box or a service manager where opening a browser on the
-// server's own display is wrong.
+// Show the interface the moment the server is up, since a user launching from a file manager has no terminal to read an address out of.
+// And typing one is exactly the step that loses someone on a first run.
+// Best effort, a failure being silent because the banner already printed the address and a missing browser must not stop the server; a flag opts out for a headless box.
 static void openLocalUi(uint16_t port) {
     char url[64];
     std::snprintf(url, sizeof(url), "http://localhost:%u/", static_cast<unsigned>(port));
@@ -173,11 +170,8 @@ int main(int argc, char** argv) {
     sigaction(SIGBUS,  &sa, nullptr);
     sigaction(SIGABRT, &sa, nullptr);
 
-    // SA_RESETHAND: the FIRST Ctrl+C asks for a clean stop, and restores the default handler so a
-    // SECOND one kills the process outright. Without it a shutdown that wedges (a driver teardown
-    // waiting on a socket, say) leaves Ctrl+C doing nothing at all, however many times it is
-    // pressed, and the only way out is another terminal. Reported from a Linux bench: "it didn't
-    // shut down fully and was slowly eating more cpu cycles ... it got SIGTERM'd".
+    // The first interrupt asks for a clean stop and restores the default handler, so a second one kills the process outright.
+    // Without that a wedged shutdown leaves the key doing nothing however many times it is pressed, and the only way out is another terminal.
     struct sigaction saInt{};
     saInt.sa_handler = [](int) {
         running = false;

@@ -1,11 +1,11 @@
 #include "core/moonlive/moonlive_emit.h"
 #include <cstring>
 
-// MoonLive arm64 emit (Apple Silicon, arm64 Linux): the fill routines as native machine code,
-// copied into an executable page and called through FillFn / AnimFn.
-//
-// One ISA per file, self-guarding, matching the assembler beside it. Every byte array is VERBATIM
-// assembler output, never hand-transcribed from a disassembly.
+/// @defgroup moonlive_emit_arm64 MoonLive arm64 fill routines
+/// The fill routines as native machine code, copied into an executable page and called through a function pointer.
+///
+/// One instruction set per file, self-guarding, matching the assembler beside it.
+/// Every byte array is verbatim assembler output, never hand-transcribed from a disassembly.
 
 namespace mm::moonlive {
 

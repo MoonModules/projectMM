@@ -1,7 +1,9 @@
 #include "core/moonlive/moonlive_emit.h"
 
-// The fill routines for a host with NO backend, the third case beside moonlive_emit_arm64.cpp and
-// moonlive_emit_x86_64.cpp. See moonlive_asm_noarch.cpp for when this is reached.
+/// @defgroup moonlive_emit_noarch MoonLive fill routines, no backend
+/// The third case beside the arm64 and x86-64 emitters: a host we have no machine code for.
+///
+/// The assembler beside it says when this is reached.
 
 #if !((defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT))
 

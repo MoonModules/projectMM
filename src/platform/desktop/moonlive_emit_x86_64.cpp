@@ -1,27 +1,32 @@
 #include "core/moonlive/moonlive_emit.h"
 #include <cstring>
 
-// MoonLive x86-64 emit (Windows, Linux, Intel macOS): the fill routines as native machine code.
-//
-// TWO branches, not one: System V and Microsoft x64 pass arguments in different registers, so the
-// emitted prologue differs even though the ISA does not. That axis is nested here rather than split
-// into a third file, because it is an ABI difference within one instruction set.
-//
-// Every byte array is VERBATIM assembler output, never hand-transcribed from a disassembly.
+/// @defgroup moonlive_emit_x86_64 MoonLive x86-64 fill routines
+/// The fill routines as native machine code for Windows, Linux and Intel macOS.
+///
+/// @moreinfo
+///
+/// ## Two branches, one instruction set
+///
+/// The two calling conventions pass arguments in different registers, so the emitted prologue differs though the instruction set does not.
+/// That axis is nested here rather than split into a third file, being a convention difference within one architecture.
+/// Every byte array is verbatim assembler output, never hand-transcribed from a disassembly.
+///
+/// ## The light count is zero-extended first
+///
+/// This architecture leaves the upper half of a register holding a narrower argument undefined, and the loop bound below compares at full width.
+/// So dirty upper bits run the loop far past the count and write past the end of the caller's buffer.
+/// Whether the register arrives dirty depends on what ran before the call, which makes the corruption intermittent and lands it in whatever allocation follows.
+/// A narrow register write zero-extends, so one instruction pins the bound.
+///
+/// The color bytes are the immediate of each store, at the offsets the patcher writes.
+/// The second blob is a leaf function, so no shadow area is reserved and only volatile registers are used, needing no saves either.
 
 namespace mm::moonlive {
 
 #if defined(__x86_64__) && !defined(_WIN32) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
-// x86-64 SysV ABI (Linux/macOS) — args in rdi/rsi/rdx. The Windows x64 ABI uses
-// rcx/rdx/r8/r9 instead, so this blob is wrong there; _WIN32 is excluded above and falls to
-// the #error until a Win64 template is added (no Windows desktop target ships today).
-// (assembled from fill_x64.s, verified with clang/objdump). buf=rdi, nLights=esi, cpl=dl.
-// R/G/B are the immediate byte of each `movb` at offsets 0x11/0x17/0x1d.
-// `mov esi, esi` FIRST: SysV, like Win64, leaves the upper 32 bits of a register holding a
-// uint32_t argument UNDEFINED, and the loop bound below is the 64-bit `cmp r8, rsi` — dirty
-// upper bits run the loop far past nLights and write past the end of the caller's buffer. A
-// 32-bit register write zero-extends, so this one instruction pins the bound.
+/// The blob for one calling convention, whose argument registers differ from the other's: @xref{the-light-count-is-zero-extended-first|why the first instruction is a widening move}.
 static const uint8_t kX64[] = {
     0x89, 0xf6,                         // mov   esi, esi         (zero-extend nLights)
     0x85, 0xf6,                         // test  esi, esi
@@ -78,17 +83,7 @@ size_t emitAnimatedFill(uint8_t* out, size_t cap) {
 }
 #elif (defined(__x86_64__) || defined(_M_X64)) && defined(_WIN32) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
-// x86-64 Microsoft x64 ABI (Windows) — args in rcx/rdx/r8/r9. Same routine as the SysV blob
-// above with the argument registers remapped. This function is a LEAF (no calls) so no shadow
-// space needs to be reserved; only volatile registers (rax, rcx, rdx, r8-r11) are used, so no
-// nonvolatile save is needed either. buf=rcx, nLights=edx, cpl=r8b. R/G/B immediates live
-// inside the three `mov byte [rcx+r11+N], imm` instructions at offsets 0x14 / 0x1A / 0x20.
-//
-// `mov edx, edx` FIRST: Win64 leaves the upper 32 bits of a register holding a uint32_t arg
-// UNDEFINED, and the loop bound below is the 64-bit `cmp r10, rdx` — with dirty upper bits the
-// loop runs far past nLights and writes past the end of the caller's buffer. Whether rdx arrives
-// dirty depends on what ran before the call, so the corruption is intermittent and lands in
-// whatever allocation follows. A 32-bit register write zero-extends, pinning the bound.
+/// The same routine for the other calling convention, with its argument registers remapped: @xref{the-light-count-is-zero-extended-first|the same widening move}.
 static const uint8_t kWin64[] = {
     0x89, 0xd2,                         // mov   edx, edx        (zero-extend nLights — see above)
     0x85, 0xd2,                         // test  edx, edx        (nLights == 0?)

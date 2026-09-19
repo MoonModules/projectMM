@@ -1,18 +1,4 @@
 #pragma once
-// Sub-pixel geometry: shapes placed between pixels rather than on them.
-//
-// The point of this effect is a demonstration of a technique, not a picture. On a 16x16 panel a
-// clock hand drawn on whole pixels jumps a full pixel at a time and reads as broken; the same hand
-// placed at a fractional position and antialiased moves smoothly, because a pixel's BRIGHTNESS
-// carries the fraction its position cannot. Everything here is built from that one idea, so a small
-// matrix gets motion a whole-pixel renderer cannot express at any framerate.
-//
-// The shapes come from draw.h's sub-pixel family (`disc`, `ring`, `strokeLine`, `line`), which work
-// in the 24.8 `pos_t` the whole draw layer speaks. Nothing here computes coverage itself.
-//
-// Concept and the original fixed-point canvas demos: Sutaburosu, in FastLED, via MoonLight
-// (E_FastLED.h, "Fixed-Point Canvas Demo").
-
 #include "core/util/math16.h"           // sin16, cos16, BeatPhase
 #include "light/util/Palette.h"         // hsvToRgb: the trail's rainbow
 #include "light/effects/EffectBase.h"
@@ -21,6 +7,18 @@ namespace mm {
 
 /// Effect: sub-pixel shapes, drawn between pixels so small panels move smoothly.
 /// @card FixedPointEffect.gif
+/// Author: concept and the original fixed-point canvas demos by Sutaburosu, in FastLED, via MoonLight.
+///
+/// @moreinfo
+///
+/// ## The point is the technique, not the picture
+///
+/// On a 16x16 panel a clock hand drawn on whole pixels jumps a full pixel at a time and reads as broken.
+/// The same hand placed at a fractional position and antialiased moves smoothly, because a pixel's brightness carries the fraction its position cannot.
+/// Everything here is built from that one idea, so a small matrix gets motion a whole-pixel renderer cannot express at any frame rate.
+///
+/// The shapes come from the sub-pixel family in `draw.h`, `disc`, `ring`, `strokeLine` and `line`, which work in the 24.8 `pos_t` the whole draw layer speaks.
+/// Nothing here computes coverage itself.
 class FixedPointEffect : public EffectBase {
 public:
     // Every shape is computed from a position rather than accumulated.

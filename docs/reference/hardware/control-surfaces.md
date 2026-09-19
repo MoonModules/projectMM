@@ -2,7 +2,7 @@
 
 What projectMM needs to know about the physical desks on the bench, so a control-ingest plan can be
 written from facts rather than from a product page. A desk here is a candidate source for
-[ControlModule](../../moonmodules/core/control.md)'s pads, encoders and faders, which were laid out to
+[ControlModule](../../moonmodules/core/system.md#control)'s pads, encoders and faders, which were laid out to
 match this class of hardware in the first place.
 
 **The headline, because it contradicts the obvious assumption:** neither desk speaks OSC. Both are

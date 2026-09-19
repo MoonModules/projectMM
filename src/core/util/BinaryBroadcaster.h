@@ -5,87 +5,104 @@
 
 namespace mm {
 
-// A sink that broadcasts a binary WebSocket message to all connected clients.
-// HttpServerModule implements it; producers (e.g. PreviewDriver) hold a pointer
-// to this interface rather than to the concrete server, so a light-domain
-// producer depends only on "something I can send bytes to" — not on the HTTP
-// server's full surface. Domain-neutral: the bytes' meaning is the caller's.
+/// A sink a producer sends bytes to, without depending on the HTTP server that carries them.
+///
+/// @moreinfo
+///
+/// ## Who implements it and who holds it
+///
+/// `HttpServerModule` implements the interface, and producers such as `PreviewDriver` hold a pointer to it rather than to the concrete server.
+/// A light-domain producer therefore depends on nothing more than something it can send bytes to.
+/// The interface is domain-neutral: what the bytes mean is the caller's business.
+///
+/// ## Why a send is resumable
+///
+/// `sendBufferedFrame` takes a payload that lives in a stable caller-owned buffer, so nothing is copied.
+/// One WebSocket message is the `header`, copied because it is small and may be a stack local, followed by `body`.
+/// `body` is a pointer the caller keeps stable until the send completes or is canceled.
+/// The implementation drains it across transport-poll ticks, a bounded chunk per tick, returning on a socket that would block.
+/// A large frame therefore stays off the caller's hot path.
+/// The browser still sees one atomic message: resumable means delivered over wall-clock, not split into several messages.
+///
+/// ## The three calls that pace a link
+///
+/// | Call | What it does |
+/// |------|--------------|
+/// | `sendBufferedFrame` | begins a send. While one is in flight a new call is dropped, keeping the in-flight frame and rejecting the new one, which the caller reads as a busy link |
+/// | `bufferedSendIdle` | true when no send is in flight, so a caller gating the next frame on it self-limits to what the link sustains |
+/// | `cancelBufferedSend` | abandons the in-flight send at once, which the caller does before it frees or reallocates `body` on a geometry rebuild |
+///
+/// ## What a cancel costs a client
+///
+/// A client caught mid-message by a cancel is closed, the only honest exit once bytes are out.
+/// It reconnects, and the generation bump primes it fresh.
+/// `PreviewDriver` is the one user today, so every `/wsp` message rides this one paced path.
+///
+/// ## Inbound messages are opaque
+///
+/// The transport unmasks a client's frame, framing being its job, and hands the payload bytes to the registered sink; only the producer knows what they mean.
+/// `onClientGone` fires when a client's slot closes or turns over.
+/// A producer holding per-slot standing state, such as the preview's stride and frame rate request, drops it with the client.
+/// Both fire on the transport's own thread, core 0 under the split.
+/// A producer ticking elsewhere therefore stores single-byte fields its reader tolerates racing on, which is the lossy-channel rule.
+///
+/// ## Why the send lease exists
+///
+/// The lease gives exclusive access to the sender for a producer that does not run on the transport's own thread.
+/// Under the multicore split the offloaded `PreviewDriver` ticks on core 1 while the transport drains, reaps and admits on core 0.
+/// That is two producers, two cores, one preview socket set and one resumable send slot.
+/// The control channel stays core-0-only and outside this lease.
+/// A producer therefore brackets a whole message in the acquire and release pair, because arming a frame must not race the drain that is reading the slot.
+///
+/// The acquire never blocks, because the caller may be on the render or encode thread where blocking violates the hot path.
+/// A false result means the transport is busy this instant, so the message is skipped rather than waited on.
+/// Skipping is already the producer's back-off path, `PreviewDriver` dropping a slot whenever the link is behind.
+/// A lost race therefore costs one frame at most.
+/// A single-threaded transport may return true unconditionally: with one producer thread there is no race to prevent, and the pair is then free.
 struct BinaryBroadcaster {
-    // RESUMABLE one-frame send for a payload that lives in a STABLE caller-owned buffer (no copy):
-    // one WS message = `header` (copied — small, may be a stack local) followed by `body` (a pointer
-    // the caller keeps stable until the send completes or is cancelled). The implementation drains it
-    // across transport-poll ticks (a bounded chunk per tick, returning on a would-block socket), so a
-    // large frame stays off the caller's hot path. The frame is still ONE atomic WS message to the
-    // browser — "resumable" means delivered over wall-clock, not split into multiple messages.
-    //   sendBufferedFrame(...) — begin a send; while one is in flight a new call is DROPPED
-    //                            (drop-new backpressure — the in-flight frame is kept, the new one
-    //                            rejected), and the caller reads that as "link busy".
-    //   bufferedSendIdle()     — true when no send is in flight (the previous frame fully drained
-    //                            or was cancelled). The caller gates the next frame on this, so the
-    //                            effective frame rate self-limits to what the link sustains.
-    //   cancelBufferedSend()   — abandon the in-flight send NOW. The caller calls this before it
-    //                            frees/reallocates the `body` buffer (a geometry rebuild), keeping a
-    //                            cursor reading only live memory. A client caught mid-message is
-    //                            closed by the implementation (the only honest exit once bytes are
-    //                            out); it reconnects and the generation bump primes it fresh.
-    // Only PreviewDriver uses this today (the color frames: full-res hands the producer buffer,
-    // downsampled and the coord table hand their gathered staging buffers), so every /wsp message
-    // rides the one paced path.
+    /// Begin one resumable frame, `header` copied and `body` kept stable by the caller.
     virtual bool sendBufferedFrame(const uint8_t* header, size_t headerLen,
                                    const uint8_t* body, size_t bodyLen) = 0;
+    /// True when no send is in flight, the gate a producer paces itself on.
     virtual bool bufferedSendIdle() const = 0;
+    /// Abandon the in-flight send now, before the `body` buffer goes away.
     virtual void cancelBufferedSend() = 0;
 
-
-
-    // How many subscribers are listening right now. Purely observational (a status line, a log);
-    // producers must not branch per subscriber through this, the channel stays broadcast-only.
+    /// How many subscribers are listening, for a status line or a log rather than a branch.
     virtual int subscriberCount() const { return 0; }
 
-    // Inbound client messages, delivered OPAQUELY: the transport unmasks a client's WS frame
-    // (framing is its job) and hands the payload bytes to the registered sink; only the producer
-    // knows what they mean. onClientGone fires when a client's slot closes or turns over, so a
-    // producer keeping per-slot standing state (the preview's [stride][fps] request) can drop it
-    // with the client. Both fire on the transport's own thread (core 0 under the split); a
-    // producer ticking elsewhere stores single-byte fields the reader tolerates racing on, the
-    // lossy-channel rule.
+    /// Where a transport delivers inbound client bytes and slot closures.
     struct ClientMessageSink {
+        /// One client's payload bytes, whose meaning only the producer knows.
         virtual void onClientMessage(int slot, const uint8_t* payload, int len) = 0;
+        /// A slot closed or turned over, so any standing state for it is dropped.
         virtual void onClientGone(int slot) = 0;
     protected:
         ~ClientMessageSink() = default;
     };
+    /// Register the sink that receives inbound messages, or clear it with null.
     virtual void setClientMessageSink(ClientMessageSink* sink) { (void)sink; }
 
-    // Exclusive access to the sender, for a producer that does NOT run on the transport's own thread.
-    // The multicore split (Drivers `multicore`) ticks the offloaded PreviewDriver on core 1 while
-    // this transport drains, reaps and admits on core 0: two producers, two cores, one preview
-    // socket set and one resumable send slot (the control channel stays core-0-only and outside
-    // this lease). A producer therefore brackets its whole message in tryAcquire/releaseSend:
-    // a frame arm must not race the drain that is reading the slot.
-    //
-    // TRY-acquire, never block: the caller may be on the render or encode thread, where blocking is a
-    // hot-path violation (CLAUDE.md § Hot path). false = the transport is busy this instant → SKIP the
-    // message, don't wait. Skipping is already the producer's back-off path (PreviewDriver's adaptive
-    // frame rate drops a slot whenever the link is behind), so a lost race costs one frame at most.
-    //
-    // Single-threaded transports may return true unconditionally: with one producer thread there is no
-    // race to prevent, and the pair is then free.
+    /// Take the sender if it is free this instant, never blocking.
     virtual bool tryAcquireSend() = 0;
+    /// Give the sender back, once the whole message is armed.
     virtual void releaseSend() = 0;
 
 protected:
     ~BinaryBroadcaster() = default;  // not owned through this interface
 };
 
-/// RAII bracket for the pair above: `if (SendLease s{bc}; s) { …one whole message… }`.
-/// Releases on scope exit; no-ops when the transport was busy. Same shape as mm::LockGuard.
+/// An RAII bracket for the acquire and release pair, the same shape as mm::LockGuard.
 class SendLease {
 public:
+    /// Take the lease, which is held only when the transport was free.
     explicit SendLease(BinaryBroadcaster* bc)
         : bc_(bc), held_(bc && bc->tryAcquireSend()) {}
+    /// Releases the lease when it was held, so a whole message is one scope.
     ~SendLease() { if (held_) bc_->releaseSend(); }
+    /// True when the lease is held, so `if (SendLease s{bc}; s)` guards one whole message.
     explicit operator bool() const { return held_; }
+    /// Not copyable: two leases would release one acquisition twice.
     SendLease(const SendLease&) = delete;
     SendLease& operator=(const SendLease&) = delete;
 private:

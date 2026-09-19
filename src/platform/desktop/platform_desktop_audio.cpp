@@ -1,18 +1,17 @@
-// Desktop audio capture backend: the vendored miniaudio single header, compiled exactly once
-// in this TU. Vendored (the repo's first runtime third-party header, PO-approved) because one
-// public-domain/MIT-0 header with no link dependencies replaces three hand-written OS backends
-// (CoreAudio / WASAPI / ALSA) plus device enumeration; miniaudio runtime-links the OS audio
-// frameworks itself, matching the house rule that the build needs no SDKs (see the Npcap and
-// NDI precedents in platform_desktop.cpp). The header lives untouched in vendor/ and is
-// excluded from the code-quality gates; everything below the include is ours and stays
-// warning-clean.
+/// @defgroup platform_desktop_audio Desktop audio capture
+/// The vendored single-header backend, compiled exactly once here.
+///
+/// @moreinfo
+///
+/// ## Why it is vendored
+///
+/// One permissively licensed header with no link dependencies replaces three hand-written system backends plus device enumeration.
+/// It links the system audio frameworks itself at run time, which matches the rule that the build needs no vendor kits, as the raw-frame and video precedents already do.
+/// The header lives untouched and is excluded from the quality gates; everything below the include is ours and stays warning-clean.
 
-// Shrink the build to the capture core: no decoders/encoders, no waveform generation, no
-// resource manager / node graph / high-level engine.
-// Real GCC on macOS exists only in the local mirror of CI's Linux toolchain (the "GCC build"
-// gate): GCC cannot parse Apple's blocks syntax in the CoreAudio/CoreMIDI framework headers,
-// and that build is a compile-proof, never shipped. Dropping the CoreAudio backend there
-// leaves miniaudio's null backend; the shipped macOS binary is clang-built with CoreAudio.
+// Shrink the build to the capture core: no codecs, no waveform generation, no engine.
+// One compiler cannot parse Apple's block syntax in those framework headers, and that build is a compile proof never shipped.
+// Dropping the backend there leaves the null one, while the shipped binary is built with the other compiler and keeps it.
 #if defined(__APPLE__) && defined(__GNUC__) && !defined(__clang__)
     #define MA_NO_COREAUDIO
 #endif
@@ -56,12 +55,9 @@
     #pragma GCC diagnostic pop
 #endif
 
-// ---------------------------------------------------------------------------------------------
-// The capture backend proper. Everything below is ours (warning-clean); only the include above
-// is vendored. Threading model: miniaudio delivers samples on ITS device thread; the callback
-// pushes into a lock-free SPSC ring; AudioService's polled audioMicRead pops on the render
-// thread. Drop-newest overflow and the sizing rationale live at SpscRing.
-// ---------------------------------------------------------------------------------------------
+// The capture backend proper: everything below is ours and only the include above is vendored.
+// The library delivers samples on ITS own device thread, the callback pushes into a lock-free single-producer ring, and the module's polled read pops on the render thread.
+// The overflow policy and the sizing reasoning live with that ring.
 
 #include "platform/platform.h"
 #include "core/util/SpscRing.h"

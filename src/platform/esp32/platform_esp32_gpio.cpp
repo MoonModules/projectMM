@@ -1,11 +1,47 @@
-// GPIO capability introspection for the pin ownership map (PinsModule). See platform::gpioCapability
-// in platform.h. Two data sources, combined:
-//   - the IDF's own GPIO_IS_VALID_GPIO / GPIO_IS_VALID_OUTPUT_GPIO / rtc_gpio_is_valid_gpio, the
-//     textbook always-correct queries for valid / output-capable / RTC-domain, and
-//   - a small per-chip strap/reserved table, because the SDK has NO "is this a boot strap or a
-//     flash/PSRAM pin" query, which is board/datasheet knowledge. The table mirrors
-//     docs/reference/hardware/gpio-usage.md (its single documented source); keep the two in sync.
-// No chip type escapes this file (the platform-boundary rule); the module gets a plain GpioCapability.
+/// @defgroup platform_esp32_gpio Pin capability introspection
+/// What the pin ownership map above is built from, combining two sources.
+///
+/// No chip type escapes this file: the module gets a plain capability.
+///
+/// @moreinfo
+///
+/// ## Two sources, because one of the questions has no query
+///
+/// The SDK's own checks answer whether a pin is valid, output-capable and in the low-power domain, and those are always correct.
+/// Whether a pin is a boot strap or belongs to the flash or external memory has no query at all, being board and datasheet knowledge.
+/// So a small per-chip table carries it.
+/// That table mirrors the hardware reference page, which is its one documented source, and the two are kept in step.
+///
+/// ## Two lists per chip, one of them conditional
+///
+/// Reserved pins corrupt the device if used, and straps change the boot mode if driven at reset.
+/// The set is keyed on the build's target, so the build IS the chip variant, and a pin listed in neither is neither.
+///
+/// The second list is the pins the memory bus takes only when the module HAS external memory, which is a runtime fact rather than a build one.
+/// One image runs on a bare module and on one with it fitted, so those are added only when it is actually present.
+///
+/// ## The package is read at runtime, not from the build
+///
+/// The system-in-package parts wire their in-package memory differently while the same firmware runs on all of them, so the package comes from the chip's own fuses.
+/// On one of them four pads are not bonded at all, which in practice means the in-package parts use them.
+/// Muxing a peripheral onto one wedges the flash cache, and the board resets with no panic and no dump.
+/// Two neighbouring pins ARE free on that package, which one bench board's microphone uses.
+///
+/// ## Pins are configured for input and output together
+///
+/// A plain output leaves the input buffer disabled, so a read returns nothing on a pin that is really driving high, and the map's live column then lies about it.
+/// That cost a long debugging round on a relay that was working the whole time.
+/// The input buffer costs nothing here and makes a driven pin readable, which is what every other peripheral on this chip already does.
+///
+/// ## Only the first converter, deliberately
+///
+/// One unit is opened on first use and kept, since the handle owns the peripheral and opening one per read would reconfigure it every tick.
+/// The second converter is shared with the radio on every chip here and times out whenever the radio holds it.
+/// A pin there would read fine on the bench and fail once the device joined a network, so refusing is the honest answer until something needs it.
+///
+/// A raw count is not a fixed fraction of full scale, every part's converter being nonlinear in its own way.
+/// And the correction for its own silicon lives in the chip's fuses.
+/// The scheme is chosen by which capability the target declares, curve fitting where it is supported and line fitting otherwise.
 
 #include "platform/platform.h"
 
@@ -30,16 +66,8 @@ namespace mm::platform {
 
 namespace {
 
-// Per-chip strap + reserved (flash/PSRAM/USB) pins, from docs/reference/hardware/gpio-usage.md. Reserved
-// pins corrupt the device if used; straps change boot mode if driven at reset. The set is keyed on
-// the build's CONFIG_IDF_TARGET (the same discriminator platform_config.h / platform_esp32.cpp use),
-// so the build IS the chip variant. A gpio not listed here is neither a strap nor reserved (the SDK
-// queries still decide valid/output/rtc). Both helpers are plain linear scans over tiny fixed arrays.
-//
-// kReservedIfPsram is the second list each target carries: pins the flash/PSRAM bus takes only when
-// the module HAS PSRAM, which is a runtime fact (one esp32s3 image runs on a bare module with none
-// and on a WROVER with it), so gpioCapability adds them only when psramPresent(). A plain WROOM (the
-// Olimex ESP32-Gateway) keeps its 16/17.
+// The per-chip strap and reserved pins, from the hardware reference page: @xref{two-lists-per-chip-one-of-them-conditional|what each list means}.
+// Both helpers are plain linear scans over tiny fixed arrays.
 bool inList(uint8_t gpio, const uint8_t* list, size_t n) {
     for (size_t i = 0; i < n; i++) if (list[i] == gpio) return true;
     return false;
@@ -51,13 +79,7 @@ bool inList(uint8_t gpio, const uint8_t* list, size_t n) {
 constexpr uint8_t kReserved[]        = {6, 7, 8, 9, 10, 11};
 constexpr uint8_t kReservedIfPsram[] = {16, 17};
 constexpr uint8_t kStrap[]           = {0, 2, 5, 12, 15};
-// The PICO system-in-package parts wire their in-package flash and PSRAM differently, and the SAME
-// esp32 firmware runs on all of them, so the package is read from eFuse at runtime rather than from
-// the build. ESP32-PICO-V3-02 (the QuinLED Dig-Next-2): flash on 6/11, PSRAM on 9/10, and the pads
-// of GPIO 16/17/18/23 are NC on the package (datasheet Table 7), which in practice means "used by
-// the in-package parts": muxing a peripheral onto one wedges the flash cache, and the board resets
-// with no panic and no coredump. 7/8 ARE free on this package (the Dig-Next-2's microphone sits
-// there). ESP32-PICO-D4: flash on 6-11 plus 16/17, PSRAM or not.
+// The package is read from the chip's own fuses at runtime: @xref{the-package-is-read-at-runtime-not-from-the-build|why, and what an unbonded pad costs}.
 constexpr uint8_t kReservedPicoV302[] = {6, 9, 10, 11};
 constexpr uint8_t kAbsentPicoV302[]   = {16, 17, 18, 23};
 constexpr uint8_t kReservedPicoD4[]   = {6, 7, 8, 9, 10, 11, 16, 17};
@@ -68,11 +90,9 @@ uint32_t packageId() {
     return pkg;
 }
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-// ESP32-S3: flash 26-32 always; 33-37 are octal-PSRAM's SPIIO4-7 + DQS, reserved only on an octal-PSRAM
-// module (N16R8/R8). The mode is the IMAGE's (CONFIG_SPIRAM_MODE_OCT), so a quad-PSRAM build leaves
-// 33-37 free: the MatrixPortal S3 (2 MB quad) drives three HUB75 lines on them, and an octal image
-// cannot run on that part anyway. Straps 0,45,46 (GPIO3 is a soft strap). JTAG/UART0/USB are
-// role-conflicts, not reserved: they stay usable as GPIO, so they are NOT flagged reserved here.
+// The wider memory bus reserves a second range, but only on a module that has it, and the mode is the image's rather than the part's.
+// So a narrower build leaves those free, which one board drives panel lines on, and the wider image cannot run on that part anyway.
+// The debug and serial roles are conflicts rather than reservations: they stay usable as ordinary pins, so they are not flagged here.
 constexpr uint8_t kReserved[]        = {26, 27, 28, 29, 30, 31, 32};
 #if CONFIG_SPIRAM_MODE_OCT
 constexpr uint8_t kReservedIfPsram[] = {33, 34, 35, 36, 37};
@@ -205,24 +225,14 @@ bool gpioWrite(uint8_t gpio, bool high) {
     // idempotent, and this runs on a control change, never per frame.
     gpio_config_t cfg = {};
     cfg.pin_bit_mask = 1ULL << gpio;
-    // INPUT_OUTPUT, not OUTPUT: plain output leaves the input buffer DISABLED, so gpio_get_level
-    // reads 0 on a pin that is really driving high, and the pin map's "see the wire" column lies
-    // about it. That cost a long debugging round on a relay that was working the whole time. The
-    // input buffer costs nothing here and makes a driven pin readable, which is what every other
-    // peripheral on this chip already does (an RMT LED pin reports dir=both for the same reason).
+    // Input and output together: @xref{pins-are-configured-for-input-and-output-together|why a plain output makes the map lie}.
     cfg.mode         = GPIO_MODE_INPUT_OUTPUT;
     cfg.intr_type    = GPIO_INTR_DISABLE;
     if (gpio_config(&cfg) != ESP_OK) return false;
     return gpio_set_level(static_cast<gpio_num_t>(gpio), high ? 1 : 0) == ESP_OK;
 }
 
-// --- ADC ------------------------------------------------------------------------------------
-//
-// One oneshot unit, opened on first use and kept: the handle owns the peripheral, so opening one per
-// read would reconfigure it on every tick. ADC1 only, deliberately, which is what the pedal and the
-// board sense pins use. ADC2 is shared with the WiFi radio on every chip here and returns
-// ESP_ERR_TIMEOUT whenever the radio holds it, so a pin there would read fine on the bench and fail
-// once the device joined a network. Refusing is the honest answer until something needs it.
+// The analogue converter: @xref{only-the-first-converter-deliberately|why one unit, and why not the second}.
 namespace {
 adc_oneshot_unit_handle_t g_adc1 = nullptr;
 bool g_adcChanReady[ADC_CHANNEL_9 + 1] = {};
@@ -264,21 +274,12 @@ bool adcRead(uint8_t gpio, uint16_t& raw) {
 
 uint16_t adcMaxCount() { return 4095; }    // 12 bits, matching ADC_BITWIDTH_DEFAULT on these chips
 
-// --- Calibrated millivolts ---
-//
-// A raw count is not a fixed fraction of full scale: every part's converter is nonlinear in its own
-// way, and the ESP32 carries the correction for its own silicon in eFuse. The IDF applies it through
-// a calibration handle, created once per unit and kept, exactly as the oneshot handle is.
-//
-// Curve fitting where the chip supports it (S3, P4, C-series), line fitting on the classic ESP32.
-// The scheme is chosen by which macro the target defines, so no per-chip #if is needed here beyond
-// the two the IDF itself exposes.
+// Calibrated voltages, applied through a handle created once per unit and kept, exactly as the unit's own handle is.
 namespace {
 adc_cali_handle_t g_adcCali = nullptr;
 bool g_adcCaliTried = false;
 
-/// The calibration handle for ADC1 at our attenuation, or nullptr where the chip has no eFuse data.
-/// Attempted ONCE: a part without calibration would otherwise retry on every read.
+/// The calibration handle at our attenuation, or nothing where the chip carries no factory data; attempted once, since a part without it would otherwise retry on every read.
 adc_cali_handle_t adcCali() {
     if (g_adcCaliTried) return g_adcCali;
     g_adcCaliTried = true;

@@ -1,11 +1,19 @@
-// LittleFS partition mount + the `fs*` / `filesystem*` API on ESP32.
-//
-// Cut out of platform_esp32.cpp (plan-23) for size + readability. The
-// file owns its private state (FS_TAG, FS_LABELS, FS_MOUNT_POINT,
-// fsMounted_) and the path-translation helper; the rest of the platform
-// layer talks to it only through the public mm::platform::fs* and
-// filesystem* symbols declared in platform.h. Move was a code-organisation
-// change with no API delta — anything that compiled before still does.
+/// @defgroup platform_esp32_fs LittleFS mount and the filesystem seam
+/// The partition mount and the file API on an ESP32.
+///
+/// The file owns its private state and the path translation; the rest of the layer reaches it only through the declared symbols.
+///
+/// @moreinfo
+///
+/// ## Two partition labels, tried in order
+///
+/// The volume has always held LittleFS, and a table written from 2026-08 says so: the label and subtype both name it.
+/// An older table calls the same volume by the legacy misnomer, so both are tried and a device keeps its config across an update.
+///
+/// ## Formatting is gated on the LAST EXISTING label
+///
+/// A formatting mount against the wrong label would erase a volume the next label would have opened, taking the user's config with it.
+/// Gating it on the last entry in the array rather than the last one present left a fresh board unformatted, running with persistence disabled.
 
 #include "platform/platform.h"
 
@@ -24,10 +32,7 @@ namespace mm::platform {
 
 // LittleFS state
 static constexpr const char* FS_TAG = "mm_fs";
-// The volume has always held LittleFS. Tables written from 2026-08 say so properly: partition
-// `littlefs` with the littlefs subtype (0x83). Older tables (and the 8/16 MB ones until they
-// migrate) call the same volume `spiffs` with the spiffs subtype, a legacy misnomer. Both are
-// tried in order, so a device that keeps its old table across an OTA still finds its config.
+// Both labels, in order: @xref{two-partition-labels-tried-in-order|why two}.
 struct FsCandidate { esp_partition_subtype_t subtype; const char* label; };
 static constexpr FsCandidate FS_CANDIDATES[] = {
     {ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, "littlefs"},
@@ -37,9 +42,7 @@ static const char* fsLabelInUse_ = nullptr;
 static constexpr const char* FS_MOUNT_POINT = "/littlefs";    // VFS mount point; not exposed in API paths
 static bool fsMounted_ = false;
 
-// Translate API path "/foo/bar" or "foo/bar" → "/littlefs/foo/bar" into out.
-// Returns false on null input, zero-sized output, or truncation; out[0] is set to 0
-// on any failure so callers don't accidentally consume a partial path.
+/// Map an API path onto the mount point; false on truncation, leaving nothing partial to consume.
 static bool fsTranslate(const char* apiPath, char* out, size_t outLen) {
     if (outLen == 0) return false;
     if (!apiPath) { out[0] = 0; return false; }
@@ -50,8 +53,7 @@ static bool fsTranslate(const char* apiPath, char* out, size_t outLen) {
 }
 
 void fsSetRoot(const char* /*path*/) {
-    // No-op on ESP32 — LittleFS is mounted at a fixed partition; the FS_MOUNT_POINT
-    // prefix is hard-coded. Provided only so test code can call it portably.
+    // A no-op here, the mount point being fixed; it exists so a test can call it portably.
 }
 
 const char* fsRootPath() { return FS_MOUNT_POINT; }
@@ -59,12 +61,7 @@ const char* fsRootPath() { return FS_MOUNT_POINT; }
 bool fsMount() {
     if (fsMounted_) return true;
 
-    // Try each known label. format_if_mount_failed is OFF for every attempt but the last that
-    // actually has a partition: a formatting mount against the wrong label would erase a volume
-    // that the next label would have opened, taking the user's config with it. "Last" must mean
-    // last EXISTING, not last in the array: a MoonBase table carries only `littlefs`, and
-    // gating the format on the absent `spiffs` entry left a fresh board unformatted, so it ran
-    // with persistence disabled.
+    // Formatting is enabled only on the last label that actually HAS a partition: @xref{formatting-is-gated-on-the-last-existing-label|why}.
     esp_err_t err = ESP_FAIL;
     constexpr size_t kCandidates = sizeof(FS_CANDIDATES) / sizeof(FS_CANDIDATES[0]);
     size_t lastPresent = kCandidates;
@@ -128,9 +125,7 @@ bool fsRemove(const char* path) {
     if (!fsMounted_) return false;
     char full[128];
     if (!fsTranslate(path, full, sizeof(full))) return false;
-    // Match the desktop contract (std::filesystem::remove): delete a file OR an empty directory.
-    // On the LittleFS VFS ::remove() maps to unlink(), which fails on a directory — so stat first
-    // and route a directory to rmdir() (which itself fails cleanly if the directory isn't empty).
+    // Matching the desktop contract: remove maps to unlink here and fails on a directory, so stat first.
     struct stat st;
     if (::stat(full, &st) == 0 && S_ISDIR(st.st_mode)) return ::rmdir(full) == 0;
     return ::remove(full) == 0;
@@ -150,9 +145,7 @@ int fsRead(const char* path, char* buf, size_t maxLen) {
 
 bool fsWriteAtomic(const char* path, const char* data, size_t len) {
     if (!fsMounted_) return false;
-    // Guard the public API: a non-zero len with a null data pointer is UB
-    // in std::fwrite. No current caller passes null, but the boundary is
-    // exposed so the check is cheap insurance.
+    // A non-zero length with a null pointer is undefined in the write below, so guard the boundary.
     if (len > 0 && !data) return false;
     char full[128];
     char tmp[136];
@@ -211,8 +204,7 @@ bool fsWriteStream(const char* path, FsWriteSrc src, void* user) {
 
     FILE* f = std::fopen(tmp, "wb");
     if (!f) return false;
-    // Pull chunks from the source and write each straight through — fixed buffer, any file size.
-    // `abort` set by the source (a short/timed-out upload) means the data is incomplete → discard.
+    // Chunks straight through, so any file size fits a fixed buffer; an aborted source discards.
     char chunk[1024];
     bool ok = true, abort = false;
     for (;;) {

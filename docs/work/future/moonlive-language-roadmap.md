@@ -483,7 +483,7 @@ picking a number — the balls port wanted ~12 and had to be folded down.
 **32 live variables**, shared by a script's named variables, its loop counters, and the arguments it
 stages for a call. The budget is what is live AT ONCE rather than a total: a call hands its staging
 slots back, and an `if`, `else` or `for` block hands its locals back at the closing brace
-([MoonLiveEffect.md](../../moonmodules/light/MoonLiveEffect.md) documents both). A script that exceeds
+([MoonLive](../../moonmodules/light/moonlive.md) documents both). A script that exceeds
 it fails with "too many variables in this function", "too many arguments to hold" or "too many loop
 variables".
 

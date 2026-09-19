@@ -6,32 +6,25 @@
 
 namespace mm::moonlive {
 
-/// One scripted module's particle pool: the buffers the particles live in, the `particles::Pool`
-/// view over them, and the frame clock that makes the physics run at the same speed everywhere.
+/// One scripted module's particle pool, with the frame clock that makes the physics run evenly.
 ///
-/// Held BY VALUE in the binding, the shape MoonLiveScript already established: a concern the three
-/// scripted bindings would each grow their own copy of gets one home rather than a shared base.
+/// @moreinfo
 ///
-/// **Why the pool cannot live in the script's own arena.** A Pool is eight parallel arrays. The
-/// script arena is 64 bytes across 8 members, so a script could hold about five particles against
-/// the hundreds a particle look needs. Widening the arena is the wrong answer: `sizeof(MoonLive)`
-/// is held by value in every scripted module and probed on the main task's stack by registerType,
-/// which boot-looped the P4 at 1440 bytes. So the particles live OUTSIDE the arena, in
-/// ScratchBuffers the binding owns, and the script only ever names whole-pool operations.
+/// ## The pool lives outside the script arena
 ///
-/// Six buffers, not eight: `acc` and `size` are documented optional in particles.h (`valid()` does
-/// not require them) and neither feeds a builtin. FireworksEffect sizes exactly these six.
+/// A pool is eight parallel arrays, where the script arena is 64 bytes across 8 members.
+/// A script could hold about five particles there, against the hundreds a particle look needs.
+/// Widening the arena is the wrong answer, since every scripted module holds one by value.
+/// A probe on the main task's stack boot-looped the P4 at 1440 bytes.
+///
+/// Six buffers rather than eight: `acc` and `size` are optional and neither feeds a builtin.
 class MoonLiveParticles {
 public:
     explicit MoonLiveParticles(MoonModule& owner)
         : x_(owner), y_(owner), vx_(owner), vy_(owner), ttl_(owner), hue_(owner) {}
 
-    /// Size the pool to `count` particles, or free it at 0. Returns the count actually available,
-    /// which is 0 when the allocation failed: that is what a script sees, so a device with less
-    /// PSRAM than the author assumed reports the truth rather than rendering nothing in silence.
-    ///
-    /// A failed resize must leave `valid()` false rather than a stale pool pointing at freed
-    /// memory, which is the trap ParticlesEffect documents at its own prepare().
+    // A failed resize leaves `valid()` false rather than a stale pool naming freed memory.
+    /// Size the pool to `count` particles, returning the count available and 0 when allocation fails.
     uint16_t resize(uint16_t count) {
         if (count == 0) { release(); return 0; }
         const bool ok = x_.resize(count) && y_.resize(count) && vx_.resize(count) &&
@@ -47,9 +40,8 @@ public:
         return count;
     }
 
-    /// Free every buffer and leave the pool invalid. Called from the binding's release(), before it
-    /// chains to the base: MoonModule::release() frees the buffers on its own free-list walk, but
-    /// the Pool's pointers would still name that freed memory.
+    // Called before the binding chains to the base, whose free-list walk would leave these dangling.
+    /// Free every buffer and leave the pool invalid.
     void release() {
         x_.resize(0); y_.resize(0); vx_.resize(0); vy_.resize(0); ttl_.resize(0); hue_.resize(0);
         pool_ = particles::Pool{};
@@ -59,9 +51,8 @@ public:
     particles::Pool& pool() MM_NONBLOCKING { return pool_; }
     uint16_t count() const MM_NONBLOCKING { return pool_.count; }
 
-    /// How much of a reference frame this frame covered, in 8.8 fixed point. Every per-frame
-    /// builtin passes this to the kernel, so framerate independence is a property of the system
-    /// rather than something a script author remembers to type.
+    // Every per-frame builtin passes this on, so framerate independence is the system's property.
+    /// How much of a reference frame this frame covered, in 8.8 fixed point.
     uint32_t advance(uint32_t nowMs) MM_NONBLOCKING { return time_.advance(nowMs); }
 
 private:

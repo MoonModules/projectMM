@@ -9,31 +9,34 @@
 
 namespace mm {
 
-/// Contiguous light-data buffer, shared between the layers that write it (effects)
-/// and the driver groups that read it. When memory allows, layers and driver groups
-/// each own a buffer (so they run in parallel); when memory is tight, one buffer is
-/// shared.
+/// The contiguous light data every effect writes and every driver reads.
 ///
-/// **Storage:** a raw `uint8_t*` (not `RGB*`), so any channel layout fits — RGB,
-/// RGBW, or multi-channel DMX fixtures — addressed by channel count + offset.
-/// Allocated once via `platform::alloc` (PSRAM when available) outside the hot path
-/// and reused every frame; a `std::span<uint8_t>` view is the zero-cost safe accessor.
+/// Allocated once outside the hot path and reused each frame.
+/// A layer and a driver group each own one when memory allows, and share one when it is tight.
+/// @moreinfo
 ///
-/// **Locking:** a semaphore costs ~150 bytes on ESP32, so prefer lock-free patterns —
-/// an atomic pointer swap for double-buffering, a single-slot SPSC handoff, or one
-/// shared semaphore across layers rather than one per layer.
+/// ## Any channel layout fits
 ///
-/// **Prior art:** MoonLight's `VirtualLayer.virtualChannels` — a raw `uint8_t*` sized
-/// by `channelsPerLight * nrOfLights`, RGB/RGBW/DMX via LightsHeader offsets
-/// (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/VirtualLayer.h).
+/// The storage is a raw byte array rather than a pixel type, addressed by channel count and offset.
+/// That is what lets RGB, RGBW and multi-channel DMX fixtures share one buffer.
+/// A `std::span` view is the zero-cost safe accessor over it.
+///
+/// ## Locking is avoided, not optimized
+///
+/// A semaphore costs around 150 bytes on an ESP32, so the patterns here stay lock-free.
+/// An atomic pointer swap for double buffering, or one shared semaphore across layers.
 class Buffer {
 public:
+    /// An empty buffer, holding nothing until it is allocated.
     Buffer() = default;
+    /// Release the allocation this buffer owns.
     ~Buffer() { free(); }
 
+    /// Never copied: the buffer owns its allocation and two owners would double-free it.
     Buffer(const Buffer&) = delete;
     Buffer& operator=(const Buffer&) = delete;
 
+    /// Take over another buffer's allocation, leaving it empty.
     Buffer(Buffer&& other) noexcept
         : data_(other.data_), count_(other.count_), channelsPerLight_(other.channelsPerLight_) {
         other.data_ = nullptr;
@@ -54,6 +57,7 @@ public:
         return *this;
     }
 
+    /// Size the buffer for `nrOfLights` at `cpl` channels each, returning false when memory refuses.
     bool allocate(nrOfLightsType nrOfLights, uint8_t cpl) {
         free();
         size_t totalBytes = static_cast<size_t>(nrOfLights) * cpl;
@@ -66,6 +70,7 @@ public:
         return true;
     }
 
+    /// Release the allocation and report the buffer as empty.
     void free() {
         if (data_) {
             platform::free(data_);
@@ -75,18 +80,26 @@ public:
         channelsPerLight_ = 0;
     }
 
+    /// Set every channel to zero, leaving the allocation in place.
     void clear() {
         if (data_) std::memset(data_, 0, bytes());
     }
 
+    /// The raw bytes, for a writer.
     uint8_t* data() { return data_; }
+    /// The raw bytes, for a reader.
     const uint8_t* data() const { return data_; }
 
+    /// A bounds-carrying view of the bytes, for a writer.
     std::span<uint8_t> span() { return {data_, bytes()}; }
+    /// A bounds-carrying view of the bytes, for a reader.
     std::span<const uint8_t> span() const { return {data_, bytes()}; }
 
+    /// How many lights the buffer holds.
     nrOfLightsType count() const { return count_; }
+    /// How many bytes each light occupies.
     uint8_t channelsPerLight() const { return channelsPerLight_; }
+    /// How many bytes the lights occupy.
     size_t bytes() const { return static_cast<size_t>(count_) * channelsPerLight_; }
 
 private:

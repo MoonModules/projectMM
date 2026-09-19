@@ -183,6 +183,23 @@ Detail: [technical](moxygen/TubesLayout.md)
 
 ## projectMM-native layouts
 
+<a id="moonlive"></a>
+
+### MoonLive
+
+<img src="../../assets/light/layouts/MoonLiveLayout.gif" width="300" alt="MoonLive scripted layout preview">
+
+Where the lights physically are, written as text on the running device. A layout is the one part of the pipeline that differs for every build: a ring, a spiral staircase, a costume sewn last night. A script means the person who hung the lights describes where they went, and sees it immediately. The language is [MoonLive](moonlive.md).
+
+- `script`: which `.mll` file runs, picked from the library and edited here.
+- Everything the script declares appears as a real control.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/MoonLiveLayout.md) · [how the count is known](#moonlive-details)
+
+[Tests](../../reference/tests/unit-tests.md#moonlivelayout)
+
 <a id="grid"></a>
 
 ### Grid
@@ -246,3 +263,22 @@ Detail: [technical](moxygen/WheelLayout.md)
 
 The [Layouts](moxygen/Layouts.md) container itself takes no controls — see its page for coordinate iteration, reordering, and rebuild propagation.
 
+## MoonLive, details
+
+#### How the light count is known
+
+A layout answers how many lights before it produces a single coordinate, because the Layer sizes its buffer from that number and only then asks where each light is. A script cannot be asked how many without running it.
+
+So it runs twice. The first pass counts what `addLight` places, and the second emits each position. Same script and same arithmetic, so a deterministic script agrees with itself, which is what the compiled layouts do for the same reason.
+
+Nothing is stored between the passes. Staging 16,384 coordinates costs 48 KB, which a classic ESP32 driving that many lights does not have spare. Running the script again is cheaper than remembering what it said.
+
+A script calling `random16` breaks that determinism. The passes disagree on the count when a random value decides a loop bound, while a random coordinate keeps the count right and places the lights elsewhere on the second pass.
+
+#### What a layout script is given
+
+`addLight(x, y, z)` places the next light along the strand. There is no index, because the order the script calls it in is the strand order.
+
+`t` is the one system variable a layout reads, and it is always 0: the script runs twice per rebuild and must agree with itself. `width`, `height` and `depth` read 0, since a layout is upstream of the grid it defines.
+
+A script names its own size controls, such as `cols` and `rows`. The pipeline derives the bounding box from the coordinates actually placed, so a size passed in from outside would be a second answer that could disagree with the first.

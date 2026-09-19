@@ -128,6 +128,23 @@ Detail: [technical](moxygen/TransposeModifier.md)
 
 ## projectMM-native modifiers
 
+<a id="moonlive"></a>
+
+### MoonLive · dynamic
+
+<img src="../../assets/light/modifiers/MoonLiveModifier.gif" width="300" alt="MoonLive scripted modifier preview">
+
+The coordinate transform written as text on the running device: mirror the pattern, shift it, swap its axes. Each hand-written modifier is a class and a reflash, where a script is a line of text applied as you type. The language is [MoonLive](moonlive.md).
+
+- `script`: which `.mlm` file runs, picked from the library and edited here.
+- Everything the script declares appears as a real control.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/MoonLiveModifier.md) · [what a script transforms](#moonlive-details)
+
+[Tests](../../reference/tests/unit-tests.md#moonlivemodifier)
+
 <a id="randommap"></a>
 
 ### RandomMap · dynamic
@@ -170,3 +187,28 @@ Detail: [technical](moxygen/RotateModifier.md)
 
 [Tests](../../reference/tests/unit-tests.md#rotatemodifier)
 
+## MoonLive, details
+
+#### One coordinate at a time
+
+The script transforms one coordinate and needs no loop, because the Layer already calls it once per physical light while building its mapping.
+
+```c
+class MirrorModifier {
+  void modifyLogical() { setXYZ(width - 1 - xPos, yPos, zPos); }
+}
+```
+
+`setXYZ(x, y, z)` writes the transformed position, mirroring `setRGB(index, r, g, b)`.
+
+#### Read the grid rather than assuming it
+
+`width` matters more than it looks. A mirror written against a fixed 255 sends every light of a 16-wide grid outside the grid, the Layer discards each one as out of bounds, and the fixture goes black with no error anywhere, because the script itself ran perfectly.
+
+A computed coordinate is full width. `setXYZ` hands its three values to the binding as a call rather than storing them as bytes, so `setXYZ(767 - xPos, ...)` on a 768-wide wall arrives as 767. It was an inline three-byte store once, and that is the bug it caused.
+
+#### What a script cannot do
+
+A modifier has two hooks: one reshapes the logical box once per rebuild, and one folds each coordinate. A script drives only the second. Transforms keeping the box the same size work, and one that halves it, as the built-in [Mirror](#mirror) does, needs the compiled modifier.
+
+A script that fails to compile shows the parse error and the mapping passes coordinates straight through, so the transform disappears until the script parses again and the device keeps rendering.

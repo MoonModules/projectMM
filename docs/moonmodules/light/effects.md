@@ -1,6 +1,6 @@
 # Effects
 
-Every effect, one block each: its preview, what it does, and what each control means: together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio: see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behavior, and control descriptions together. (For how this page maps to the source/asset folders, see the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).)
+Every effect, one block each: its preview, what it does, and what each control means: together. An effect writes per-pixel color into its [Layer](moxygen/Layer.md)'s buffer each tick; [modifiers](modifiers.md) reshape the result and a [driver](moxygen/PreviewDriver.md) sends it out. Effects that name an index color read the global palette (the `palette` control on [Drivers](moxygen/Drivers.md)) via `colorFromPalette`. Each block's emoji are its `tags()` (origin/creator/audio: see the [tag emoji legend](../../explanation/architecture/index.md#tag-emoji-legend)); **Dim** is its native axes ([Layer](moxygen/Layer.md) extrudes a lower-dim effect onto a bigger grid). Effects are grouped into sections by origin, and each block carries that effect's preview, behavior, and control descriptions together. How the layout here maps to the source and asset folders is the [folder-structure decision](../../contributing/documentation-standards.md#module-pages).
 
 Effects are built from the shared [power functions](power-functions.md): the drawing, field and motion routines every effect composes; that page lists each one with its callers.
 
@@ -859,7 +859,7 @@ Detail: [technical](moxygen/TextEffect.md)
 
 <img src="../../assets/light/effects/GameOfLifeEffect.gif" width="300" alt="GameOfLife effect preview">
 
-Conway's cellular automaton generalised to 2D/3D: selectable rulesets (+ custom `B#/S#`), cells that inherit a neighbor's palette color on birth, optional green→red age coloring, a dead-cell blur fading toward the background color, toroidal `wrap`, a 1.5 s settle pause, and 3-CRC stasis self-respawn (R-pentomino/glider) when the board goes static.
+Conway's cellular automaton generalized to 2D and 3D, with selectable rulesets and custom `B#/S#`. Cells inherit a neighbor's palette color on birth, dead cells blur toward the background, and the board wraps toroidally. A stasis check respawns a pentomino or glider when the board goes static.
 
 - `backgroundColorR` / `G` / `B`: the color dead cells fade toward.
 - `ruleset`: the birth and survive rule: Conway, HighLife, Maze and others.
@@ -1122,6 +1122,23 @@ Detail: [technical](moxygen/NoiseEffect.md)
 
 ## projectMM-native effects
 
+<a id="moonlive"></a>
+
+### MoonLive 📝 · any
+
+<img src="../../assets/light/effects/MoonLiveEffect.gif" width="300" alt="MoonLive scripted effect preview">
+
+An effect you write as text on the running device, compiled to native code on the next tick. Pick a script from the library or write your own, and it renders at the speed of a compiled effect. The language is [MoonLive](moonlive.md).
+
+- `script`: which `.mle` file runs, picked from the library and edited here.
+- Every control the script declares, editable live without a recompile.
+
+Origin: projectMM original, on the native-codegen approach of [ESPLiveScript](https://github.com/hpwit/ESPLiveScript) by Yves Bazin
+
+Detail: [technical](moxygen/MoonLiveEffect.md) · [what the card reports](#moonlive-details)
+
+[Tests](../../reference/tests/unit-tests.md#moonlive)
+
 <a id="audiospectrum"></a>
 
 ### AudioSpectrum 💫🎶
@@ -1241,3 +1258,428 @@ Origin: MoonLight (Sinus, AI-generated) · via [MoonLight](https://github.com/Mo
 Detail: [technical](moxygen/SineEffect.md)
 
 [Tests](../../reference/tests/unit-tests.md#sineeffect)
+
+<a id="aurora"></a>
+
+### Aurora 💫🖌️🌫️🎡 · 3D
+
+<img src="../../assets/light/effects/AuroraEffect.png" width="300" alt="Aurora effect preview">
+
+Layers of one noise field at different scales, moved by different oscillators and composited. The interference between them reads as curtains folding through each other. No aurora is simulated: this is the shader idiom rather than a picture.
+
+- `speed`: how fast the layers move.
+- `scale`: the field's spatial frequency.
+- `layers`: how many are composited.
+- `warp`: how far the field bends before sampling.
+- `twist`: rotation applied with radius.
+- `segments`: kaleidoscopic repeats around the center.
+- `contrast`: how hard the composite pushes toward black and white.
+- `octaves`: how much fine detail the field carries.
+
+Origin: projectMM original, on the shader vocabulary Stefan Petrick made recognizable in the LED world
+
+Detail: [technical](moxygen/AuroraEffect.md)
+
+[Tests](../../reference/tests/unit-tests.md#auroraeffect)
+
+<a id="ballpit"></a>
+
+### Ballpit 💫✨ · 2D
+
+<img src="../../assets/light/effects/BallpitEffect.png" width="300" alt="Ballpit effect preview">
+
+Falling balls that pile up and push each other aside. Gravity pulls them down, the floor stops them, and contact between neighbors does the rest, so the heap's shape is whatever the collisions produce.
+
+- `balls`: how many are in play.
+- `gravity`: downward acceleration.
+- `size`: ball radius.
+- `bounce`: how much energy a collision returns.
+- `tilt`: which way the floor leans.
+- `drag`: how fast motion bleeds away.
+
+Origin: projectMM original, on the WLED Particle System's ballpit family
+
+Detail: [technical](moxygen/BallpitEffect.md)
+
+<a id="beatripples"></a>
+
+### BeatRipples 💫🎶🖌️ · 2D
+
+<img src="../../assets/light/effects/BeatRipplesEffect.gif" width="300" alt="BeatRipples effect preview">
+
+A wave surface where every detected beat drops a stone. Ripples pass through each other, reflect off the walls and interfere into standing patterns, and between beats the surface keeps ringing on its own.
+
+- `damping`: how fast the surface settles.
+- `drop`: the size of a beat's stone.
+- `rain`: stones dropped without a beat.
+- `shine`: how hard the slope reads as light.
+
+Origin: projectMM original, on the two-buffer water effect the demoscene settled on (Gomez, 2000)
+
+Detail: [technical](moxygen/BeatRipplesEffect.md)
+
+[Tests](../../reference/tests/unit-tests.md#beatrippleseffect)
+
+<a id="dissolve"></a>
+
+### Dissolve 💫 · 2D
+
+<img src="../../assets/light/effects/DissolveEffect.png" width="300" alt="Dissolve effect preview">
+
+Two color fields trading places pixel by pixel. The order looks random but is computed: each pixel asks a hash of its own position for a threshold and compares it against the progress, so there is no array, no shuffle and no per-pixel state.
+
+- `bpm`: how fast the two fields trade.
+- `spread`: how wide the transition front is.
+- `eased`: soften the progress curve.
+- `scatter`: how scrambled the order looks.
+
+Origin: projectMM original, on the classic dissolve in its position-addressed shader form
+
+Detail: [technical](moxygen/DissolveEffect.md)
+
+<a id="echo"></a>
+
+### Echo 💫✨ · 2D
+
+<img src="../../assets/light/effects/EchoEffect.png" width="300" alt="Echo effect preview">
+
+The previous frame fed back through a zoom and a rotation, dimmed, with a bright source drawn on top. The trail spirals away from itself, as a camera pointed at its own monitor does.
+
+- `bpm`: how fast the source moves.
+- `zoom`: how much each pass scales.
+- `rotate`: how much each pass turns.
+- `decay`: how fast the trail fades.
+- `size`: the source's size.
+
+Origin: projectMM original, on video feedback, a demoscene and video-art staple
+
+Detail: [technical](moxygen/EchoEffect.md)
+
+<a id="fireworks"></a>
+
+### Fireworks 💫✨ · 2D
+
+<img src="../../assets/light/effects/FireworksEffect.png" width="300" alt="Fireworks effect preview">
+
+Shells that rise, stall, and burst into falling sparks. A shell is spawned with upward velocity and gravity acts on it every frame, so the burst fires when its vertical velocity crosses zero and the physics decides where.
+
+- `launchRate`: how often a shell goes up.
+- `launchSpeed`: how hard it is thrown.
+- `gravity`: downward acceleration.
+- `sparks`: how many a burst produces.
+- `sparkLife`: how long they last.
+- `drag`: how fast they slow.
+- `fade`: how they dim over their life.
+
+Origin: projectMM original, on the WLED Particle System's firework family
+
+Detail: [technical](moxygen/FireworksEffect.md)
+
+<a id="fluid"></a>
+
+### Fluid 💫🖌️🌊💨 · 3D
+
+<img src="../../assets/light/effects/FluidEffect.png" width="300" alt="Fluid effect preview">
+
+Dye poured into a simulated fluid and carried by the flow the medium itself works out. The jets push the fluid, and where the dye goes is the simulation's answer rather than a path anything drew.
+
+- `jets`: how many are injecting.
+- `force`: how hard they push.
+- `swirl`: how much rotation they add.
+- `viscosity`: how thick the medium is.
+- `persistence`: how long dye lingers.
+- `iterations`: how hard the solver works per frame.
+
+Origin: projectMM original, on the stable-fluids method (Stam, 1999)
+
+Detail: [technical](moxygen/FluidEffect.md)
+
+<a id="movinghead"></a>
+
+### MovingHead 💫🎶🎯 · 3D
+
+<img src="../../assets/light/effects/MovingHeadEffect.gif" width="300" alt="MovingHead effect preview">
+
+Aims a rig of moving heads, with formations and an audio-reactive mode. The fixtures sweep as a set rather than individually, so a formation reads as one gesture across the rig.
+
+- `formation`: which pattern the rig traces.
+- `panBpm`: how fast it sweeps horizontally.
+- `tiltBpm`: how fast it sweeps vertically.
+- `panRange`: how far the sweep travels.
+- `tiltRange`: how far it travels vertically.
+- `panCenter`: where the sweep is centered.
+- `tiltCenter`: its vertical center.
+- `audioReactive`: drive the aim from the audio.
+- `gobo`: which pattern the beam carries.
+- `rotate`: spin the pattern.
+- `goboOnBeat`: change it on a detected beat.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/MovingHeadEffect.md)
+
+[Tests](../../reference/tests/unit-tests.md#movingheadeffect)
+
+<a id="nebula"></a>
+
+### Nebula 💫🖌️💨🌫️ · 3D
+
+<img src="../../assets/light/effects/NebulaEffect.png" width="300" alt="Nebula effect preview">
+
+A noise field births light, a curl flow carries it, and the two make a folding cloud. The flow is divergence-free, so the cloud folds into itself rather than spreading out.
+
+- `speed`: how fast the cloud evolves.
+- `scale`: the field's spatial frequency.
+- `contrast`: how hard it pushes toward black and white.
+- `persistence`: how long light lingers.
+- `octaves`: how much fine detail it carries.
+- `fieldScale`: the flow's spatial frequency.
+- `fieldRate`: how fast the flow itself changes.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/NebulaEffect.md)
+
+<a id="polarnoise"></a>
+
+### PolarNoise 💫🖌️🌫️🎡 · 3D
+
+<img src="../../assets/light/effects/PolarNoiseEffect.png" width="300" alt="PolarNoise effect preview">
+
+A warped, kaleidoscopic noise field in polar coordinates. Every pixel is addressed by its angle and radius, so the pattern turns and repeats around the center rather than across a grid.
+
+- `bpm`: how fast the field moves.
+- `scale`: its spatial frequency.
+- `segments`: kaleidoscopic repeats around the center.
+- `warp`: how far it bends before sampling.
+- `octaves`: how much fine detail it carries.
+- `twist`: rotation applied with radius.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/PolarNoiseEffect.md)
+
+<a id="pong"></a>
+
+### Pong 💫🎵👾 · 2D
+
+<img src="../../assets/light/effects/PongEffect.png" width="300" alt="Pong effect preview">
+
+Two self-playing paddles rallying a ball across the grid. The paddles track the ball with a delay, so a rally has rhythm rather than being perfect.
+
+- `rallyBpm`: how fast the ball travels.
+- `paddle`: paddle size.
+- `reflex`: how quickly a paddle reacts.
+- `size`: ball size.
+- `spriteBall`: draw the ball as a sprite.
+- `audioReactive`: drive the rally from the audio.
+
+Origin: projectMM original, on the 1972 original
+
+Detail: [technical](moxygen/PongEffect.md)
+
+<a id="radialspectrum"></a>
+
+### RadialSpectrum 💫🎶🖌️🎡 · 3D
+
+<img src="../../assets/light/effects/RadialSpectrumEffect.png" width="300" alt="RadialSpectrum effect preview">
+
+The spectrum as ripples: one sector per band, radius as time, and a shockwave per beat. The newest sample sits at the center and travels outward, so the ring shows the recent past at a glance.
+
+- `speed`: how fast a ripple travels out.
+- `persistence`: how long it stays visible.
+- `smooth`: how much the bands are smoothed.
+- `beat`: how strong a beat's shockwave is.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/RadialSpectrumEffect.md)
+
+<a id="sdfshapes"></a>
+
+### SdfShapes 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/SdfShapesEffect.png" width="300" alt="SdfShapes effect preview">
+
+Two signed-distance shapes orbiting and melting together, with a soft edge and an outline. The blend is a smooth minimum of the two distances, so they merge like liquid rather than overlapping.
+
+- `bpm`: how fast they orbit.
+- `radius`: the circle's size.
+- `boxSize`: the box's size.
+- `blend`: how readily they melt together.
+- `outline`: how strong the edge line is.
+- `glow`: how far the soft edge reaches.
+
+Origin: projectMM original, on the signed-distance-field vocabulary Inigo Quilez documented
+
+Detail: [technical](moxygen/SdfShapesEffect.md)
+
+<a id="spectrum"></a>
+
+### Spectrum 💫🎶 · 2D
+
+<img src="../../assets/light/effects/SpectrumEffect.png" width="300" alt="Spectrum effect preview">
+
+A bar per frequency band, rising with the music and falling back under its own decay, with an optional peak marker riding the top of each bar.
+
+- `attack`: how fast a bar rises.
+- `release`: how fast it falls.
+- `peakDecay`: how fast the peak marker sinks.
+- `showPeaks`: draw the peak markers.
+- `colorByColumn`: color each bar by its position rather than its height.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/SpectrumEffect.md)
+
+<a id="spritefountain"></a>
+
+### SpriteFountain 💫🎶✨👾 · 2D
+
+<img src="../../assets/light/effects/SpriteFountainEffect.png" width="300" alt="SpriteFountain effect preview">
+
+A fountain of sprites thrown up from the floor and falling back under gravity. Each is a small bitmap rather than a point, so the spray has texture.
+
+- `lift`: how hard they are thrown.
+- `pull`: downward acceleration.
+- `rate`: how many are emitted.
+- `emitBpm`: how often a burst is emitted.
+- `size`: sprite size.
+- `audioReactive`: drive the emission from the audio.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/SpriteFountainEffect.md)
+
+<a id="trails"></a>
+
+### Trails 💫🖌️💨🌫️ · 3D
+
+<img src="../../assets/light/effects/TrailsEffect.gif" width="300" alt="Trails effect preview">
+
+Bright dots thrown into a flowing medium, leaving tails the flow carries and bends. The dots do not steer: the field moves them, and the tail records where the field took them.
+
+- `speed`: how fast the flow moves.
+- `dots`: how many are in play.
+- `scale`: the flow's spatial frequency.
+- `persistence`: how long a tail lingers.
+- `breathe`: how much the flow pulses.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/TrailsEffect.md)
+
+<a id="truchet"></a>
+
+### Truchet 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/TruchetEffect.png" width="300" alt="Truchet effect preview">
+
+Randomly-turned arc tiles that join into endless winding paths. Each tile carries two quarter-arcs, and because their ends always meet at the tile edges, any arrangement connects.
+
+- `bpm`: how fast tiles re-shuffle.
+- `scale`: tile size.
+- `thickness`: how wide an arc is.
+- `softness`: how soft its edge is.
+- `shuffle`: how often a tile turns.
+- `drift`: how fast the whole field slides.
+
+Origin: projectMM original, on Truchet's 1704 tiling
+
+Detail: [technical](moxygen/TruchetEffect.md)
+
+<a id="tunnel"></a>
+
+### Tunnel 💫🖌️🌫️🎡 · 3D
+
+<img src="../../assets/light/effects/TunnelEffect.png" width="300" alt="Tunnel effect preview">
+
+A texture-mapped tunnel flying toward a vanishing point. Angle and inverse radius address the texture, which is the classic demoscene trick that makes a flat grid read as depth.
+
+- `bpm`: how fast you fly.
+- `depth`: how far the tunnel reaches.
+- `twist`: how much it spirals.
+- `segments`: repeats around the wall.
+- `octaves`: how much detail the wall carries.
+- `vignette`: how dark the far end goes.
+
+Origin: projectMM original, on the demoscene tunnel
+
+Detail: [technical](moxygen/TunnelEffect.md)
+
+<a id="vectorballs"></a>
+
+### VectorBalls 💫🖌️ · 2D
+
+<img src="../../assets/light/effects/VectorBallsEffect.png" width="300" alt="VectorBalls effect preview">
+
+A rotating 3D object of shaded spheres, drawn with real perspective. The spheres are sorted back to front so nearer ones cover the ones behind, which is what sells the depth.
+
+- `bpm`: how fast it rotates.
+- `size`: sphere size.
+- `spread`: how far apart they sit.
+- `distance`: how far the object is from the camera.
+- `fade`: how much distance dims a sphere.
+
+Origin: projectMM original, on the demoscene vector-ball routine
+
+Detail: [technical](moxygen/VectorBallsEffect.md)
+
+<a id="vumeters"></a>
+
+### VuMeters 💫🎶🖌️ · 3D
+
+<img src="../../assets/light/effects/VuMetersEffect.gif" width="300" alt="VuMeters effect preview">
+
+Sixteen needles with real mass, one per band, with peak-hold and a red zone. A needle is simulated rather than positioned, so it overshoots and settles the way a real meter does.
+
+- `damping`: how fast a needle settles.
+- `response`: how hard the signal drives it.
+- `peakHold`: how long the peak marker stays.
+- `smooth`: how much the bands are smoothed.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/VuMetersEffect.md)
+
+<a id="waterripple"></a>
+
+### WaterRipple 💫🧬 · 2D
+
+<img src="../../assets/light/effects/WaterRippleEffect.gif" width="300" alt="WaterRipple effect preview">
+
+A propagating water surface where drops ripple, reflect and interfere. The height field is a real wave simulation, so two ripples crossing add rather than overwrite.
+
+- `speed`: how fast waves travel.
+- `dropRate`: how often a drop lands.
+- `damping`: how fast the surface settles.
+- `strength`: how big a drop is.
+- `colorByHeight`: color the surface by its height.
+- `hueBase`: where the color range starts.
+- `hueSpread`: how wide it runs.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/WaterRippleEffect.md)
+
+## MoonLive, details
+
+#### What the card reports
+
+Three numbers, and they measure different things. `status` is the size of the compiled program in bytes, which is what a script author asks and nothing else answers. The memory figure is what the module costs the device: its own fixed size, plus the executable block holding the compiled code and the control arena. `tickTimeUs` is the per-tick cost of running the compiled function, measured the way every module's is.
+
+A third allocation exists and appears nowhere. Compiling needs a staging buffer, sized from the script's token count, and it is freed the moment the compile returns. Three scripted modules compiling in sequence each borrow and return it, so what persists per module is only the executable block.
+
+#### The five walls
+
+A script can exhaust ten limits, and five are ones an author can act on.
+
+| limit | ceiling | what to do |
+|---|---|---|
+| code size | 16 KB | split or simplify the script |
+| controls | 8 | remove an `addControl` |
+| members | 8 | shares the budget with controls |
+| functions | 8 | merge two helpers |
+| string bytes | 128 | shorter control labels |
+
+The other five follow from code size or loop nesting, so a number for them is noise. The card shows the tightest of the five and only past half full, since the others by definition have more room.

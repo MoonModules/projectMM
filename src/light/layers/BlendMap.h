@@ -7,58 +7,69 @@
 
 namespace mm {
 
-/// How a layer's pixels combine into the destination during composition.
+/// @defgroup BlendMap Composing a layer into the frame
+/// @{
+/// The one pass that reads a layer's logical buffer and writes it, mapped and blended, into the physical frame.
 ///
-/// The per-Layer `blendMode` / `opacity` controls that select the op live on the
-/// Layer; the Drivers container reads them together with the layer stack order and
-/// drives one `blendMap` pass per enabled layer each frame.
+/// @moreinfo
+///
+/// The pass runs once per enabled layer each frame, driven by the Drivers container, which reads each layer's own `blendMode` and `opacity` controls along with the stack order.
+///
+/// `clearFirst` clears the destination before writing, which the first and bottom layer of a composite does.
+/// That is what keeps physical cells with no source, such as a sparse layout's lattice gaps, black.
+/// Later layers pass false and blend onto the frame accumulated below.
+/// A single layer passes `Overwrite` at full opacity with a clear, which takes the exact fast path this had before composition existed.
+///
+/// ## The combine math is integer-only
+///
+/// The hot-path per-light rule applies, so one specialised loop is chosen once before the per-light loop and there is no per-pixel mode check.
+///
+/// | Mode | What it does |
+/// |------|--------------|
+/// | Overwrite | a plain copy with no read-back. A dense grid with no LUT is a `memcpy`; a single-write LUT copies per mapped light |
+/// | Additive | the destination plus the source scaled by opacity, summed with saturation at 255 |
+/// | Alpha | the textbook 8-bit alpha-over, the source and destination weighted by opacity, divided by 255 through the fast reciprocal. Full opacity collapses to a plain overwrite at no blend cost |
+///
+/// A non-overwriting LUT, one folding several logical lights onto a single physical cell, routes through the additive accumulate path so overlaps sum with clamping rather than last-writer-wins.
+///
+/// ## How a light finds its destination
+///
+/// A dense-grid layer has no LUT, so its buffer blends one to one with the source index equal to the physical index and no lookup at all.
+/// A layer with a LUT maps each logical light to its physical destinations first.
+/// Physical indices come from the LUT, which is built in range from the shared Layouts, so they address the destination in bounds by construction.
+///
+/// ## Why every mapped access is bounded
+///
+/// A reshape rebuilds the mapping and the driver's output buffer in separate steps of one `prepareTree` sweep, Layouts first, then the Layer, then Drivers.
+/// A render tick can land between them, holding the new mapping's physical indices and the old, smaller buffer.
+/// Unbounded, that writes past the end and corrupts the heap, and the failure then surfaces in an unrelated allocation later, which is what made resizing a layout look intermittently fatal.
+///
+/// The identity path has always clamped to the smaller of the two buffers for the same reason; the mapped path did not.
+/// This is a bound rather than a fix for the ordering.
+/// The window is still there and the frame drawn inside it is briefly wrong, but it cannot corrupt memory, which is the property that matters.
+///
+/// ## What Overwrite defers to
+///
+/// Overwrite is the default, for a single layer or the bottom of a composite, and it defers to the LUT's own overwrites flag.
+/// A mapping writing each physical cell once, a mirror, a shuffle or a sparse box, plain-copies.
+/// A mapping folding several logical lights onto one cell accumulates additively within the layer, with clamping, while cross-layer Additive and Alpha remain the explicit ops.
+
+/// How a layer's pixels combine into the destination during composition.
 enum class BlendOp : uint8_t {
     Overwrite,  ///< `dst = src` (replace; the first/bottom layer, fastest — no read-back)
     Alpha,      ///< `dst = src*opacity + dst*(255-opacity)` (opacity-weighted over)
     Additive,   ///< `dst = clamp(dst + src*opacity/255)` (adds light, never dims)
 };
 
-/// Fast 8-bit "divide by 255": exact for 0..65535. Avoids a real divide on the
-/// hot path (the textbook `(x + (x>>8) + 1) >> 8` trick).
+/// Fast 8-bit divide by 255, exact over the full 16-bit range, avoiding a real divide on the hot path.
 inline uint8_t div255(uint16_t x) { return static_cast<uint8_t>((x + (x >> 8) + 1) >> 8); }
 
-/// Reads a layer's logical buffer (`src`) and writes the mapped result into a
-/// physical destination buffer (`dst`) via the layer's LUT — called by the Drivers
-/// container once per enabled layer each frame.
-///
-/// `op` + `opacity` decide how each light combines into `dst`; `clearFirst` clears
-/// `dst` before writing (the first/bottom layer in a composite — so physical cells
-/// with no source, such as a sparse layout's lattice gaps, stay black; subsequent
-/// layers pass `false` to blend ONTO the accumulated frame below). For a single
-/// layer the caller passes `op=Overwrite`, `opacity=255`, `clearFirst=true`, which
-/// takes the exact fast path this had before composition (memcpy / plain copy).
-///
-/// **Integer-only combine math** (the hot-path per-light rule), one tight
-/// specialised loop chosen ONCE before the per-light loop — no per-pixel mode check:
-///
-/// - **Overwrite** (default / bottom layer): plain copy, no read-back. A dense grid
-///   (no LUT) is a `memcpy`; a single-write LUT (mirror, shuffle, sparse box→driver)
-///   copies source→destination per mapped light. A non-overwriting LUT (one that
-///   folds several logical lights onto one physical cell) routes through the additive
-///   accumulate path so overlaps sum-with-clamp rather than last-writer-win.
-/// - **Additive**: `dst = clamp(dst + src·opacity)` — sum with saturation at 255,
-///   opacity scaling the source.
-/// - **Alpha** (over): `dst = (src·α + dst·(255−α)) / 255` — the textbook 8-bit
-///   alpha-over, division by 255 via the fast `div255` reciprocal. Full opacity (255)
-///   collapses to a plain overwrite (no blend cost).
-///
-/// A dense-grid layer has no LUT, so its buffer blends 1:1 (source index == physical
-/// index, no lookup); a layer with a LUT maps each logical light to its physical
-/// destination(s) first. Physical indices come from the LUT, built in-range from the
-/// shared Layouts, so they address `dst` in bounds by construction.
+/// Blend one layer's `src` into `dst` through its LUT, once per frame.
 inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
                      uint8_t channelsPerLight,
                      BlendOp op = BlendOp::Overwrite, uint8_t opacity = 255,
                      bool clearFirst = true) {
-    // No LUT = identity map (dense grid, logical index == physical index — the
-    // common case). Blend 1:1, src byte i → dst byte i, no LUT lookup. The
-    // first/bottom full-opacity overwrite is a plain memcpy (the fast path);
-    // a composited layer above it blends per op/opacity straight over dst.
+    // No LUT is an identity map, the dense-grid case: blend one to one with no lookup.
     if (!lut.hasLUT()) {
         const size_t n = src.bytes() < dst.bytes() ? src.bytes() : dst.bytes();
         const uint8_t* s = src.data();
@@ -89,28 +100,11 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
     const nrOfLightsType logCount = lut.logicalCount();
     const bool full = (opacity == 255);
 
-    // How many whole lights each buffer actually holds. Every mapped access below is bounded by
-    // these, because a LUT entry is only valid against the buffer it was BUILT for.
-    //
-    // A reshape rebuilds the mapping and the driver's output buffer in separate steps of the same
-    // prepareTree sweep (Layouts, then the Layer, then Drivers), and a render tick can land between
-    // them — with the new mapping's physical indices and the old, smaller buffer. Unbounded, that
-    // writes past the end and corrupts the heap; the failure then surfaces later in an unrelated
-    // allocation, which is what made resizing a layout look intermittently fatal. The identity path
-    // above has always clamped to min(src, dst) for the same reason; the mapped path did not.
-    //
-    // This is a bound, not a fix for the ordering — the window is still there and the frame drawn
-    // inside it is briefly wrong. It cannot corrupt memory, which is the property that matters.
+    // Every mapped access below is bounded by these: a LUT entry is valid only against its own buffer.
     const size_t dstLights = channelsPerLight ? dst.bytes() / channelsPerLight : 0;
     const size_t srcLights = channelsPerLight ? src.bytes() / channelsPerLight : 0;
 
-    // Overwrite is the default op (single layer / bottom of a composite). It
-    // defers to the LUT's own overwrites() flag: a mapping where each physical
-    // cell is written once (mirror, shuffle, sparse box→driver) plain-copies;
-    // a mapping that folds several logical lights onto one physical cell
-    // (overwrites()=false) additively accumulates *within the layer* with clamp.
-    // (Cross-layer Additive/Alpha are the explicit ops below.) So a full-opacity
-    // Overwrite on a non-overwriting LUT routes to the additive accumulate path.
+    // Overwrite defers to the LUT's own overwrites() flag, so a folding mapping accumulates.
     const bool effectiveAdditive = (op == BlendOp::Additive) ||
                                    (op == BlendOp::Overwrite && !lut.overwrites());
 
@@ -163,4 +157,5 @@ inline void blendMap(const Buffer& src, Buffer& dst, const MappingLUT& lut,
     }
 }
 
+/// @}
 } // namespace mm

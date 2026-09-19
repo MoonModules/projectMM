@@ -1,30 +1,38 @@
 #pragma once
 
 #include "core/module/MoonModule.h"
-#include "light/moonlive/MoonLivePalette.h"   // the per-frame scripted palette, run before the layers
+#include "light/moonlive/MoonLivePalette.h"   // the scripted palette, run before the layers
 #include "light/layers/Layer.h"
 #include "light/layouts/Layouts.h"
 #include "platform/platform.h"
 
 namespace mm {
 
-/// Top-level container for one or more `Layer` children. Each child Layer renders independently into its own buffer using the shared `Layouts` instance for physical topology. `Drivers` composites the resulting buffers in container order (bottom→top) per each Layer's blendMode and opacity.
+/// The container holding every rendering layer, which `Drivers` composites into one output.
 ///
-/// **Why a container:** multi-layer composition (alpha-blend, additive, layered overlays) needs a place to walk every layer in order so drivers can merge their buffers before consuming the result. With one child Layer this is a thin pass-through: tick() runs the child Layer's tick() in order; behaviour matches the single-Layer pipeline byte-for-byte (Drivers takes its single-layer fast path).
-///
-/// **No buffer of its own:** each Layer owns its buffer and the `Drivers` container owns the composited output. Effects wires the shared `Layouts` into every child so each can size its buffer. Two queries serve the Drivers compositor: `activeLayer` (the first enabled child, or a disabled one as fallback) answers physical dimensions and feeds the single-layer fast path, and `forEachEnabledLayer` walks the enabled children in container order (bottom→top) marking the bottom layer that clears the buffer. `enabledLayerCount` lets Drivers pick the fast path (one enabled layer → hand its buffer straight to the driver) versus the composite path (≥2 → blend into the output buffer).
-///
-/// **Prior art:** MoonLight's `PhysicalLayer` runs N `VirtualLayer`s and composites their buffers into the display channel — same idea, different shape: Drivers (not Effects) does the compositing here (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight).
+/// Each child layer renders independently into its own buffer.
+/// The shared `Layouts` describing the physical topology is wired into all of them.
 /// @card Effects.png
+///
+/// @moreinfo
+///
+/// ## Why a container
+///
+/// Multi-layer composition needs one place that walks every layer in order.
+/// With a single child this is a pass-through, matching the one-layer pipeline exactly.
+///
+/// ## It owns no buffer
+///
+/// Each layer owns its buffer, and `Drivers` owns the composited output.
+/// Three queries serve the compositor: the active layer, the enabled count, and a walk in order.
+/// The count is what lets `Drivers` choose between handing one buffer over and blending several.
 class Effects : public MoonModule {
 public:
+    /// The child role this container accepts, which is layers alone.
     const char* acceptsChildRoles() const override { return "layer"; }
 
-    /// Wire the shared Layouts. Propagates to every child Layer so their
-    /// prepare() can size buffers from it. Idempotent — call again
-    /// after adding a Layer child to wire the new one. Non-Layer children
-    /// (UI shouldn't allow them; engine doesn't enforce — yet) are skipped
-    /// rather than miscast, so a stray child can't UB the cast.
+    // Idempotent, so adding a layer child is followed by calling this again.
+    /// Wire the shared `Layouts` into every child layer, so each can size its buffer.
     void setLayouts(Layouts* l) {
         layouts_ = l;
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -34,26 +42,18 @@ public:
         }
     }
 
+    /// The shared `Layouts` this container hands to its children.
     Layouts* layouts() const { return layouts_; }
 
-    /// Re-wire children before they build their state, so a Layer added via the
-    /// API (clear_children + add_module) gets the shared Layouts without anyone
-    /// re-running main.cpp's setLayouts. Then chain to base to build the children.
+    /// Re-wire the children before they build, so a layer added through the API is wired too.
     void prepare() override {
         setLayouts(layouts_);
     }
 
-    /// Role-filtered loop propagation: only tick children that are Layers.
-    /// The factory / UI shouldn't allow non-Layer children of an Effects
-    /// container, but if one slips in (test fixture, hand-crafted config),
-    /// ticking it through Effects would run its loop at the wrong tree
-    /// depth (an Effect that should be ticked inside a Layer). Matches
-    /// the role-filter precedent in setLayouts / activeLayer above.
+    // Role-filtered: a stray child ticked here would run at the wrong depth in the tree.
+    /// Tick every enabled layer child, in container order.
     void tick() MM_NONBLOCKING override {
-        // The scripted palette runs FIRST, so every layer in this frame samples the same sixteen
-        // entries. It is owned by Drivers (which owns the palette control) and reached through a
-        // static seam, because Drivers ticks after the layers and a palette applied there would be
-        // one frame late. A no-op when no `.mlp` is named, which is the common case.
+        // First, so every layer this frame samples the same entries: Drivers ticks too late for it.
         MoonLivePalette::tickActive(platform::millis());
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);
@@ -65,11 +65,8 @@ public:
         }
     }
 
-    /// The first enabled Layer — `Drivers` reads it for physical dimensions
-    /// (every layer composites into the same physical space, so any one answers
-    /// width/height/depth). Also the source for the single-layer fast path.
-    /// Returns nullptr when no Layer is registered (drivers handle that gracefully).
-    /// Non-Layer children are skipped — same guard as setLayouts above.
+    // Falls back to a disabled layer, so geometry stays queryable while everything is off.
+    /// The first enabled layer, which `Drivers` reads for the physical dimensions.
     Layer* activeLayer() const {
         MoonModule* fallback = nullptr;
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -81,11 +78,8 @@ public:
         return static_cast<Layer*>(fallback);  // nullptr if no Layer children
     }
 
-    /// The first *enabled* Layer, or nullptr when none is enabled. Distinct from
-    /// activeLayer(), which falls back to a disabled registered Layer so geometry
-    /// (width/height/depth) stays queryable while everything is toggled off. Output
-    /// selection must use *this* one: handing a disabled layer's stale buffer to the
-    /// drivers would keep emitting its last frame instead of going idle.
+    // Output selection uses this one: a disabled layer's buffer would keep emitting its last frame.
+    /// The first enabled layer, or null when none is enabled.
     Layer* firstEnabledLayer() const {
         for (uint8_t i = 0; i < childCount(); i++) {
             MoonModule* c = child(i);
@@ -95,8 +89,7 @@ public:
         return nullptr;
     }
 
-    /// Count of enabled Layer children — Drivers uses it to pick the single-layer
-    /// fast path (==1) vs the composite path (>1), and to know if anything renders.
+    /// How many layer children are enabled, which chooses the fast or the composite path.
     uint8_t enabledLayerCount() const {
         uint8_t n = 0;
         for (uint8_t i = 0; i < childCount(); i++) {
@@ -106,9 +99,8 @@ public:
         return n;
     }
 
-    /// Walk enabled Layers in container (composition) order — the order Drivers
-    /// blends them, bottom (first) to top (last). `` `cb(layer, isFirst)` ``: isFirst
-    /// marks the bottom layer (clears the buffer; the rest blend onto it).
+    // The callback's second argument marks the bottom layer, which clears the buffer.
+    /// Walk the enabled layers in composition order, bottom to top.
     template <typename Fn>
     void forEachEnabledLayer(Fn cb) const {
         bool first = true;

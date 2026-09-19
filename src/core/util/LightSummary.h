@@ -4,20 +4,23 @@
 
 namespace mm {
 
-/// A small plain-data summary of the light pipeline's output, produced by the light domain
-/// (the `Drivers` container) and consumed by domain-neutral core consumers — the WLED `/json`
-/// shim and MQTT — so they can report the real device shape without including any light-domain
-/// class or type. This is the shared-struct pull pattern (see architecture.md § Data exchange,
-/// the same shape as `AudioFrame`): the producer owns one POD overwritten in place on each
-/// rebuild, the consumer holds a `const LightSummary*` and reads it; no allocation, no event bus.
+/// A small plain-data summary of the light pipeline's output, readable from core without any light-domain type.
 ///
-/// Domain-neutral on purpose: plain `uint32_t`/`uint8_t`, no light typedefs, so it stays in core
-/// with the consumers. `lightCount` is `uint32_t` to hold any count on any board (the light-side
-/// `nrOfLightsType` is `uint16_t` without PSRAM, `uint32_t` with; `uint32_t` here covers both).
+/// @moreinfo
 ///
-/// **Extendable by design.** Add a field (estimated power, segment count, RGBW flag) and the
-/// producer fills it in one place; every consumer that wants it reads it, no new seam. Keep it a
-/// flat POD of small integers.
+/// ## Who fills it and who reads it
+///
+/// The light domain's `Drivers` container produces it, and domain-neutral consumers read it: the WLED `/json` shim and MQTT, which report the real device shape.
+/// This is the shared-struct pull pattern the architecture page describes under data exchange, the same shape as `AudioFrame`.
+/// The producer owns one plain struct overwritten in place on each rebuild, and a consumer holds a `const LightSummary*` and reads it, with no allocation and no event bus.
+///
+/// It stays domain-neutral on purpose: plain `uint32_t` and `uint8_t` with no light typedefs, so it lives in core beside its consumers.
+/// `lightCount` is a `uint32_t` to hold any count on any board, the light-side `nrOfLightsType` being a `uint16_t` without PSRAM and a `uint32_t` with it.
+///
+/// ## Extendable by design
+///
+/// Adding a field, say estimated power or a segment count, means the producer fills it in one place and every consumer that wants it reads it, with no new seam.
+/// Keep it a flat struct of small integers.
 struct LightSummary {
     uint32_t lightCount = 0;              ///< total physical lights driven (Layer::physicalLightCount()).
     uint8_t  channelsPerLight = 3;        ///< 3 = RGB, 4 = RGBW, more = multi-channel DMX fixtures.

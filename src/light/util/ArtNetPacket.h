@@ -5,35 +5,30 @@
 
 namespace mm {
 
-// ArtNet wire formats — the one place the packet layouts live. The sender
-// (drivers/NetworkSendDriver.h) builds packets with it, the receiver
-// (effects/NetworkReceiveEffect.h) parses them with it; a unit test round-trips
-// build→parse so the two can never drift apart. Sits at the top of src/light/
-// (beside light_types.h) because the protocol is neutral between the drivers
-// and effects subfolders.
-//
-// OpDmx layout (18-byte header + DMX data):
-//   0-7   "Art-Net\0"
-//   8-9   OpCode, little-endian — OpDmx = 0x5000
-//   10-11 protocol version, big-endian — 14
-//   12    sequence
-//   13    physical port
-//   14-15 universe, little-endian
-//   16-17 data length, big-endian
-//   18+   DMX channel data
-//
-// Discovery (the Resolume/Madrix/xLights node-list handshake): controllers
-// broadcast ArtPoll (OpCode 0x2000); every node answers with ArtPollReply
-// (OpCode 0x2100, 239 bytes) carrying its IP, names, MAC, and bound universe —
-// that reply is what makes the device appear in a controller's output list.
+/// @defgroup artnet_packet ArtNet wire format
+/// @{
+/// The one place the ArtNet packet layouts live, so a sender and a receiver cannot drift apart.
+///
+/// A unit test round-trips build against parse, and the header sits above both subfolders because the protocol is neutral between them.
+///
+/// @moreinfo
+///
+/// ## The data packet
+///
+/// An 18-byte header then the channel data: the magic string, the opcode, a protocol version, a sequence and physical port, the universe, and the data length.
+/// The multi-byte fields run in a mix of orders, which is the protocol's own inconsistency rather than ours.
+///
+/// ## Discovery
+///
+/// A controller broadcasts a poll and every node answers with a reply carrying its address, names and bound universe.
+/// That reply is what makes the device appear in a controller's output list.
 
 constexpr uint16_t ARTNET_PORT = 6454;
 constexpr size_t MAX_CHANNELS_PER_UNIVERSE = 510; // 170 RGB lights
 constexpr size_t ARTNET_HEADER_SIZE = 18;
 constexpr size_t ARTNET_POLL_REPLY_SIZE = 239;
 
-// Build an ArtNet OpDmx packet into outBuf. Returns the total packet size.
-// outBuf must be at least ARTNET_HEADER_SIZE + dataLen.
+/// Build a data packet into `outBuf`, which must hold the header and the data; answers the total size.
 inline size_t buildArtDmxPacket(uint8_t* outBuf, uint16_t universe, uint8_t sequence,
                                 const uint8_t* data, uint16_t dataLen) {
     // "Art-Net\0" header
@@ -67,14 +62,7 @@ inline size_t buildArtDmxPacket(uint8_t* outBuf, uint16_t universe, uint8_t sequ
     return ARTNET_HEADER_SIZE + dataLen;
 }
 
-// Parse + validate an ArtNet OpDmx packet. Returns true and sets the out
-// params when pkt is a well-formed OpDmx datagram: "Art-Net\0" magic, OpDmx
-// opcode, and a declared data length that fits inside the received bytes
-// (dataOut points into pkt — zero copy). Anything else (other opcodes, short
-// headers, lying length fields) returns false and the caller drops the packet.
-// The protocol-version field is deliberately not checked — be liberal in what
-// we accept; the sequence field is the caller's concern (the receive effect
-// ignores it: last write wins).
+/// Parse and validate a data packet, zero-copy; the version and sequence are deliberately not checked.
 inline bool parseArtDmxPacket(const uint8_t* pkt, size_t len, uint16_t& universeOut,
                               const uint8_t*& dataOut, uint16_t& dataLenOut) {
     if (!pkt || len < ARTNET_HEADER_SIZE) return false;
@@ -88,18 +76,13 @@ inline bool parseArtDmxPacket(const uint8_t* pkt, size_t len, uint16_t& universe
     return true;
 }
 
-// True when pkt is an ArtPoll — a controller asking "which nodes are out
-// there?". The minimal ArtPoll is 14 bytes (header + protVer + flags + prio).
+/// True when the packet is a poll, a controller asking which nodes are out there.
 inline bool isArtPoll(const uint8_t* pkt, size_t len) {
     return pkt && len >= 14 && std::memcmp(pkt, "Art-Net", 8) == 0
         && pkt[8] == 0x00 && pkt[9] == 0x20;   // OpPoll, little-endian
 }
 
-// Build the minimal ArtPollReply controllers actually read: our IP + port,
-// short/long name, MAC, style "node", one output port bound to
-// `universeStart`. Every other field stays zero — accepted by Resolume,
-// Madrix and xLights, which key on the fields above. outBuf must be at least
-// ARTNET_POLL_REPLY_SIZE bytes.
+/// Build the minimal reply a controller reads: our address, names, MAC and one bound output port.
 inline size_t buildArtPollReply(uint8_t* outBuf, const uint8_t ip[4],
                                 const uint8_t mac[6], const char* shortName,
                                 const char* longName, uint16_t universeStart) {
@@ -108,8 +91,7 @@ inline size_t buildArtPollReply(uint8_t* outBuf, const uint8_t ip[4],
     outBuf[8] = 0x00; outBuf[9] = 0x21;                   // OpPollReply, little-endian
     std::memcpy(outBuf + 10, ip, 4);
     outBuf[14] = 0x36; outBuf[15] = 0x19;                 // port 6454, little-endian
-    // 15-bit port address: NetSwitch = bits 14-8, SubSwitch = bits 7-4,
-    // SwOut[0] = bits 3-0 — together they re-assemble universeStart.
+    // The port address split across three fields, which together re-assemble the universe.
     outBuf[18] = static_cast<uint8_t>((universeStart >> 8) & 0x7F);
     outBuf[19] = static_cast<uint8_t>((universeStart >> 4) & 0x0F);
     outBuf[20] = 0x00; outBuf[21] = 0xFF;                 // OEM: unknown/generic
@@ -124,5 +106,7 @@ inline size_t buildArtPollReply(uint8_t* outBuf, const uint8_t ip[4],
     std::memcpy(outBuf + 201, mac, 6);
     return ARTNET_POLL_REPLY_SIZE;
 }
+
+/// @}
 
 } // namespace mm

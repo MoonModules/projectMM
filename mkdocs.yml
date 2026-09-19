@@ -180,19 +180,11 @@ nav:
       - Layouts: moonmodules/light/layouts.md
       - Modifiers: moonmodules/light/modifiers.md
       - Drivers: moonmodules/light/drivers.md
-      # ONE MoonLive page, not three. The engine is the same for an effect, a layout and a
-      # modifier, so three pages repeated the engine and differed only in which moment the
-      # host calls: the roles are now sections under it.
-      - MoonLive: moonmodules/light/MoonLiveEffect.md
-      # The script LANGUAGE reference. Authored at moonlive/README.md (beside the scripts
-      # it documents) and staged into the tree by mkdocs_hooks.on_files — it is not a file
-      # under docs/, so it appears here by its staged URI.
-      - Writing scripts: moonmodules/light/writing-scripts.md
+      - MoonLive: moonmodules/light/moonlive.md
       - Power functions: moonmodules/light/power-functions.md
       - Supporting: moonmodules/light/supporting.md
   - Core:
       - System: moonmodules/core/system.md
-      - Control: moonmodules/core/control.md
       - Services: moonmodules/core/services.md
       - Supporting: moonmodules/core/supporting.md
       - Web UI: moonmodules/core/ui.md
@@ -204,6 +196,10 @@ nav:
       - Overview: explanation/architecture/index.md
       - MoonModule: explanation/architecture/moonmodule.md
       - MoonCore: explanation/architecture/mooncore.md
+      # The reference half of MoonCore's platform abstraction, so it sits beside it rather than
+      # carrying a tab of its own. The file stays under moonmodules/ because the generated
+      # moxygen/ tree is written beside it (gen_api.py writes moonmodules/<domain>/moxygen/).
+      - Platform: moonmodules/platform/index.md
       - MoonLight: explanation/architecture/moonlight.md
       - MoonLive: explanation/architecture/moonlive.md
       - MoonBase: explanation/architecture/moonbase.md

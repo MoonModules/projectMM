@@ -1,23 +1,52 @@
 #pragma once
 
-// JSON helpers for projectMM. Two layers, both header-only, both off the hot path
-// (persistence load at boot, control writes) so bounded stack use is fine:
-//
-//   1. Flat helpers (parseString/hasKey/parseInt/parseBool): first-match key lookup
-//      over the subset we emit — flat key/value pairs, optional whitespace after the
-//      colon (Python's json.dumps inserts it), string/integer/boolean values. They do
-//      not descend into nested objects or arrays; many callers rely on this cheap
-//      strstr-based scan (HttpServerModule, FilesystemModule, scenario_runner, Control).
-//
-//   2. Recursive reader (JsonDoc/parse + the read/get accessors below): a standard
-//      recursive-descent parser, the recognizable shape for walking nested structure —
-//      needed for the persisted device / preset lists, arrays of small objects. The text
-//      arena and node pool are HEAP-allocated per parse, sized to the input and grown as
-//      needed (nodes are referenced by index, so a realloc never dangles), then freed when
-//      the JsonDoc is destroyed — so there is no node-count or length cap and no large
-//      standing buffer; only recursion is bounded (kMaxDepth, for the ESP32 task stack).
-//      Any malformed / truncated input fails cleanly (parse() returns false, accessors
-//      return safe defaults) and never reads OOB. Off the hot path (boot load, control writes).
+/// @defgroup JsonUtil Reading JSON
+/// @{
+/// Two layers, both header-only and both off the hot path, so bounded stack use is fine.
+///
+/// The flat helpers scan for a key over the subset we emit, and never descend into a nested object or an array.
+/// The recursive reader walks nested structure, which the persisted device and preset lists need.
+///
+/// @moreinfo
+///
+/// ## What the flat scan covers
+///
+/// Flat key and value pairs, with optional whitespace after the colon, and string, integer or boolean values.
+/// Many callers rely on that being a cheap search rather than a parse.
+///
+/// ## The recursive reader allocates per parse
+///
+/// The text arena and the node pool are taken from the heap, sized to the input and grown as needed, then freed with the document.
+/// Nodes are referenced by index, so growing the pool never dangles a pointer, and there is no node-count or length cap and no large standing buffer.
+/// Only the recursion is bounded, for the task stack.
+///
+/// Malformed or truncated input fails cleanly: the parse reports false, the accessors return safe defaults, and nothing reads out of bounds.
+///
+/// ## An absent key is not a zero
+///
+/// The flat integer and boolean readers cannot tell one from the other, so applying their result for an absent key clobbers a control's non-zero default.
+/// A load path asks whether the key is present first, or an older or partial save silently resets a control on every reboot.
+///
+/// ## Overflow needs both checks
+///
+/// The conversion reports out of range rather than saturating, because a caller that narrows the result would otherwise store a different valid number.
+/// Two checks are needed because they cover different targets.
+/// On a desktop a huge value lands inside the wide type, so only the range compare rejects it.
+/// On a device that compare is dead code, and the library's own saturation is the only signal.
+/// Testing one alone passes on the desktop and silently returns the maximum on the target this exists to protect.
+///
+/// Trailing text is deliberately allowed, these values being read out of a document where digits are followed by a comma or a brace, so only the leading characters decide.
+///
+/// ## The conversion is out of line, unlike its neighbours
+///
+/// As an inline its three checks were duplicated into every caller and cost 1712 bytes of flash on one chip, measured per symbol.
+/// One call instead is free in practice, every user being off the hot path.
+///
+/// ## The shared document is a function-local static
+///
+/// A list restore parses into one document rather than a stack local, since that document overflows a device task stack and boot-loops it.
+/// It lives in its own non-template function so the heavy object is one copy however many callback types instantiate the iteration, or each would multiply it.
+/// Sharing is safe because parsing is strictly serial: a boot-time load or a single control write, never concurrent.
 
 #include <cstdint>
 #include <cstdio>
@@ -26,20 +55,11 @@
 
 namespace mm::json {
 
-// The longest `"<key>"<sep>` search pattern these readers build. Sized from the parts rather than a
-// round number, so the bound is provable: 2 quotes + a colon + an optional space + NUL = 5 bytes of
-// fixture around the key.
+// The longest search pattern these readers build, sized from its parts rather than a round number so the bound is provable.
 inline constexpr size_t kMaxKeyLen = 58;
 inline constexpr size_t kSearchLen = kMaxKeyLen + 5;
 
-// Build `"<key>"<sep>` into `buf` — the pattern the readers below strstr for. Returns false when the
-// key is too long to fit, which the caller MUST treat as "not found".
-//
-// Why it returns a bool rather than truncating: a truncated pattern still strstr's, and it matches
-// the WRONG thing (or nothing) — so an over-long key would silently read as absent, and an absent key
-// takes the default. That is the same silent-default failure mode that once reset a control to 0 on
-// every reboot. Failing the lookup loudly-in-code (and leaving the value untouched) beats guessing.
-// The single helper also removes the four copies of this snprintf that GCC flagged as truncating.
+/// Build the search pattern the readers look for, false when the key is too long: it reports rather than truncating, a truncated pattern still matching something.
 inline bool buildKeyPattern(char (&buf)[kSearchLen], const char* key, const char* sep) {
     const int n = std::snprintf(buf, sizeof(buf), "\"%s\"%s", key, sep);
     return n > 0 && static_cast<size_t>(n) < sizeof(buf);
@@ -56,11 +76,7 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
     }
     if (!start) return;
     start += std::strlen(search);
-    // Copy until the real closing quote, decoding the JSON string escapes our own writer emits
-    // (JsonSink::appendEscaped / writeJsonString): \" \\ \n \r \t \b \f and `\u00XX` for control
-    // bytes < 0x20. A bare strchr for '"' would stop at an escaped quote inside the value, and a
-    // multi-line value (a script with a `\n`) would arrive with a literal backslash-n unless \n is
-    // decoded — so reader and writer stay symmetric.
+    // Copy to the real closing quote, decoding our own writer's escapes: a bare search stops at an escaped one inside the value.
     auto hexNibble = [](char c) -> int {
         if (c >= '0' && c <= '9') return c - '0';
         if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -98,10 +114,7 @@ inline void parseString(const char* json, const char* key, char* out, size_t max
     out[oi] = 0;
 }
 
-// True when `key` is present in the JSON object. Lets callers distinguish a
-// genuinely-absent key from one whose value happens to be 0/false — parseInt and
-// parseBool can't, so applying their result for an absent key would clobber a
-// control's non-zero default (e.g. eth phyType=2) with 0 on a partial/older save.
+/// Whether the key is present at all: @xref{an-absent-key-is-not-a-zero|why a reader cannot tell one from a zero}.
 inline bool hasKey(const char* json, const char* key) {
     if (!json || !key) return false;
     char search[kSearchLen];
@@ -109,28 +122,7 @@ inline bool hasKey(const char* json, const char* key) {
     return std::strstr(json, search) != nullptr;
 }
 
-/// The integer `s` starts with, or `fallback` when it does not start with one or the value does
-/// not fit in `int`. The one string→int conversion these readers use.
-///
-/// `strtol`, not `atoi`: atoi cannot report a failure, so "no digits at all" and a genuine `"0"`
-/// are indistinguishable, and a value too large for `long` is undefined behavior rather than a
-/// detectable error. Callers that then narrow the result (a `uint16_t` id, a `uint8_t` percent)
-/// would silently store a DIFFERENT valid number — `"65537"` becoming 1. Out-of-range is reported
-/// as the fallback here, which is the only place it can still be seen.
-///
-/// Overflow needs BOTH checks, because they cover different targets. `long` is 64-bit on the
-/// desktop, so a huge value lands inside `long` and only the INT_MAX compare rejects it; `long` is
-/// 32-bit on ESP32 and Windows, where `LONG_MAX == INT_MAX` makes that compare dead code and
-/// strtol's own saturation-to-LONG_MAX plus `ERANGE` is the only signal. Testing one alone passes
-/// on the desktop and silently returns INT_MAX on the target this exists to protect.
-///
-/// Trailing text is deliberately allowed: these values are read out of a JSON body, so digits are
-/// followed by `,` or `}`. Only the LEADING characters decide.
-///
-/// OUT OF LINE, unlike its neighbours here. As an inline the three checks were duplicated into
-/// every caller and cost **1712 bytes of flash on the S3** — measured per symbol: parseLights +552,
-/// applyControlValue +560, parseGroups +249. One call instead is free in practice: every user is
-/// off the hot path (boot load, control writes, a 1 Hz bridge poll).
+/// The integer a string starts with, or the fallback: @xref{overflow-needs-both-checks|both range checks} and @xref{the-conversion-is-out-of-line-unlike-its-neighbours|why not inline}.
 int parseIntStr(const char* s, int fallback = 0);
 
 inline int parseInt(const char* json, const char* key) {
@@ -158,63 +150,52 @@ inline bool parseBool(const char* json, const char* key) {
     if (!start) return false;
     const char* val = start + std::strlen(search);
     while (*val == ' ') val++;
-    // Accept both the JSON literal `true` and a numeric `1` — deviceModels.json / the
-    // catalog fan-out historically wrote 0/1 for flags that are now Bool controls
-    // (e.g. ethClockExtIn), and some HTTP clients send 1/0; treat either as true.
+    // Both the literal and a numeric one, since device models wrote numbers for flags that are now boolean controls, and some clients still send them.
     return std::strncmp(val, "true", 4) == 0 || *val == '1';
 }
 
-// --- Recursive reader -------------------------------------------------------
-//
-// A standard recursive-descent parser into a fixed node arena. parse() copies the
-// input into the document's own buffer (so strings can be NUL-terminated in place,
-// un-escaped) and links nodes by index — no pointers into caller memory, no heap.
+// The recursive reader: a standard recursive-descent parser that copies the input into the document's own buffer and links nodes by index.
 
-// kMaxDepth bounds recursion for the ESP32 task stack (~3.5-8 KB); a deeply-nested document can't
-// blow the stack. 64 is far deeper than anything we emit (array -> object -> value is depth 3) yet
-// still a hard guard against a pathological input. There is NO node-count or text-length cap: the
-// text arena and node pool are heap-allocated per parse, sized to the input, and freed when the
-// JsonDoc goes out of scope — so a config of any size (many light presets, a wide fixture) parses.
+// The recursion bound for a device task stack, far deeper than anything we emit yet a hard guard against a pathological input.
 inline constexpr int kMaxDepth = 64;
 
 enum class JsonType : uint8_t { Null, Bool, Int, String, Object, Array };
 
-// One value in the arena. Children form a singly-linked list by index (firstChild ->
-// next -> next -> ...), which keeps each node fixed-size with no per-node child array.
-// For an object member, `key` points into the doc buffer (the member name); the member's
-// value is the node itself.
+/// One value in the arena, its children linked by index so every node stays fixed-size with no per-node child array.
 struct JsonNode {
-    JsonType type = JsonType::Null;
-    const char* key = nullptr;    // member name when this node is an object member, else nullptr
+    JsonType type = JsonType::Null;   ///< which kind of value this node holds
+    const char* key = nullptr;    ///< the member name when this node is an object member
     const char* str = nullptr;    // string value (points into doc buffer) when type == String
-    long intValue = 0;            // numeric value when type == Int; 0/1 mirror for Bool
-    int firstChild = -1;          // index of first child node, or -1
-    int next = -1;                // index of next sibling, or -1
+    long intValue = 0;            ///< the numeric value, and a mirror for a boolean
+    int firstChild = -1;          ///< the first child's index, or none
+    int next = -1;                ///< the next sibling's index, or none
 };
 
-// The parsed document: owns the text buffer and node arena, both HEAP-allocated by parse() and
-// freed here. `buf` is sized to the input; `nodes` grows (realloc-doubling) as the parser allocates
-// — nodes are addressed by INDEX (firstChild/next are ints), so a realloc that moves the block never
-// dangles. No node-count or length cap. Non-copyable (it owns two heap blocks); a caller keeps it
-// alive while walking. Off the hot path (boot load / control writes), so a transient alloc is fine.
+/// The parsed document, owning the text buffer and the node arena: @xref{the-recursive-reader-allocates-per-parse|how both are sized and freed}.
+/// Non-copyable, owning two blocks, so a caller keeps it alive while walking.
 struct JsonDoc {
-    char*     buf = nullptr;     // heap copy of the input (mutable — un-escaping rewrites in place)
-    JsonNode* nodes = nullptr;   // heap node pool, grown by ensureNode()
-    int       cap = 0;           // allocated node slots
-    int       count = 0;         // used node slots
-    int       root = -1;
+    char*     buf = nullptr;     ///< the mutable copy of the input, which un-escaping rewrites in place
+    JsonNode* nodes = nullptr;   ///< the node pool, grown as the parser allocates
+    int       cap = 0;           ///< allocated node slots
+    int       count = 0;         ///< used node slots
+    int       root = -1;         ///< the top value's index, or none until a parse succeeds
 
+    /// An empty document, owning nothing until a parse fills it.
     JsonDoc() = default;
+    /// Frees both blocks.
     ~JsonDoc() { std::free(buf); std::free(nodes); }
+    /// Non-copyable: it owns two heap blocks.
     JsonDoc(const JsonDoc&) = delete;
     JsonDoc& operator=(const JsonDoc&) = delete;
 
+    /// Whether a parse succeeded.
     bool valid() const { return root >= 0; }
+    /// The node at an index, or nothing when it is out of range.
     const JsonNode* node(int i) const { return (i >= 0 && i < count) ? &nodes[i] : nullptr; }
+    /// The top value, or nothing until a parse succeeds.
     const JsonNode* rootNode() const { return node(root); }
 
-    // Grow the node pool if full; returns false on allocation failure. Called by the parser's
-    // alloc(). Doubling keeps total reallocations logarithmic. Indices stay valid across the move.
+    /// Grow the pool when full, doubling so reallocations stay logarithmic; indices survive the move.
     bool ensureNode() {
         if (count < cap) return true;
         int newCap = cap ? cap * 2 : 32;
@@ -228,18 +209,19 @@ struct JsonDoc {
 
 namespace detail {
 
-// Parser cursor over the doc's own (mutable) buffer. Un-escaping rewrites string bytes in
-// place, so the buffer doubles as scratch — a parsed string is NUL-terminated where its
-// closing quote was, and `str` points at its first byte.
+/// The cursor over the document's own buffer, which doubles as scratch: un-escaping rewrites string bytes in place.
 struct JsonParser {
-    JsonDoc& doc;
-    char* p;        // current position in doc.buf
-    bool ok = true;
+    JsonDoc& doc;   ///< the document being filled
+    char* p;        ///< the read cursor into its buffer
+    bool ok = true; ///< cleared once the input is known to be malformed
 
+    /// A cursor at the start of the document's buffer.
     explicit JsonParser(JsonDoc& d) : doc(d), p(d.buf) {}
 
+    /// Advance past any whitespace.
     void skipWs() { while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++; }
 
+    /// Take the next node slot, or report failure when the pool cannot grow.
     int alloc() {
         if (!doc.ensureNode()) { ok = false; return -1; }   // grows the heap pool; false = OOM
         const int i = doc.count++;
@@ -247,9 +229,7 @@ struct JsonParser {
         return i;
     }
 
-    // Parse a JSON string literal: assumes *p == '"'. Un-escapes in place and NUL-terminates,
-    // returning a pointer to the first byte. Handles \" \\ \/ \n \r \t \b \f; \uXXXX is passed
-    // through as raw bytes (no decode — we never emit it). Returns nullptr on unterminated input.
+    /// Un-escape a string literal in place and terminate it, returning its first byte, or nothing when unterminated.
     char* parseStringLiteral() {
         p++;                       // opening quote
         char* out = p;             // write cursor (<= read cursor, so in-place is safe)
@@ -278,6 +258,7 @@ struct JsonParser {
         return nullptr;
     }
 
+    /// Parse any value at the cursor, recursing into an object or an array.
     int parseValue(int depth) {
         if (!ok) return -1;
         if (depth >= kMaxDepth) { ok = false; return -1; }
@@ -315,18 +296,13 @@ struct JsonParser {
                 return idx;
             }
             default: {
-                // Number. Integer-only model: read the optional sign + digits, then
-                // discard any fractional/exponent tail (truncate) — we never persist floats.
+                // An integer-only model: the sign and digits, then any fractional tail discarded, since we never persist a float.
                 if (*p != '-' && (*p < '0' || *p > '9')) { ok = false; return -1; }
                 char* endp = nullptr;
                 long v = std::strtol(p, &endp, 10);
                 if (endp == p) { ok = false; return -1; }
                 p = endp;
-                // Skip a well-formed fractional/exponent tail (we keep only the integer
-                // part — never persist floats). Precise so we stop at the number's real
-                // end and don't swallow a following token: `1-2` reads `1` then leaves
-                // `-2`, not one run. Fraction: '.' then digits. Exponent: e/E, optional
-                // sign, then digits.
+                // Skipped precisely, so the scan stops at the number's real end rather than swallowing a following token.
                 auto digits = [&] { while (*p >= '0' && *p <= '9') p++; };
                 if (*p == '.') { p++; digits(); }
                 if (*p == 'e' || *p == 'E') {
@@ -374,6 +350,7 @@ struct JsonParser {
         return -1;
     }
 
+    /// Parse an array at the cursor, linking each element as a child.
     int parseArray(int depth) {
         int self = alloc();
         if (self < 0) return -1;
@@ -399,18 +376,14 @@ struct JsonParser {
 
 }  // namespace detail
 
-// Parse `json` into `out`. Returns true on success (out.root is the top value), false on
-// any malformed, truncated, oversized, or too-deep input — out is left invalid (root == -1).
-// Safe on a null pointer and the empty string. Trailing whitespace is allowed; trailing
-// non-whitespace garbage (e.g. "}{][") fails.
+/// Parse into a document, false on malformed, truncated or too-deep input, and safe on a null pointer or the empty string.
 inline bool parse(const char* json, JsonDoc& out) {
     out.count = 0;
     out.root = -1;
     if (!json) return false;
     size_t len = std::strlen(json);
     if (len == 0) return false;
-    // Heap-copy the input, sized exactly to it — no length cap. The parser un-escapes strings in
-    // place, so this mutable copy doubles as the string arena; freed by ~JsonDoc.
+    // A copy sized exactly to the input, which doubles as the string arena since un-escaping rewrites in place.
     std::free(out.buf);
     out.buf = static_cast<char*>(std::malloc(len + 1));
     if (!out.buf) return false;
@@ -425,9 +398,7 @@ inline bool parse(const char* json, JsonDoc& out) {
     return true;
 }
 
-// --- Navigation -------------------------------------------------------------
-// All accessors are null-safe and bounds-safe: pass a node from doc.node(...) (or nullptr),
-// get back a child node / safe default. They never crash on a wrong-typed or missing node.
+// Navigation. Every accessor is null-safe and bounds-safe, returning a child or a safe default rather than crashing on a wrong-typed or missing node.
 
 // Member of an object by key, or nullptr if `obj` is not an object / has no such member.
 inline const JsonNode* member(const JsonDoc& doc, const JsonNode* obj, const char* key) {
@@ -468,8 +439,7 @@ inline const JsonNode* element(const JsonDoc& doc, const JsonNode* arr, int inde
     return nullptr;
 }
 
-// Read a node as a string into `out` (always NUL-terminated). Empty string for a non-string
-// node or null node. Returns true when a string value was copied.
+/// Read a node as a string, always terminated and empty for a non-string or absent node; true when one was copied.
 inline bool readString(const JsonNode* n, char* out, size_t maxLen) {
     if (!out || maxLen == 0) return false;
     out[0] = 0;
@@ -493,24 +463,7 @@ inline bool readBool(const JsonNode* n, bool fallback = false) {
     return fallback;
 }
 
-// Parse `json`, find the array at `key`, and call `fn(doc, element)` for each OBJECT
-// element. This is the boilerplate every persisted-list restore shares — parse,
-// navigate, type-check, iterate, malformed-safety — so it lives here in core; a caller
-// (a ListSource's restoreList) supplies only the per-element "read my fields" body and
-// stays a few plain lines. `fn` is a template callback (zero-overhead, no std::function
-// / heap). Non-object elements are skipped. Returns false on malformed/missing/non-array
-// (the caller's list is simply not restored). The JsonDoc lives on this call's stack —
-// boot-time load, not the hot path. Recognizable callback-iteration shape.
-// The non-template core: parse `json` and navigate to the array under `key`, returning
-// the array node (or nullptr on malformed/missing/non-array) along with the shared doc.
-// Lives in a .cpp-less inline but in its OWN non-template function so the heavy static
-// JsonDoc below is ONE copy in .bss regardless of how many callback types instantiate
-// forEachListElement — a per-instantiation static would multiply the ~8 KB doc by the
-// number of distinct lists (and "we'll add more lists"). The doc is a function-local
-// static (not a stack local: ~8 KB overflows the ESP32 task stack → boot-loop) and is
-// safe to share because JSON parsing is strictly serial — boot-time load or a single
-// control write, never concurrent (same single-owner-buffer reasoning as
-// FilesystemModule::fileBuf_). Returns the doc by out-param so the caller can read fields.
+/// Navigate to the array under a key, or nothing when the input names none: @xref{the-shared-document-is-a-function-local-static|why its own function}.
 inline const JsonNode* parseListArray(const char* json, const char* key, JsonDoc*& docOut) {
     static JsonDoc doc;
     docOut = &doc;
@@ -533,4 +486,5 @@ inline bool forEachListElement(const char* json, const char* key, Fn&& fn) {
     return true;
 }
 
+/// @}
 } // namespace mm::json

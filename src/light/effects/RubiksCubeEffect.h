@@ -4,14 +4,6 @@
 
 namespace mm {
 
-// A solved 3D Rubik's cube that scrambles itself, then plays the scramble back in reverse so the
-// cube visibly un-mixes turn by turn, and re-scrambles once solved. The cube is a full 6-face model
-// (up to 8×8 stickers per face) with the real face/row/column rotations; each frame it is drawn onto
-// the LED volume by classifying every in-bounds voxel as belonging to whichever of the six outer
-// faces it sits nearest, and coloring it from that face's sticker. Turns play at `turnsPerSecond`;
-// `cubeSize` is the order of the cube (2..8 are real cubes, 1 is a degenerate single block); with
-// `randomTurning` the cube tumbles through endless random moves instead of solving a stored scramble.
-//
 /// Effect rendering a rotating Rubik's cube on a 3D layout.
 /// @card RubiksCubeEffect.gif
 /// Author: WildCats08 / @Brandon502 (MoonLight), https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
@@ -22,6 +14,13 @@ namespace mm {
 /// Prior art: MoonLight's RubiksCube, whose model and move list this reproduces.
 ///
 /// @moreinfo
+///
+/// ## The model behind the picture
+///
+/// The cube is a full six-face model, up to 8x8 stickers a face, with the real face, row and column rotations.
+/// Each frame it is drawn onto the LED volume by classifying every in-bounds voxel as belonging to whichever outer face it sits nearest, and coloring it from that face's sticker.
+/// Turns play at `turnsPerSecond`, and `cubeSize` is the order of the cube, 2 through 8 being real cubes and 1 a degenerate single block.
+/// With `randomTurning` the cube tumbles through endless random moves instead of solving a stored scramble.
 ///
 /// ## One difference from the source
 ///

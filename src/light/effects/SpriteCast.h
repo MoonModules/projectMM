@@ -1,11 +1,14 @@
 #pragma once
-// The sprite cast: every pixel-art character the effects share, behind one draw call.
-//
-// Four effects own their art in their own namespaces, each a plain header of pixels.
-// Two effects draw any of them chosen at runtime: the fountain throws a random species,
-// and Pong can use one as its ball. That selection is the same in both, so it lives here.
-// The pixels stay owned by the effect that introduced them.
 // Author: projectMM original
+/// @defgroup SpriteCast The shared sprite cast
+/// @{
+/// Every pixel-art character the effects share, behind one draw call.
+///
+/// @moreinfo
+///
+/// Four effects own their art in their own namespaces, each a plain header of pixels.
+/// Two effects draw any of them chosen at runtime: the fountain throws a random species, and Pong can use one as its ball.
+/// That selection is the same in both, so it lives here, while the pixels stay owned by the effect that introduced them.
 
 #include "core/util/math16.h"
 #include "light/powerfunctions/draw.h"
@@ -145,4 +148,5 @@ inline constexpr uint8_t kMaxW = 16;
 inline constexpr uint8_t kMaxH = 11;
 
 }  // namespace spritecast
+/// @}
 }  // namespace mm

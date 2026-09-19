@@ -1,13 +1,27 @@
-// RTOS task introspection — the platform half of TasksModule (src/core/TasksModule.h). The module
-// does the domain work (rows, nesting under the render task); this file owns the one seam: reading
-// the FreeRTOS task table so no FreeRTOS type escapes src/platform/ (the platform-boundary rule).
-//
-// uxTaskGetSystemState is the textbook RTOS-introspection call (Espressif examples, FreeRTOS+CLI,
-// MoonLight all use it). It needs CONFIG_FREERTOS_USE_TRACE_FACILITY; when that's off the snapshot
-// returns 0 and the module shows only its (free) MoonModule cost table. The per-task CPU% counter
-// (ulRunTimeCounter) needs CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS, which costs a timer read on
-// every context switch (~5% tick, measured) — so it's gated behind MM_TASK_CPU_STATS and reported
-// as kTaskCpuUnmeasured when compiled out.
+/// @defgroup platform_esp32_tasks RTOS task introspection
+/// The one seam that reads the task table, so no RTOS type escapes the platform layer.
+///
+/// The module above does the domain work; this file answers what the tasks are.
+///
+/// @moreinfo
+///
+/// ## Two SDK options gate what it can answer
+///
+/// The snapshot call is the textbook introspection one and needs the trace facility: without it the snapshot is empty and the module shows only its own cost table.
+/// The per-task CPU figure needs run-time stats, which cost a timer read on every context switch, measured at about 5 percent of the tick.
+/// So that one is gated behind its own build flag and reported as unmeasured when compiled out.
+///
+/// ## The scratch buffer is lazy and internal
+///
+/// Allocated once on the first snapshot rather than held from boot, and never re-allocated per tick.
+/// The no-heap rule applies because this runs from the one-second tick, and one lazy allocation satisfies it: every later tick is allocation-free.
+/// As a plain static array it cost over a kilobyte of internal memory from boot on every board, for an opt-in diagnostic that appears in no device model.
+///
+/// It is kept for the process rather than freed per call, since freeing would put the allocation back on every tick.
+/// The snapshot call wants room for every task or it returns nothing, so the ceiling is generous and exceeding it makes that tick empty rather than partial.
+///
+/// Internal rather than external memory, though the size would fit comfortably: the call fills this buffer with the kernel lock held, so every write lands inside a critical section.
+/// A cache miss there stretches that section, which is the one place on this chip where a stall is most expensive.
 
 #include "platform/platform.h"
 
@@ -42,29 +56,7 @@ TaskState mapState(eTaskState s) {
 
 size_t taskSnapshot(TaskInfo* out, size_t maxTasks) {
     if (!out || maxTasks == 0) return 0;
-    // Allocated ONCE, on the first snapshot — not held from boot, and not re-allocated per tick.
-    //
-    // The no-heap rule applies here: this runs from tick1s, which the Scheduler dispatches inside
-    // tick(). One lazy allocation satisfies it — every tick after the first is allocation-free, and
-    // the first one happens when the user adds TasksModule, not on the render path at steady state.
-    // As a plain `static TaskStatus_t raw[40]` it cost 1440 B of INTERNAL RAM from boot on every
-    // board, and TasksModule is opt-in: it appears in no device model, so the overwhelmingly common
-    // case paid for a diagnostic it never used (surfaced by check_footprint's STATIC column, where
-    // this file read 230 B of code against 1440 B of static).
-    //
-    // Kept for the process rather than freed per call: freeing would put the allocation back on
-    // every tick, which is the thing the no-heap rule forbids. A module that is removed leaves the
-    // buffer behind — 1440 B once used, against 1440 B always — and re-adding it reuses the same
-    // one. Single-threaded (one render task calls this), so no guard is needed.
-    //
-    // uxTaskGetSystemState wants room for EVERY task or it returns 0, so the ceiling is generous;
-    // exceeding it makes the snapshot empty that tick rather than partial. The walk also briefly
-    // suspends the scheduler — an accepted once-per-second cost for an opt-in diagnostic.
-    // INTERNAL, not PSRAM, even though 1440 B would fit PSRAM comfortably: uxTaskGetSystemState
-    // fills this buffer with the kernel lock held (`prvENTER_CRITICAL_OR_SUSPEND_ALL(&xKernelLock)`
-    // around its whole walk, FreeRTOS-Kernel/tasks.c), so every write lands inside a critical
-    // section. A PSRAM cache miss there stretches that section — the one place on this chip where
-    // a stall is most expensive. The 1440 B is worth spending to keep the walk deterministic.
+    // Allocated once on the first snapshot: @xref{the-scratch-buffer-is-lazy-and-internal|why not from boot, and why not external memory}.
     static constexpr size_t kScratch = 40;
     static TaskStatus_t* raw = nullptr;
     if (!raw) {
@@ -113,13 +105,8 @@ void currentTaskOnCore(int core, char* out, size_t cap) {
 #endif
 }
 
-// The name of the task calling this. Today everything — the render loop AND the HTTP/WS serialization
-// that reads this to decide which task nests the modules — runs in app_main (FreeRTOS "main"), so the
-// caller's task IS the render task, and the nesting is correct. This is TRUE ONLY while single-tasked:
-// when a dedicated render task lands, serialization would still run in "main"/httpd, so the caller's
-// name would NO LONGER be the render task's — this seam must then capture the render task's name from
-// inside the render loop (or the Scheduler) rather than from the caller. Flagged with the multi-task
-// scheduler work; correct for the single-task present.
+// The name of the calling task, which today IS the render task, everything running on the one task, so the nesting is correct.
+// True only while single-tasked: once a dedicated render task lands, the serialization would still run elsewhere and this seam must capture the name from inside the render loop instead.
 const char* renderTaskName() { return pcTaskGetName(nullptr); }
 
 #else  // trace facility off — inert stubs; the module falls back to its cost table only.

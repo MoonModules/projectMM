@@ -10,7 +10,7 @@ namespace mm {
 
 namespace invart {
 
-// The sprites index these and the effect fills them, so one drawing serves every rank in a color.
+/// The sprites index these and the effect fills them, so one drawing serves every rank in a color.
 enum : uint8_t { kClear = 0, kBody = 1, kDark = 2, kEye = 3 };
 inline constexpr uint8_t kPaletteCount = 4;
 

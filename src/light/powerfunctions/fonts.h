@@ -3,18 +3,28 @@
 #include <cstdint>
 
 
-// Bitmap console fonts for draw::text — one byte per glyph row, MSB-aligned, bit set = pixel on.
-// Glyphs are ASCII 32..126 (95 printable), stored row-major: font[(chr-32)*height + row]. The high
-// `width` bits of each byte are the glyph columns (left to right = bit (7) down to bit (8-width)).
-//
-// Prior art: the public raster-fonts set (https://github.com/idispatch/raster-fonts), the same
-// bitmap console fonts WLED/MoonLight ship. Carried as data; the blitter (draw::glyph/draw::text)
-// is ours. Two sizes: a compact 4x6 and a larger 6x8. More fonts are pure data to add later.
+/// @defgroup fonts Bitmap console fonts
+/// @{
+/// The glyph data `draw::text` blits: one byte per glyph row, aligned to the high bit, a set bit being a lit pixel.
+///
+/// Two sizes ship, a compact 4x6 and a larger 6x8, and more are pure data to add.
+///
+/// @moreinfo
+///
+/// ## The layout
+///
+/// Glyphs are the 95 printable ASCII characters, stored row-major, so a glyph's rows begin at its index times the height.
+/// The high bits of each byte are the columns, left to right.
+///
+/// ## Prior art
+///
+/// The public [raster-fonts set](https://github.com/idispatch/raster-fonts), the same bitmap console fonts WLED and MoonLight ship.
+/// Carried as data; the blitter is ours.
 namespace mm::fonts {
 
 struct Font { const uint8_t* rows; uint8_t width; uint8_t height; };  // rows: 95*height bytes
 
-// 4x6: 4x6, ASCII 32..126
+/// The 4x6 glyph rows, ASCII 32..126.
 inline constexpr uint8_t kFont4x6_rows[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x20, 0x20, 0x20, 0x00, 0x20, 0x00,
@@ -115,7 +125,7 @@ inline constexpr uint8_t kFont4x6_rows[] = {
 inline constexpr Font kFont4x6{ kFont4x6_rows, 4, 6 };
 static_assert(sizeof(kFont4x6_rows) == 95 * 6, "kFont4x6: 95 printable ASCII glyphs, one byte per row");
 
-// 6x8: 6x8, ASCII 32..126
+/// The 6x8 glyph rows, ASCII 32..126.
 inline constexpr uint8_t kFont6x8_rows[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x10, 0x38, 0x38, 0x10, 0x10, 0x00, 0x10, 0x00,
@@ -216,8 +226,10 @@ inline constexpr uint8_t kFont6x8_rows[] = {
 inline constexpr Font kFont6x8{ kFont6x8_rows, 6, 8 };
 static_assert(sizeof(kFont6x8_rows) == 95 * 8, "kFont6x8: 95 printable ASCII glyphs, one byte per row");
 
-// The available fonts, in the order the TextEffect's font select lists them.
+/// The available fonts, in the order the TextEffect's font select lists them.
 inline constexpr Font kAll[] = { kFont4x6, kFont6x8 };
 inline constexpr uint8_t kCount = sizeof(kAll) / sizeof(kAll[0]);
+
+/// @}
 
 }  // namespace mm::fonts

@@ -5,34 +5,20 @@
 
 namespace mm {
 
-// E1.31 (streaming ACN / sACN) data-packet wire format — the one place the
-// layout lives, shared by NetworkSendDriver (build) and NetworkReceiveEffect
-// (parse); a unit test round-trips build→parse so the two can never drift.
-// Same shape as ArtNetPacket.h: constants + two inline free functions.
-//
-// Layout (126-byte header + DMX data; every multi-byte field BIG-endian):
-//   Root layer 0–37:
-//     0-1   preamble size 0x0010      2-3   postamble size 0x0000
-//     4-15  packet identifier "ASC-E1.17\0\0\0"
-//     16-17 flags+length 0x7000 | (totalLen − 16)
-//     18-21 vector 0x00000004 (E131 data)
-//     22-37 CID — sender's stable 16-byte component id
-//   Framing layer 38–114:
-//     38-39 flags+length 0x7000 | (totalLen − 38)
-//     40-43 vector 0x00000002
-//     44-107 source name (64 bytes, NUL-padded)
-//     108   priority (default 100)    109-110 sync address (0 = none)
-//     111   sequence                  112     options (0)
-//     113-114 universe (1-based per spec; we transmit whatever the caller says
-//             — see the universe rule on NetworkSendDriver's `universeStart` control)
-//   DMP layer 115–125:
-//     115-116 flags+length 0x7000 | (totalLen − 115)
-//     117   vector 0x02              118     address & data type 0xA1
-//     119-120 first property address 0x0000
-//     121-122 address increment 0x0001
-//     123-124 property value count = 1 + dataLen
-//     125   DMX start code 0x00
-//   126+  channel data
+/// @defgroup e131_packet E1.31 wire format
+/// @{
+/// The one place the streaming-ACN layout lives, shared by the sender and the receiver.
+///
+/// A unit test round-trips build against parse, and the shape follows ArtNet's: constants plus two free functions.
+///
+/// @moreinfo
+///
+/// ## Three nested layers
+///
+/// A 126-byte header precedes the channel data, and every multi-byte field is big-endian.
+/// The root layer carries the packet identifier and the sender's stable component id.
+/// The framing layer carries the source name, the priority, the sequence and the universe.
+/// The DMP layer carries the property count and the start code, and the channel data follows it.
 
 constexpr uint16_t E131_PORT = 5568;
 constexpr size_t E131_HEADER_SIZE = 126;
@@ -48,9 +34,7 @@ inline uint16_t getU16(const uint8_t* p) {
 }
 } // namespace detail
 
-// Build an E1.31 data packet. outBuf must be at least E131_HEADER_SIZE +
-// dataLen. Priority is fixed at 100 (the spec default) and sync address at 0 —
-// neither has a use here until a consumer appears.
+/// Build a data packet; priority and sync address stay at their defaults until a consumer needs them.
 inline size_t buildE131Packet(uint8_t* outBuf, uint16_t universe, uint8_t sequence,
                               const uint8_t cid[E131_CID_LENGTH],
                               const uint8_t* data, uint16_t dataLen) {
@@ -88,11 +72,7 @@ inline size_t buildE131Packet(uint8_t* outBuf, uint16_t universe, uint8_t sequen
     return totalLen;
 }
 
-// Parse + validate an E1.31 data packet. Liberal like parseArtDmxPacket —
-// checks the ACN identifier, the three layer vectors, the DMX start code, and
-// that the declared property count fits the datagram; priority/sequence/sync
-// are deliberately ignored (last write wins, same stance as ArtNet's sequence).
-// dataOut points into pkt (zero copy).
+/// Parse and validate a data packet, zero-copy; priority, sequence and sync are ignored, last write winning.
 inline bool parseE131Packet(const uint8_t* pkt, size_t len, uint16_t& universeOut,
                             const uint8_t*& dataOut, uint16_t& dataLenOut) {
     if (!pkt || len < E131_HEADER_SIZE) return false;
@@ -110,5 +90,7 @@ inline bool parseE131Packet(const uint8_t* pkt, size_t len, uint16_t& universeOu
     dataLenOut = dataLen;
     return true;
 }
+
+/// @}
 
 } // namespace mm

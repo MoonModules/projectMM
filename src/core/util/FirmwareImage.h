@@ -1,13 +1,27 @@
 #pragma once
 
-// Reading an ESP32 firmware image's header, without ESP-IDF.
-//
-// The layout is a fixed on-disk format the bootloader parses, so it is the same bytes whether
-// they arrive on a device or in a test: magic, chip id, then the app descriptor carrying the
-// project name and version. Defining it here rather than including esp_app_format.h is what
-// lets the vetting run in a host test, which matters because the code it guards ERASES a
-// device's only recovery image. The layout is pinned by unit_FirmwareImage against real
-// binaries built by the ESP32 toolchain.
+/// @defgroup FirmwareImage Reading an ESP32 image header
+/// @{
+/// What an ESP32 firmware image says about itself, read without ESP-IDF.
+///
+/// @moreinfo
+///
+/// ## Why the layout is redefined here
+///
+/// The layout is a fixed on-disk format the bootloader parses: magic, chip id, then the app descriptor carrying the project name and version.
+/// Those are the same bytes whether they arrive on a device or in a test.
+/// Defining it here rather than including `esp_app_format.h` is what lets the vetting run in a host test, which matters because the code it guards erases a device's only recovery image.
+/// `unit_FirmwareImage` pins the layout against real binaries built by the ESP32 toolchain.
+///
+/// ## The three ways an image can be wrong
+///
+/// `moonBaseRejection` tests them in the order they are cheapest to detect:
+///
+/// | Reason | What it usually is |
+/// |--------|--------------------|
+/// | not an image | a 404 body, an HTML error page, a `.zip` |
+/// | the wrong chip | one MoonBase per chip, one paste apart, and a checksum will not catch it |
+/// | not MoonBase | an app image, which sits beside it on the releases page |
 
 #include <cstddef>
 #include <cstdint>
@@ -26,10 +40,7 @@ constexpr size_t kChipIdOffset = 12;
 /// Enough bytes to identify an image: through the descriptor's version and project name.
 constexpr size_t kIdentifyBytes = kDescOffset + 96;
 
-/// Chip ids, as the image header encodes them (esp_chip_id_t).
-/// Every id esp_chip_id_t defines, not only the ones that ship MoonBase today: a missing entry
-/// makes a valid image land on Invalid, so it is still refused but described as "for another
-/// chip" when the truth is "for a chip this table does not name". S31 is already built here.
+/// Every chip id `esp_chip_id_t` defines, so that no valid image is refused as being for another chip when the truth is that this table does not name it.
 enum class ChipId : uint16_t {
     Esp32    = 0x0000,
     Esp32S2  = 0x0002,
@@ -49,13 +60,12 @@ enum class ChipId : uint16_t {
 struct ImageInfo {
     bool   valid       = false;   ///< begins with the image magic
     bool   described   = false;   ///< carries a readable app descriptor
-    ChipId chip        = ChipId::Invalid;
+    ChipId chip        = ChipId::Invalid;  ///< which chip the image header names
     char   project[32] = {};      ///< "projectMM" or "projectMM-moonbase"
-    char   version[32] = {};
+    char   version[32] = {};      ///< the app version string the descriptor carries
 };
 
-/// Read what `buf` claims to be. Reads only the first kIdentifyBytes and never past `len`, so a
-/// truncated or hostile stream reports what it can rather than reading past its own buffer.
+/// Read what `buf` claims to be, never past `len`, so a truncated or hostile stream reports what it can.
 inline ImageInfo identify(const uint8_t* buf, size_t len) {
     ImageInfo out;
     if (!buf || len == 0) return out;
@@ -71,20 +81,13 @@ inline ImageInfo identify(const uint8_t* buf, size_t len) {
     std::memcpy(&magic, buf + kDescOffset, 4);
     if (magic != kDescMagic) return out;
     out.described = true;
-    // The descriptor's version is at +16 and its project name at +48, each a fixed 32-byte field
-    // that IDF may leave unterminated when the string exactly fills it.
+    // Version at +16 and project name at +48, each a 32-byte field IDF may leave unterminated.
     std::memcpy(out.version, buf + kDescOffset + 16, 31);
     std::memcpy(out.project, buf + kDescOffset + 48, 31);
     return out;
 }
 
-/// Is this a MoonBase image for `chip`? Returns the reason it is not, for a caller that has to
-/// tell a person which file they should have picked.
-///
-/// The three ways to be wrong, in the order they are cheapest to detect:
-///   not an image      a 404 body, an HTML error page, a .zip
-///   the wrong chip    one MoonBase per chip, one paste apart, and a checksum will NOT catch it
-///   not MoonBase      an app image, which sits beside it on the releases page
+/// The reason this is not a MoonBase image for `chip`, or null when it is.
 inline const char* moonBaseRejection(const ImageInfo& info, ChipId chip) {
     if (!info.valid)     return "not a firmware image";
     if (info.chip != chip) return "image is for another chip";
@@ -93,4 +96,5 @@ inline const char* moonBaseRejection(const ImageInfo& info, ChipId chip) {
     return nullptr;
 }
 
+/// @}
 } // namespace mm::firmware

@@ -47,8 +47,10 @@ public:
     // `#if`-gated per chip in main.cpp, so the Select offers the linked-and-supported subset.
     using PeripheralFactory = LedPeripheral* (*)();
     struct PeripheralEntry { const char* label; PeripheralFactory make; };
+    /// How many backends can register, sized to the most any one chip links in.
     static constexpr uint8_t kMaxPeripherals = 4;
     static inline PeripheralEntry peripheralRegistry_[kMaxPeripherals] = {};
+    /// How many of the registry's slots are filled, so registration stops at the cap.
     static inline uint8_t peripheralRegistryCount_ = 0;
     /// Register a backend factory under a UI label, once per linked backend at static-init.
     static bool registerPeripheral(const char* label, PeripheralFactory make) {
@@ -351,9 +353,11 @@ public:
         dbgTickPrimeUs = (tkW3 - tkW2) / kCyPerUs;
     }
 
-    // Bench diagnostic: the ring tick's three segment costs, surfaced in ringDbg.
+    /// Microseconds the ring tick spent waiting for the peripheral, for `ringDbg`.
     static inline volatile uint32_t dbgTickWaitUs = 0;
+    /// Microseconds the ring tick spent snapshotting the frame, for `ringDbg`.
     static inline volatile uint32_t dbgTickSnapUs = 0;
+    /// Microseconds the ring tick spent priming buffers, for `ringDbg`.
     static inline volatile uint32_t dbgTickPrimeUs = 0;
 
     // The pure WS2812 output floor: the render loop can never beat it.
@@ -406,6 +410,7 @@ public:
         setStatus(statusBuf_, Severity::Error);
     }
 
+    /// Whether the bus has failed for long enough to stop trying, reported once.
     bool busGaveUp() {
         if (deadFrames_ < kDeadFramesBeforeGiveUp) return false;
         if (!gaveUpReported_) {
@@ -590,13 +595,16 @@ public:
     bool inFlightForTest(uint8_t i) const { return inFlight_[i]; }
     /// Lights on lane `i` (0 if out of range). Test-only.
     nrOfLightsType laneLightCount(uint8_t i) const { return i < laneCount_ ? laneCounts_[i] : 0; }
-    // The prefill-skip needs a constant per-row mask; an empty lane is in no mask at all.
-    /// Are all POPULATED strands the same length? Gates the ring's prefill-skip.
     // Best-effort counters: NOT volatile, which is the wrong tool and deprecated on a compound assign.
+    /// Cycles spent gathering a row, accumulated for `ringDbg`.
     static inline uint32_t dbgSegGatherCy = 0;
+    /// Cycles spent transposing and emitting a row, accumulated for `ringDbg`.
     static inline uint32_t dbgSegEmitCy = 0;
+    /// How many rows the two counters above cover, so `ringDbg` can average them.
     static inline uint32_t dbgSegRows = 0;
 
+    // The prefill-skip needs a constant per-row mask; an empty lane is in no mask at all.
+    /// Are all POPULATED strands the same length? Gates the ring's prefill-skip.
     bool MM_RAMFUNC uniformLaneCounts() const {
         nrOfLightsType ref = 0;
         for (uint8_t i = 0; i < laneCount_; i++) {
@@ -944,9 +952,9 @@ public:
         }
         return width;
     }
-    // A '595 needs 8 shift cycles per slot, so the bus clocks that much faster for the same 375 ns.
+    /// How much faster the bus clocks per slot: a '595 needs 8 shift cycles for the same 375 ns.
     uint8_t busClockMultiplier() const { return outputsPerPin(); }
-    // Keys on the PHYSICAL pin count: 48 lanes on 6 pins through a '595 is still an 8-bit bus.
+    /// Bytes per bus slot, keyed on the PHYSICAL pin count rather than the lane count.
     uint8_t slotBytes() const { return busWidthPins() > 8 ? 2 : 1; }
 protected:
 

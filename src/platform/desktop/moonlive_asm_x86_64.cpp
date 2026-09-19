@@ -3,43 +3,64 @@
 
 #include <cstring>
 
-// MoonLive x86-64 host assembler (Windows, Linux, Intel macOS). Each named instruction is encoded
-// ONCE here; the shared IR lowering composes them.
-//
-// One ISA per file, self-guarding, the shape the ESP32 backends already use. This file carries a
-// SECOND axis the arm64 one does not: Microsoft x64 and System V disagree on the argument-register
-// set, the callee-saved set, and the 32-byte shadow space, so the ABI branches are nested inside
-// the ISA guard rather than split again.
-//
-// It also carries its own lowerToBytes, the two-line binding of core's IR walk to THIS assembler.
+/// @defgroup moonlive_asm_x86_64 MoonLive x86-64 assembler
+/// Each named instruction encoded once, composed by the shared lowering.
+///
+/// One architecture per file, self-guarding, the shape the device backends use; it carries its own binding of the shared walk to this assembler.
+///
+/// @moreinfo
+///
+/// ## A second axis the other host backend does not have
+///
+/// The two calling conventions disagree on the argument registers, the callee-saved set and the reserved stack space.
+/// So those branches nest inside the architecture guard rather than splitting the file again, being a convention difference within one instruction set.
+///
+/// ## What the two conventions disagree on
+///
+/// The argument registers, the callee-saved set, and whether the caller must reserve a shadow area below the call site.
+/// The encodings themselves are identical, so only the register map and the call's argument shuffle differ, switched in one place each.
+///
+/// ## Design choices worth stating
+///
+/// The frame is always emitted, unlike the sibling backend which skips it when nothing spills.
+/// Registers the map uses must be saved and the shadow area reserved for any built-in call, and without a frame there is nowhere to put them.
+/// It costs a short prologue and a fixed stack window per invocation, run once per frame, which is negligible against the tick budget.
+///
+/// The accumulator doubles as the return register, so a call stashes the return before restoring the pool and only then moves it into place.
+/// Conditional branches always take the wide relative form, one width so the patcher never has to choose.
+/// That wastes a few bytes on short branches and saves the range-check retry and its correctness burden.
+///
+/// ## The call pushes rather than moves
+///
+/// Pushing each register costs one or two bytes against eight for a stack-relative move, and the pool is fourteen registers while a script calls built-ins inside its light loop.
+/// So the call's encoded size dominates a call-dense script, at roughly a hundred bytes per call instead of nearly three hundred.
+/// That is the difference between fitting the buffers the sibling backend fits and overflowing them, which a density check in the tests holds.
+///
+/// ## Slots ascend, and the reason is a contract
+///
+/// A call hands a built-in the address of its first argument slot and the callee reads upward from there.
+/// So consecutive slot indices must be consecutive ascending memory; reversing them makes every non-inlined built-in receive its arguments backwards while everything inlined keeps working.
+/// They are addressed from the frame pointer rather than the stack pointer, so they survive the call moving it.
+///
+/// ## Narrow arguments must be zero-extended
+///
+/// This architecture leaves the upper bits of a register holding a narrower argument undefined, and a caller may leave anything above.
+/// The intermediate form then spills each argument to a slot as a full-width store and the loop arithmetic multiplies a full-width view.
+/// So a dirty channel count reaches the write as nonsense and the address lands outside the buffer.
+/// The sibling architecture's convention extends them for us, which is why only this backend needs it.
+///
+/// ## The high multiply is alias-safe by construction
+///
+/// Both sources are read before the destination is written, and the only register touched is the accumulator, saved and restored around the sequence.
+/// The intermediate lives on the stack rather than in a borrowed register, because no register here is safe to borrow.
+/// The accumulator is itself a virtual register, and the obvious temporaries are the first ones the allocator hands out.
+/// Two earlier attempts each picked a register that turned out to be allocatable, and each produced a silently wrong number rather than a crash.
 
 namespace mm::moonlive {
 
 #if (defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT)
 
-// x86-64 host assembler — Microsoft x64 (Windows) and System V (Linux / Intel-macOS) ABIs. The
-// two diverge in the argument-register set (rcx/rdx/r8/r9 vs rdi/rsi/rdx/rcx/r8/r9), the
-// callee-saved set (Win64 preserves rsi/rdi/xmm6-15; SysV does not), and the caller's obligation
-// to reserve 32 bytes of shadow space below the call site (Win64 only). Encodings are identical
-// between them — only the register-map and the call() argument shuffle differ, switched on
-// _WIN32 in the register map below and inside call().
-//
-// Design choices worth stating:
-// - Frame always emitted on x86-64, unlike arm64 which skips it when slots == 0. On Win64 we
-//   need to save nonvolatile regs the vreg map uses (rbx, rdi, rsi, r12-r15) and reserve
-//   32 bytes of shadow space for any host builtin call; without a frame there is nowhere to
-//   put them. SysV is similar (rbx, r12-r15 nonvolatile). Cost: ~20 bytes of prologue and a
-//   fixed stack window per script invocation, run once per frame — negligible against the
-//   MoonLive tick budget.
-// - rax lands as R13 (last vreg). It is volatile in both ABIs and doubles as the return-value
-//   register, so call() must stash the return before restoring vregs and then move it into
-//   the destination — matching the arm64 pattern that stashes into x15 for the same reason.
-// - Conditional branches always use the 32-bit relative form (0F 8x rel32, 6 bytes). One
-//   width, so patchBranches never has to choose — same rel32 story as bl uses on arm64.
-//   Wastes 4 bytes on short branches, saves the "range fits?" retry loop and its correctness
-//   burden.
-// - movabs (REX.W B8+r imm64) is the movPtr / call-target instruction, the direct analog of
-//   arm64's movz + 3×movk sequence. 10 bytes on x64 vs 16 on arm64.
+// The register map and the call's shuffle are the only things the two conventions change here: @xref{what-the-two-conventions-disagree-on|what they disagree on} and @xref{design-choices-worth-stating|the choices made}.
 
 // x86-64 machine register numbers, nested in a namespace so the RAX/RCX/... names cannot
 // collide with the vreg enum's R0..R13 in the enclosing mm::moonlive scope.
@@ -109,13 +130,9 @@ void HostAssembler::addFixup(size_t at, Label label, FixKind kind) {
     fixups_[fixupCount_++] = {at, label, kind};
 }
 
-// Emit N bytes little-endian into the code buffer via the existing emitBytes path (which owns
-// bounds checking + the overflow_ flag). x86 opcodes are 1-15 bytes long; a stack buffer of 16
-// is enough for any single instruction the backend emits here.
-// No emit32 here: x86-64 instructions are 1-15 bytes, so every encoder below marshals into a
-// local buffer and calls emitBytes. The header still declares emit32 for the arm64 branch, where
-// a fixed 4-byte word is the natural unit; leaving it undefined on this ISA is what says it has
-// no meaning here, and nothing links against it.
+// Emit bytes through the existing path, which owns the bounds check and the overflow flag; instructions here are variable-length, so a small local buffer holds any single one.
+// There is no fixed-word emitter on this architecture: the header declares one for the sibling, where a fixed word is the natural unit.
+// And leaving it undefined here is what says it has no meaning.
 void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
     if (!buf_ || len_ + n > kCap) { overflow_ = true; return; }
     std::memcpy(buf_ + len_, p, n); len_ += n;
@@ -144,13 +161,9 @@ static void emitMovRegReg(HostAssembler* A, uint8_t dst, uint8_t src) {
     A->emitBytes(b, 3);
 }
 
-// The shared body of the three [base + disp] memory forms below: REX.W + opcode + ModR/M with a
-// disp8 (mod=01) when the displacement fits a signed byte, disp32 (mod=10) otherwise. The disp8
-// form saves 3 bytes per access, and the frame's hot offsets — the parked host arguments and the
-// spill region's upper half — all fit it. Density matters: spill traffic is most of what a
-// script emits, and a fill script that fits an arm64-sized 256-byte buffer must keep fitting
-// here (the "compiled fill is BEHAVIORALLY identical" test's buffer pins exactly that).
-// If base is rsp/r12 (low 3 bits = 100), a SIB byte is required.
+// The shared body of the three base-plus-displacement forms, using the short displacement when it fits a signed byte and the wide one otherwise.
+// The short form saves three bytes per access and the frame's hot offsets all fit it, and density matters because spill traffic is most of what a script emits.
+// Two base registers require an extra addressing byte, which the encoder adds.
 static void emitMemDispOp(HostAssembler* A, uint8_t opcode, uint8_t reg, uint8_t base,
                           int32_t disp) {
     const bool needsSIB = ((base & 7) == x64::RSP);
@@ -220,44 +233,13 @@ static void emitSubRspImm32(HostAssembler* A, int32_t imm) {
 // (No emitAddRspImm32 helper: the epilogue uses `lea rsp, [rbp - kNonvolSaveBytes]` to unwind
 // the frame in one instruction, which also drops anything call() left on the stack.)
 
-// --- the call frame -----------------------------------------------------------------------------
-//
-// Frame layout, address ORDER (low → high):
-//   [rsp+0] .. [rsp+kShadowSpace-1]              shadow space our callees are owed (Win64; SysV 0)
-//   [rsp+kShadowSpace]                           callLabel's outgoing arg 5 (Win64)
-//   ... alignment padding ...
-//   [rbp - kNonvolSaveBytes - 8*kTotalSlots]     slot 0            (deepest)
-//   [rbp - kNonvolSaveBytes - 8]                 slot kTotalSlots-1
-//   [rbp - kNonvolSaveBytes]                     first saved nonvolatile (pushed)
-//   [rbp - 8]                                    last saved nonvolatile (pushed)
-//   [rbp]                                        saved rbp (from `push rbp`)
-//   [rbp + 8]                                    return address
-//   [rbp + 16 .. rbp+kArg5Offset-1]              (Win64) caller's shadow space
-//   [rbp + kArg5Offset]                          (Win64) caller's arg 5 = the ctrls pointer
-//
-// Slots ASCEND with the index (slotOffsetFromRbp), because IrOp::Call hands a builtin the address
-// of its first argument slot and the callee reads upward from there. Addressed from rbp rather
-// than rsp so they survive call() moving rsp, the same decision arm64 makes with x29.
-//
-// call() saves the vreg pool BELOW this frame with pushes; nothing in the frame is reserved for
-// it beyond the shadow space above.
+// The call frame, laid out from the stack pointer upward.
+// The shadow area callees are owed, then the outgoing argument, then the spill slots below the saved registers, then the saved frame pointer and the return address.
+// Slots ascend with their index: @xref{slots-ascend-and-the-reason-is-a-contract|the contract that requires it}.
+// The call saves the register pool below this frame with pushes, and nothing here is reserved for it beyond the shadow area.
 
-// call() saves the vreg pool with PUSHES (1-2 bytes each), not rsp-relative movs (8 bytes each)
-// — the pool is 14 registers and a script calls builtins per-pixel-loop, so the encoding size of
-// call() dominates a call-dense script's emitted bytes. The frame reserves only the OUTGOING
-// area at the bottom of rsp: the Win64 shadow space our callees are owed plus one stack slot for
-// callLabel's arg 5 (the SysV build needs neither, but carrying the 8 bytes uniformly beats a
-// second frame formula). Spill slots are rbp-relative, so the rsp movement inside call() cannot
-// disturb them.
-// Slot n's offset from rbp (negative — the slots live BELOW the saved nonvols). ASCENDING with
-// the slot index, exactly like arm64's x29 + 16 + n*8: IrOp::Call passes slotAddr(firstSlot) and
-// the host builtin reads its arguments as an ARRAY walking upward from that address
-// (moonlive_lower.h), so consecutive slot indices MUST be consecutive ascending memory. Reverse
-// this and every non-inlined builtin (random16, addLight, addControl, line, palette reads)
-// receives its arguments backwards, while everything inlined keeps working.
-//
-// The region is sized at kTotalSlots whatever the script uses: a fixed 168 bytes of desktop stack
-// against a formula that would need the slot count at every call site.
+// The pool is saved with pushes rather than moves: @xref{the-call-pushes-rather-than-moves|the density that buys}.
+// A slot's offset is negative and ascends with its index, the region sized uniformly whatever the script uses, against a formula that would need the count at every call site.
 static inline int32_t slotOffsetFromRbp(uint8_t slot) {
     return -int32_t(kNonvolSaveBytes) - 8 * int32_t(kTotalSlots - slot);
 }
@@ -287,12 +269,8 @@ void HostAssembler::prologue(uint8_t slots) {
     emitPushReg(this, x64::R15);
 #endif
 
-    // Reserve stack for: the outgoing area (callee shadow space + callLabel's stack arg 5) plus
-    // the spill slots. Align the whole thing to 16 so rsp is 16-aligned before any call.
-    //
-    // At entry: rsp was (X - 8) for return addr. After push rbp: (X - 16), 16-aligned. After N
-    // pushes of 8 bytes each: 16-aligned iff N is even. Win64 pushes 7 nonvols → odd → rsp is
-    // 8 mod 16. SysV pushes 5 → odd → same. To land 16-aligned we need frameBytes % 16 == 8.
+    // Reserve the outgoing area and the spill slots, aligned so the stack pointer is correctly aligned before any call.
+    // Both conventions push an odd number of registers here, which is what makes the frame size land where it does.
     uint32_t needed = uint32_t(kShadowSpace) + 8   // outgoing: callee shadow + arg-5 slot
                     + uint32_t(kTotalSlots) * 8;   // full slot region — slotOffsetFromRbp is fixed
     // Bring rsp back to 16-alignment: needed + (rsp offset mod 16) must be 0 mod 16.
@@ -309,17 +287,8 @@ void HostAssembler::prologue(uint8_t slots) {
     emitMovRegMemDisp(this, x64::RDI, x64::RBP, kArg5Offset);
 #endif
 
-    // Zero-extend the narrow arguments. REQUIRED ON BOTH ABIs, which is why it is not inside
-    // the switch above. CtrlFn is
-    //   void (uint8_t* buf, uint32_t nLights, uint8_t cpl, uint32_t t, const uint8_t* ctrls)
-    // and x86-64 leaves the UPPER bits of a register holding a narrower argument UNDEFINED: a
-    // caller sets edx / r8b / r9d (Win64) or esi / dl / ecx (SysV) and may leave anything above.
-    // The IR then spills each host argument to a frame slot as a full 64-bit store, and the loop
-    // math multiplies a 64-bit view of that slot, so a dirty `cpl` reaches the pixel write as
-    // ~0x7fffffff_ffffff03 and the address lands outside the buffer. arm64's ABI extends narrow
-    // arguments for us, which is why only this backend needs it.
-    //
-    // The pointers (buf, ctrls) are full-width by definition and need nothing.
+    // Zero-extend the narrow arguments, required on both conventions, which is why it sits outside the switch above: @xref{narrow-arguments-must-be-zero-extended|what a dirty one does}.
+    // The pointers are full width by definition and need nothing.
 #if defined(_WIN32)
     { uint8_t b[2] = {0x89, 0xD2};             emitBytes(b, 2); }  // mov   edx, edx   (nLights)
     { uint8_t b[4] = {0x4D, 0x0F, 0xB6, 0xC0}; emitBytes(b, 4); }  // movzx r8,  r8b   (cpl)
@@ -480,21 +449,10 @@ void HostAssembler::mulReg(Reg d, Reg a, Reg b) {
 
 // --- memory ops ---------------------------------------------------------------------------------
 
-// The shared body of the four INDEXED memory ops: `[base + index]`, unscaled, which is how this
-// backend addresses a pixel (the lowering multiplies an element index by the element width before
-// it gets here, so the index is always a byte offset).
-//
-// Two encoding rules live here once instead of four times:
-//
-// - A base whose low three bits are 101 (rbp, r13) cannot use mod=00: the SDM gives that slot to
-//   "disp32, no base", so the emitted instruction would address an absolute constant instead of
-//   the register. mod=01 with an explicit zero disp8 means the same thing and encodes correctly.
-//   Unreachable today (the lowering only ever bases these on kArg0/kArg4), but the cost is one
-//   comparison, and the previous version of this code carried a comment claiming it was guarded
-//   when it was not, which is the kind of note that stops the next reader from checking.
-// - REX is emitted UNCONDITIONALLY for the byte store. Without it, an 8-bit operand naming
-//   register 4-7 means ah/ch/dh/bh, not sil/dil/bpl/spl, and this backend's vreg maps do put
-//   values in rsi/rdi/rbx, so the wrong half-register would be stored with no diagnostic.
+// The shared body of the four indexed forms, unscaled, which is how this backend addresses a light, the lowering having already multiplied by the element width.
+// Two encoding rules live here once instead of four times.
+// Certain base registers cannot use the short addressing mode, whose slot the architecture gives to an absolute address, so an explicit zero displacement means the same thing and encodes correctly.
+// The prefix is emitted unconditionally for the byte store, since without it an eight-bit operand names the high half of a different register.
 void HostAssembler::emitIndexed(const uint8_t* opcode, size_t opLen, bool prefix66,
                                 bool forceRex, uint8_t reg, uint8_t base, uint8_t index) {
     const bool baseNeedsDisp = ((base & 7) == 0b101);    // rbp / r13
@@ -509,21 +467,7 @@ void HostAssembler::emitIndexed(const uint8_t* opcode, size_t opLen, bool prefix
     emitBytes(b, n);
 }
 
-// The signed high 32 bits of a * b, for the Q16.16 multiply.
-//
-// ALIAS-SAFE BY CONSTRUCTION: both sources are read before the destination is written, and the
-// only register touched is rax, saved and restored around the sequence. The intermediate lives on
-// the STACK rather than in a borrowed register, because there is no register here that is safe to
-// borrow: rax is vreg R13, and r10/r11 are R5/R6 — the FIRST temps the allocator hands out, so
-// borrowing them is worse than borrowing rax, not better. Two earlier attempts each picked a
-// register that turned out to be allocatable, and each produced the same failure: `pop` restoring
-// a stale value over the result when the destination aliased the scratch, or a source destroyed
-// before it was read. A silently wrong number, not a crash.
-//
-//   movsxd rax, aD    ; push rax        — a widened, parked
-//   movsxd rax, bD    ; imul rax, [rsp] — b widened, then the 64-bit product
-//   sar rax, 32       ; mov dD, rax     — the high word, into d only now
-//   add rsp, 8                          — discard, without writing any register
+// The signed high half of the product, for the fixed-point multiply: @xref{the-high-multiply-is-alias-safe-by-construction|why the intermediate lives on the stack}.
 void HostAssembler::mulhi(Reg d, Reg a, Reg b) {
     const uint8_t dst = xr(d), ra = xr(a), rb = xr(b);
     const uint8_t RAX = x64::RAX;
@@ -660,17 +604,10 @@ void HostAssembler::load8Idx(Reg d, Reg base, Reg off) {
 
 // --- compare and branch -------------------------------------------------------------------------
 
-// cmp r32, r32  (39 /r): sets flags = a - b, THIRTY-TWO bit.
-//
-// 32-bit, not REX.W 64-bit, because a MoonLive value is 32 bits and arm64 already compares in `w`
-// registers. While every value was zero-extended the two agreed and the width did not matter. A
-// SIGNED compare makes them disagree on the same program: a 32-bit -1 sitting in a 64-bit register
-// is 0x00000000FFFFFFFF, which a 64-bit signed compare reads as +4294967295. Comparing at the
-// value's own width is what keeps the four backends running the same script the same way.
-//
-// REX is still emitted when either register is r8..r15, since that is what addresses them; only
-// the W bit (the 64-bit operand size) is dropped. rex_ returns 0x40 for the no-bits case, which is
-// a valid null REX prefix, so the three-byte form holds for every register pair.
+// A compare at the VALUE'S own width, not the register's, because a script value is narrower and the sibling backend already compares that way.
+// While every value was zero-extended the two agreed, but a signed compare makes them disagree: a narrow negative in a wide register reads as a large positive.
+// Comparing at the value's width keeps the backends running the same script the same way.
+// The prefix is still emitted to address the upper registers; only the width bit is dropped, and the null prefix is valid, so one form holds for every pair.
 void HostAssembler::cmp(Reg a, Reg b) {
     const uint8_t left = xr(a), right = xr(b);
     uint8_t bytes[3] = {
@@ -727,21 +664,10 @@ void HostAssembler::ret() {
     emitBytes(&b, 1);
 }
 
-// --- call ---------------------------------------------------------------------------------------
-//
-// Host builtin call: d = fn(a, b, c). The textbook push/pop shape: push the whole vreg pool
-// (the live-vreg-across-call contract), load the arguments from their pushed copies (memory
-// sources, so an argument register overlapping a source is harmless — the "one is x0" problem
-// arm64 solves with x15/x16/x17 scratch), call through rax, write the zero-extended return over
-// dst's pushed slot, pop everything back.
-//
-// Pushes rather than rsp-relative movs because call() dominates a call-dense script's emitted
-// size: 1-2 bytes against 8, which is ~100 bytes per call instead of ~270. That is the difference
-// between fitting the buffers arm64 fits and overflowing them. The density canary in
-// unit_moonlive_codegen_x86_64.cpp is what holds that.
-//
-// Alignment: prologue leaves rsp 16-aligned; kRegCount (14) pushes move it by 112 ≡ 0 (mod 16),
-// so it is still 16-aligned at the call — with the Win64 shadow sub folded in around it.
+// The call to a host built-in, in the textbook push and pop shape: push the pool, load the arguments from their pushed copies, call, then pop back.
+// Loading from memory makes an argument register overlapping a source harmless, which the sibling solves with dedicated scratch.
+// Pushes rather than moves: @xref{the-call-pushes-rather-than-moves|the density that buys}.
+// The pool's size keeps the stack pointer aligned across the pushes.
 
 // A pushed vreg's offset from rsp while the pool is on the stack (before the shadow sub): vreg 0
 // was pushed first so it sits highest.
@@ -819,16 +745,10 @@ void HostAssembler::callLabel(Label l, Reg d, bool take) {
     // have consumed, so their live-across-a-called-function meaning has to be re-established.
     for (uint8_t v = 0; v < kHostArgSlots; v++) spillLoad(static_cast<Reg>(v), hostArgSlot(v));
 #if defined(_WIN32)
-    // Win64 passes arg 5 (= kArg4, the ctrls-arena pointer) on the CALLER's stack at [rsp+32],
-    // above the 32-byte shadow space. The entry-point function's prologue reads kArg4 from
-    // [rbp+48] and it works because the C++ caller followed Win64 exactly. A script-to-script
-    // call must do the same: without this store, the callee's `mov rdi, [rbp+48]` reads whatever
-    // happened to be in that stack slot, rdi becomes garbage, and the first host(kArg4)
-    // dereferences it and faults. The pushes above buried the slot prologue reserved, so a fresh
-    // outgoing area is opened here: shadow + the arg-5 slot, padded to keep rsp 16-aligned (the
-    // pushes leave it aligned, as call()'s own `sub rsp, kShadowSpace` relies on).
-    // SysV passes arg 5 in r8, which IS R4 in the SysV map; the spillLoad above already put it
-    // in the right register, so no stack store is needed.
+    // One convention passes the fifth argument on the caller's stack above the shadow area, which the entry point's prologue reads from there.
+    // A script-to-script call must do the same, or the callee reads whatever was in that slot and faults on the first use.
+    // The pushes above buried the slot the prologue reserved, so a fresh outgoing area is opened here, padded to keep the stack aligned.
+    // The other convention passes it in a register the load above already filled, so it needs no store.
     emitSubRspImm32(this, int32_t(kShadowSpace) + 16);
     emitMovMemDispReg(this, x64::RSP, kShadowSpace, xr(R4));
 #endif

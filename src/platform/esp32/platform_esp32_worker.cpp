@@ -1,10 +1,36 @@
-// Pinned worker task + wake notification — the platform half of the multicore render↔encode split
-// (Drivers owns the domain logic; this file owns the one seam so no FreeRTOS type escapes
-// src/platform/, the platform-boundary rule). xTaskCreatePinnedToCore + a direct-to-task
-// notification (xTaskNotifyGive / ulTaskNotifyTake) is the textbook lock-free single-producer/
-// single-consumer wake FreeRTOS documents as the lightweight binary-semaphore replacement — same
-// pairing Espressif's own examples use for a "wake this worker" handoff. The Drivers render-split is
-// the first user; the async-ArtNet send wants the identical primitive, which is why it lives here.
+/// @defgroup platform_esp32_worker The pinned worker task and its wake
+/// The one seam behind the multicore split, so no task-system type escapes this layer.
+///
+/// A pinned task with a direct notification is the textbook lock-free wake for one producer and one consumer, and the documented lightweight replacement for a binary semaphore.
+/// The render split is the first user and the asynchronous send wants the identical primitive, which is why it lives here rather than in either.
+///
+/// @moreinfo
+///
+/// ## The watchdog subscription is per task
+///
+/// Subscribing and feeding act on the current task, so the flag recording whether the caller subscribed is thread-local rather than global.
+/// The render loop and the encode worker each feed the watchdog, and a single global would let one call the feed on a task the other subscribed.
+/// The system rejects that as an unknown task, flooding the log every tick and starving the network stack.
+/// Each task reads and writes its own copy on its own task, so nothing needs synchronizing.
+///
+/// The configuration runs the watchdog with idle-task checking off, a saturated core being healthy, so nothing is watched unless a task subscribes.
+/// If either stops feeding it, a genuine wedge rather than a busy frame, it panics and reboots with a backtrace instead of hanging silently.
+///
+/// ## Stopping is bounded, never infinite
+///
+/// Normally one wake suffices, the worker returning once it sees the stop flag.
+/// But if the stop runs on the same core the worker is pinned to while the worker is mid-job, it cannot be scheduled until this caller yields.
+/// And an unbounded spin would deadlock the device.
+/// Yielding lets it drain within a few milliseconds, and the deadline is the robustness floor for a lost wake or a wedged job.
+/// On timeout the worker is detached rather than freed, a bounded leak being better than a use-after-free.
+/// And its stop flag stays set so it self-deletes cleanly if it ever wakes.
+///
+/// ## The handle is assigned before the task is created
+///
+/// A task pinned to the spawner's own core preempts inside the create call, and its function may wait immediately.
+/// With the handle still unset that wait returns at once without blocking.
+/// And a retry loop becomes a hot spin that starves this caller from ever assigning it, which measured as a board offline at boot.
+/// Assigning first closes that window, and a failed create resets it before anyone can be woken.
 
 #include "platform/platform.h"
 
@@ -38,12 +64,8 @@ struct EspWorker {
     std::atomic<bool> detached{false};
 };
 
-// Trampoline: run the caller's fn (which owns its own loop and returns when it observes the stop flag
-// via a woken waitNotify), then self-delete the RTOS task. The fn manages its own WDT membership: the
-// encode worker subscribes itself via taskWdtSubscribe() at loop start, feeds it with taskWdtReset() each
-// frame, and unsubscribes via taskWdtUnsubscribe() before returning (the subscription is per-task, so it
-// can't ride the render task's — see taskWdtSubscribe). A fn that never subscribes leaves taskWdtReset() a
-// no-op, so this trampoline stays generic.
+// The trampoline: run the caller's function, which owns its own loop and returns once it sees the stop flag, then delete the task.
+// The function manages its own watchdog membership, subscribing at loop start and unsubscribing before returning; one that never subscribes leaves the feed a no-op, so this stays generic.
 void workerTrampoline(void* arg) {
     auto* w = static_cast<EspWorker*>(arg);
     w->fn(w->user);                     // runs until stopPinnedTask flips w->stop and wakes it
@@ -61,11 +83,7 @@ bool spawnPinnedTask(WorkerTask& t, const char* name, WorkerFn fn, void* user,
     if (!w) return false;
     w->fn = fn;
     w->user = user;
-    // t.impl BEFORE the create: a task pinned to the SPAWNER'S OWN core preempts inside
-    // xTaskCreatePinnedToCore (equal/higher priority), and its fn may call waitNotify(t) immediately —
-    // with impl still null that returns false without blocking, and a retry loop becomes a hot spin
-    // that starves this caller from ever assigning impl (a live-lock; measured: board offline at boot).
-    // Assigning first closes the window; on create-failure it is reset before anyone can be woken.
+    // The handle is assigned BEFORE the create: @xref{the-handle-is-assigned-before-the-task-is-created|the live-lock that otherwise measured as a board offline at boot}.
     t.impl = w;
     const BaseType_t coreId = (core < 0) ? tskNO_AFFINITY : static_cast<BaseType_t>(core);
     const BaseType_t ok = xTaskCreatePinnedToCore(
@@ -93,15 +111,7 @@ void stopPinnedTask(WorkerTask& t) {
     if (!w) return;
     w->stop.store(true, std::memory_order_release);   // the fn re-checks this after its next wake
     if (w->handle) xTaskNotifyGive(w->handle);         // wake it so it observes the stop
-    // Wait for the trampoline to run its fn out and self-delete. Normally bounded by ONE wake (the fn
-    // returns after it sees `stop` via a woken waitNotify). BOUNDED, never infinite: if this stop runs
-    // on the SAME core the worker is pinned to and the worker is mid-job (not parked in waitNotify), the
-    // worker can't be scheduled until this caller yields — and an unbounded spin here would deadlock
-    // (measured: a config-change teardown of the core-0 helper hanging the whole device). vTaskDelay
-    // yields, so the worker normally drains within a few ms; the deadline is the robustness floor for
-    // the pathological case (a lost notify, a wedged job). On timeout we DETACH — leak the worker rather
-    // than free-while-running (a use-after-free is worse than a bounded leak) — and its stop flag stays
-    // set, so if it ever wakes it self-deletes cleanly against the still-live EspWorker.
+    // Wait for the trampoline to run out and delete itself, bounded rather than infinite: @xref{stopping-is-bounded-never-infinite|the deadlock an unbounded spin caused}.
     const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(kStopJoinTimeoutMs);
     while (!w->finished.load(std::memory_order_acquire)) {
         if (xTaskGetTickCount() > deadline) {
@@ -123,20 +133,11 @@ void stopPinnedTask(WorkerTask& t) {
     t.impl = nullptr;
 }
 
-// Whether the CALLING task subscribed to the WDT — so taskWdtReset only feeds a real subscription. The
-// WDT subscription is per-task (esp_task_wdt_add/_reset act on the current task), so this flag is
-// thread_local, NOT one global: the render loop AND the core-1 encode worker each feed the WDT, and a
-// single global would let the worker call esp_task_wdt_reset() on a task the render loop subscribed —
-// which the IDF rejects as "task not found", flooding the log every tick and starving the network stack.
-// Each task reads/writes its own copy, on its own task, so no synchronization is needed.
+// Whether the CALLING task subscribed, so the feed only ever feeds a real subscription: @xref{the-watchdog-subscription-is-per-task|why this is thread-local rather than global}.
 static thread_local bool s_wdtSubscribed = false;
 
-// Subscribe the CURRENT task to the task WDT. The sdkconfig runs the TWDT with idle-task checking OFF (a
-// saturated core is healthy), so nothing is watched unless a task subscribes. Both the render loop and the
-// encode worker call this on their own task: if either stops feeding the WDT (a genuine wedge, not a busy
-// frame), it panics and reboots (the self-heal) instead of hanging silently, and leaves a backtrace.
-// Idempotent per task; a failure (WDT not inited) just leaves s_wdtSubscribed false and reset a no-op,
-// degrading to unwatched behavior rather than crashing.
+// Subscribe the CURRENT task to the watchdog: @xref{the-watchdog-subscription-is-per-task|what it watches and why}.
+// Idempotent per task, and a failure leaves the flag clear and the feed a no-op, degrading to unwatched rather than crashing.
 void taskWdtSubscribe() {
     if (s_wdtSubscribed) return;
     if (esp_task_wdt_add(nullptr) == ESP_OK) s_wdtSubscribed = true;

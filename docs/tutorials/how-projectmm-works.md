@@ -217,5 +217,5 @@ Now that you know what the cards are, go build something:
 - **[Layouts](../moonmodules/light/layouts.md)** — grids, rings and custom shapes
 - **[Modifiers](../moonmodules/light/modifiers.md)** — mirroring, folding, tiling
 - **[Drivers](../moonmodules/light/drivers.md)** — LED strips, ArtNet, DMX
-- **[Live scripting](../moonmodules/light/MoonLiveEffect.md)** — write your own
+- **[Live scripting](../moonmodules/light/moonlive.md)**: write your own
   effect in the browser; it compiles on the device and runs as native code

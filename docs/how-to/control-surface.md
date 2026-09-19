@@ -179,5 +179,5 @@ The session also draws a **pad grid**. Those pads are inert for now: `/mm/pad/N`
 ## Where to go next
 
 - **[OSC module reference](../moonmodules/core/services.md)**: every control, the feedback rules, `/mm/hello`
-- **[Control card](../moonmodules/core/control.md)**: the surface the device owns, and what each control drives
+- **[Control card](../moonmodules/core/system.md#control)**: the surface the device owns, and what each control drives
 - **[Control surfaces](../reference/hardware/control-surfaces.md)**: what it would take to drive projectMM from a Mackie desk or a MIDI controller

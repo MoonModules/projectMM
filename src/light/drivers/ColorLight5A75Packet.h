@@ -5,54 +5,94 @@
 
 namespace mm {
 
-// ColorLight 5A-75 wire format — the one place the layout lives, used by PanelCardDriver to build
-// frames. Same shape as ArtNetPacket.h / DdpPacket.h, with one structural difference: this format
-// has no receiver in the tree (the cards are the receiver), so there is no build→parse round-trip
-// test. The unit tests pin the built bytes against the layout instead.
-//
-// **Raw Ethernet, not UDP.** These are complete L2 frames sent below IP: no address, no port, no
-// DHCP lease. That is why the driver works on a link that never got one.
-//
-// **The EtherType field is overloaded, and it is the format's defining quirk.** A normal frame has
-// a 2-byte EtherType at offset 12-13. Here byte 12 is the PACKET TYPE and byte 13 is already the
-// first payload byte, so every packet's body starts at offset 13 rather than 14. A row packet
-// therefore reads on the wire as EtherType 0x55<row-MSB> — not because the row is deliberately
-// encoded into the EtherType, but because the row number is simply the first payload byte and lands
-// there. Getting this wrong shifts every field by one and the cards silently discard the frame.
-//
-// **The MACs are fixed constants, not real addresses.** Destination 11:22:33:44:55:66, source
-// 22:22:33:44:55:66 — the cards filter on that destination, so a frame sent to broadcast or from
-// the device's own MAC is dropped without any visible error. The source is not this device's MAC.
-//
-// Frame layout, all packet types:
-//   0-5    destination MAC — always kColorLightDestMac
-//   6-11   source MAC — always kColorLightSrcMac
-//   12     packet type (0x55 row data, 0x01 sync, 0x0A brightness, 0x07 discovery)
-//   13+    payload, per type below
-//
-// Row data (type 0x55), payload at offset 13:
-//   13-14  row number, big-endian
-//   15-16  pixel offset within the row, big-endian
-//   17-18  pixel count in this packet, big-endian
-//   19     0x08 — constant; purpose undocumented
-//   20     0x88 — constant; purpose undocumented
-//   21+    pixel data, 3 bytes per pixel
-//
-// Sync (type 0x01), 112 bytes total, body zeroed except:
-//   13     0x07 — "sent from a PC/netcard" (a hardware sender writes 0x00 here)
-//   35     brightness          (payload byte 22)
-//   36     0x05 — constant; purpose undocumented
-//   38-40  brightness ×3       (payload bytes 25-27)
-//
-// Brightness (type 0x0A), 77 bytes total, body zeroed except:
-//   13-15  brightness ×3
-//   16     0xFF
-//
-// Per frame the order is: brightness, then every row ascending, then sync last — the sync is what
-// latches the buffered rows onto the panels.
-//
-// No configuration packets are sent. The cards are configured by the vendor's own tool and keep
-// that in flash; a sender only streams pixels.
+/// @defgroup ColorLight5A75Packet The ColorLight 5A-75 wire format
+/// @{
+/// The one home for the layout, which `PanelCardDriver` builds frames against.
+///
+/// @moreinfo
+///
+/// This is the same shape as `ArtNetPacket.h` and `DdpPacket.h`, with one structural difference.
+/// The format has no receiver in the tree, the cards being the receiver, so there is no build-and-parse round trip to test against.
+/// The unit tests pin the built bytes against the layout instead.
+///
+/// ## Raw Ethernet, not UDP
+///
+/// These are complete layer-2 frames sent below IP: no address, no port, no DHCP lease.
+/// That is why the driver works on a link that never got one.
+///
+/// ## The overloaded EtherType, the format's defining quirk
+///
+/// A normal frame carries a two-byte EtherType at offset 12 and 13.
+/// Here byte 12 is the packet type and byte 13 is already the first payload byte, so every packet's body starts at offset 13 rather than 14.
+/// A row packet therefore reads on the wire as EtherType `0x55` followed by the row's high byte.
+/// That is not because the row is deliberately encoded there, but because it is simply the first payload byte and lands in that position.
+/// Getting this wrong shifts every field by one, and the cards silently discard the frame.
+///
+/// ## The MACs are fixed constants, not real addresses
+///
+/// The destination is `11:22:33:44:55:66` and the source `22:22:33:44:55:66`.
+/// The cards filter on that destination, so a frame sent to broadcast, or from the device's own MAC, is dropped with no visible error.
+/// The source is not this device's MAC.
+///
+/// ## The frame layout
+///
+/// Every packet type shares the first thirteen bytes:
+///
+/// | Bytes | Meaning |
+/// |-------|---------|
+/// | 0 to 5 | destination MAC, always the fixed constant |
+/// | 6 to 11 | source MAC, always the fixed constant |
+/// | 12 | packet type: `0x55` row data, `0x01` sync, `0x0A` brightness, `0x07` discovery |
+/// | 13 onward | payload, per type |
+///
+/// ## The row-data payload
+///
+/// Row data, type `0x55`, carries its payload from offset 13:
+///
+/// | Bytes | Meaning |
+/// |-------|---------|
+/// | 13 to 14 | row number, big-endian |
+/// | 15 to 16 | pixel offset within the row, big-endian |
+/// | 17 to 18 | pixel count in this packet, big-endian |
+/// | 19 | `0x08`, a constant whose purpose is undocumented |
+/// | 20 | `0x88`, likewise |
+/// | 21 onward | pixel data, three bytes per pixel |
+///
+/// ## The sync and brightness packets
+///
+/// Sync, type `0x01`, is 112 bytes with its body zeroed except in four places.
+/// Byte 13 is `0x07`, marking a PC or netcard sender where hardware writes `0x00`.
+/// Byte 35 is the brightness, byte 36 a constant `0x05`, and bytes 38 to 40 the brightness again.
+///
+/// Brightness, type `0x0A`, is 77 bytes, zeroed except for the brightness three times at bytes 13 to 15 and `0xFF` at byte 16.
+///
+/// ## The order within a frame
+///
+/// Brightness first, then every row ascending, then sync last, the sync being what latches the buffered rows onto the panels.
+///
+/// The brightness packet is reported not to work on older card firmware, so the driver treats it as advisory and never depends on it having landed.
+///
+/// No configuration packets are sent: the cards are configured by the vendor's own tool and keep that in flash, so a sender only streams pixels.
+///
+/// ## What a builder requires of its caller
+///
+/// Each builder writes into a caller-owned buffer and returns the bytes written, so the buffer must be large enough before the call.
+/// A row frame needs the row prefix plus three bytes a pixel, which the largest-frame constant covers.
+/// A sync frame needs its own fixed 112 bytes, and a brightness frame its 77.
+///
+/// Pixel bytes are copied verbatim, because channel order is the caller's business and the driver's `Correction` has already applied it.
+/// Nothing here reorders them, and nothing here should start to.
+///
+/// ## Why the largest frame exceeds the MTU
+///
+/// The largest frame is 1512 bytes, above the 1500-byte Ethernet MTU on purpose.
+/// These are raw layer-2 frames on a dedicated link to dumb receivers, never IP packets a router would fragment.
+///
+/// FPP packs rows the same way, while Harald Kubota's write-up sends 128 pixels a packet, 391 bytes, which stays inside the MTU.
+/// Both work against the cards, and the larger packet is fewer frames for the same wall.
+///
+/// This is worth knowing if a wall ever goes dark behind a switch that will not pass a 1512-byte frame.
+/// Nothing in the path reports that: the card simply never sees a row and its activity LED stays still, which looks exactly like a transmit path that is not running.
 
 // Fixed MACs. The cards filter on the destination, so these are not arbitrary.
 constexpr uint8_t kColorLightDestMac[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
@@ -73,40 +113,27 @@ constexpr size_t COLORLIGHT_ROW_PREFIX = COLORLIGHT_DATA_OFFSET + COLORLIGHT_ROW
 constexpr uint16_t COLORLIGHT_MAX_PIXELS_PER_PACKET = 497;
 constexpr uint8_t COLORLIGHT_BYTES_PER_PIXEL = 3;
 
-// Largest frame built: 21 + 497x3 = 1512 bytes. Above the 1500-byte MTU on purpose: these are raw
-// L2 frames on a dedicated link to dumb receivers, never IP packets a router would fragment.
-//
-// FPP packs rows the same way. Harald Kubota's write-up sends 128 pixels per packet instead (391
-// bytes), which stays inside the MTU: both work against the cards, and the larger packet is fewer
-// frames for the same wall. Worth knowing if a wall ever goes dark through a SWITCH that will not
-// pass a 1512-byte frame, since nothing in the path reports that: the card simply never sees a row
-// and its activity LED stays still, which looks exactly like a transmit path that is not running.
+/// The largest frame built, 1512 bytes, deliberately above the 1500-byte MTU.
 constexpr size_t COLORLIGHT_MAX_FRAME =
     COLORLIGHT_ROW_PREFIX + COLORLIGHT_MAX_PIXELS_PER_PACKET * COLORLIGHT_BYTES_PER_PIXEL;  // 1512
 
 constexpr size_t COLORLIGHT_SYNC_FRAME = 112;
 constexpr size_t COLORLIGHT_BRIGHTNESS_FRAME = 77;
 
-// Constants the cards require whose purpose is not documented anywhere verifiable. Reproduced from
-// the observed layout and named to say exactly that.
+/// Constants the cards require, reproduced from the observed layout, their purpose undocumented.
 constexpr uint8_t kUnknownRowConst0 = 0x08;   // row payload byte 6
 constexpr uint8_t kUnknownRowConst1 = 0x88;   // row payload byte 7
 constexpr uint8_t kSyncFromNetcard  = 0x07;   // sync payload byte 0: sender is a PC/netcard
 constexpr uint8_t kUnknownSyncConst = 0x05;   // sync payload byte 23
 
-// Write the 12-byte MAC pair plus the packet-type byte. Everything after byte 12 is payload.
+/// Write the 12-byte MAC pair plus the packet-type byte, everything after which is payload.
 inline void buildColorLightHeader(uint8_t* out, uint8_t packetType) {
     std::memcpy(out, kColorLightDestMac, 6);
     std::memcpy(out + 6, kColorLightSrcMac, 6);
     out[COLORLIGHT_TYPE_OFFSET] = packetType;
 }
 
-// Build one row-data frame: up to COLORLIGHT_MAX_PIXELS_PER_PACKET pixels of one row, starting at
-// `pixelOffset` within that row. Returns the total frame length.
-//
-// `out` must hold COLORLIGHT_ROW_PREFIX + pixelCount × 3 bytes; COLORLIGHT_MAX_FRAME covers the
-// largest. Pixel bytes are copied verbatim — channel order is the caller's business (the driver's
-// Correction has already applied it), so this never reorders them.
+/// Build one row-data frame from `pixelOffset` within `row`, returning the frame length.
 inline size_t buildColorLightRowPacket(uint8_t* out, uint16_t row,
                                        uint16_t pixelOffset, uint16_t pixelCount,
                                        const uint8_t* pixels) {
@@ -125,9 +152,7 @@ inline size_t buildColorLightRowPacket(uint8_t* out, uint16_t row,
     return COLORLIGHT_ROW_PREFIX + dataBytes;
 }
 
-// Build the sync frame that latches every row sent since the last one. Fixed 112 bytes, zeroed
-// except for the netcard marker, one undocumented constant, and brightness in four places.
-// Returns the frame length; `out` must hold COLORLIGHT_SYNC_FRAME bytes.
+/// Build the sync frame that latches every row sent since the last one, returning its length.
 inline size_t buildColorLightSyncPacket(uint8_t* out, uint8_t brightness) {
     std::memset(out, 0, COLORLIGHT_SYNC_FRAME);
     buildColorLightHeader(out, COLORLIGHT_TYPE_SYNC);
@@ -141,10 +166,7 @@ inline size_t buildColorLightSyncPacket(uint8_t* out, uint8_t brightness) {
     return COLORLIGHT_SYNC_FRAME;
 }
 
-// Build the brightness frame: one level on each of the three channels. Sent first in a frame, ahead
-// of the rows. Reported not to work on older card firmware, so the driver treats it as advisory and
-// never depends on it having landed. Returns the frame length; `out` must hold
-// COLORLIGHT_BRIGHTNESS_FRAME bytes.
+/// Build the brightness frame, one level on each of the three channels, returning its length.
 inline size_t buildColorLightBrightnessPacket(uint8_t* out, uint8_t brightness) {
     std::memset(out, 0, COLORLIGHT_BRIGHTNESS_FRAME);
     buildColorLightHeader(out, COLORLIGHT_TYPE_BRIGHTNESS);
@@ -156,4 +178,5 @@ inline size_t buildColorLightBrightnessPacket(uint8_t* out, uint8_t brightness) 
     return COLORLIGHT_BRIGHTNESS_FRAME;
 }
 
+/// @}
 }  // namespace mm

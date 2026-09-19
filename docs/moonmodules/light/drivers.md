@@ -175,7 +175,7 @@ The grid becomes the frame, output correction applied. Latency is HLS's own, **2
 - `encoder`: which ffmpeg encoder (desktop only).
 - read-only: `url` to play, plus a status line for state, drops, or why the encoder stopped.
 
-Detail: [technical](moxygen/HlsDriver.md)
+Detail: [technical](moxygen/HlsDriver.md) · [the transport-stream muxer](moxygen/MpegTs.md)
 
 <a id="shared-details"></a>
 

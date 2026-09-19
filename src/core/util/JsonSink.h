@@ -7,10 +7,43 @@
 #include <cstdio>
 #include <cstring>
 
-// Printf-format checking: GCC/Clang have __attribute__((format)); MSVC parses
-// it as an "unknown override specifier" under /WX and the whole class fails to
-// parse downstream. Define a portable macro that expands to the attribute on
-// the GNU family and to nothing on MSVC.
+/// @defgroup JsonSink Writing JSON
+/// @{
+/// Writes a document with no fixed size ceiling, in one of three modes, so a module tree of any size serializes correctly.
+///
+/// @moreinfo
+///
+/// ## The three modes
+///
+/// A socket mode flushes a small staging buffer to a connection as it fills, so a whole response never lives in memory at once.
+/// A buffer mode collects into a heap block that grows on demand, for a caller that needs the assembled document and its length up front.
+/// A fixed mode writes into a caller-owned slice and raises an overflow flag rather than truncating silently or growing, which the save path wants.
+///
+/// ## Growth steps down when doubling is refused
+///
+/// Doubling is the right default, giving amortized constant-time appends, but both buffers are live across the copy.
+/// So growing a large block asks for half again as much CONTIGUOUS memory at once, and a device serving a big document has the free bytes without the block.
+/// The allocation then failed, every later append was dropped, and the device shipped a truncated document that looked complete.
+///
+/// A refused doubling therefore steps down toward the minimum rather than giving up: slower to grow, and it fits where doubling cannot.
+/// Measured on the bench, both classic boards cut their document at a power of two, losing eight to eleven kilobytes of the tree.
+///
+/// The step is a QUARTER of the current capacity rather than the bare minimum.
+/// Backing off to just enough serves one append and grows again on the next character, which copies quadratically and thrashes the fragmented heap that refused the doubling.
+///
+/// ## Overflow is a flag, never a silent truncation
+///
+/// Once tripped, later appends do nothing, so a caller sees one consistent state.
+/// A caller that ships the buffer anyway sends a truncated document, indistinguishable from a whole one at the far end.
+/// The receiver parses it, throws, and drops the tail.
+///
+/// The fixed mode never allocates, its capacity being the caller's slice on purpose, since an allocation there would succeed even when the slice is too small.
+///
+/// ## The number writer takes a double, and firmware must not call it
+///
+/// Its only caller is the test runner's bridge, which stores numerics that way so it does not lose precision parsing fixtures.
+/// A double runs in software emulation on one architecture, far slower than the single-precision type, so production paths use the typed serializers instead.
+// Format checking, where the compiler offers it: one toolchain parses the attribute as an unknown specifier and fails the whole class downstream.
 #if defined(__GNUC__) || defined(__clang__)
   #define MM_PRINTF_FORMAT(fmt_arg, va_arg) __attribute__((format(printf, fmt_arg, va_arg)))
 #else
@@ -19,40 +52,31 @@
 
 namespace mm {
 
-// Writes JSON with no fixed-buffer size ceiling. Three modes:
-//  - socket mode: a small staging buffer flushes to a TcpConnection as it fills,
-//    so the whole response never lives in RAM at once (used by GET /api/state).
-//  - buffer mode: bytes collect in a heap buffer that doubles on demand, for
-//    callers that need the assembled JSON + its length (the WebSocket push,
-//    whose frame header carries the length up front).
-//  - fixed-buffer mode: bytes write into a caller-owned slice; the sink
-//    flips an overflow flag rather than truncating silently or growing.
-//    Used by FilesystemModule's save path, which already owns a sized config
-//    buffer and needs the same JSON shape as the live API but with its own
-//    overflow-returns-false contract.
-// Either way, a module tree of any size serializes correctly.
 class JsonSink {
 public:
     // Socket mode.
+    /// Socket mode: a staging buffer flushes to the connection as it fills.
     explicit JsonSink(platform::TcpConnection& conn) : conn_(&conn) {}
 
     // Buffer mode — collects into a growable heap buffer.
+    /// Buffer mode: bytes collect in a block this owns.
     JsonSink() = default;
 
-    // Fixed-buffer mode — writes into a caller-owned slice (no heap, no
-    // truncation: overflow sets a flag the caller checks via overflowed()).
-    // `cap` is the total writable capacity; the sink reserves one byte for
-    // a trailing NUL so `data()` stays C-string-safe.
+    /// Fixed mode, writing into a caller-owned slice with no allocation: @xref{overflow-is-a-flag-never-a-silent-truncation|what happens when it fills}.
     JsonSink(char* buf, size_t cap) : fixed_(buf), fixedCap_(cap) {
         if (fixed_ && fixedCap_ > 0) fixed_[0] = '\0';
     }
 
 
+    /// Frees the block, when one was taken and not detached.
     ~JsonSink() { if (heap_) platform::free(heap_); }
 
+    /// Non-copyable: it owns a heap block and possibly a connection.
     JsonSink(const JsonSink&) = delete;
+    /// Non-assignable, for the same reason.
     JsonSink& operator=(const JsonSink&) = delete;
 
+    /// Append a string, growing or flushing as the mode requires.
     void append(const char* s) {
         if (!s) return;
         while (*s) {
@@ -60,31 +84,21 @@ public:
                 if (pos_ == STAGE_SIZE) flushStage();
                 stage_[pos_++] = *s++;
             } else if (fixed_) {
-                // +1 reserves the NUL slot. Overflow stops writing; once
-                // tripped, subsequent appends are no-ops so the caller sees
-                // a consistent overflowed() state.
+                // One byte reserved for the terminator; once overflow trips, later appends do nothing.
                 if (fixedLen_ + 1 >= fixedCap_) { overflowed_ = true; return; }
                 fixed_[fixedLen_++] = *s++;
                 fixed_[fixedLen_] = '\0';
             } else {
-                // Out of memory. Flag it exactly as the fixed-buffer path above does: a caller
-                // that ships the buffer anyway sends a TRUNCATED document, and a truncated JSON
-                // frame is indistinguishable from a whole one at the far end (the browser parses
-                // it, throws, and drops the tail: the module cards past the cut simply vanish).
+                // Out of memory, flagged as the fixed path does: @xref{overflow-is-a-flag-never-a-silent-truncation|why a truncated document is worse than none}.
                 if (!ensureHeap(heapLen_ + 1)) { overflowed_ = true; return; }
                 heap_[heapLen_++] = *s++;
             }
         }
-        // Keep heap_ null-terminated after every append so data() is a valid
-        // C-string even if the caller skips size(). ensureHeap already reserved
-        // the +1 slot, so this write is in-bounds.
+        // Terminated after every append, so the data stays a valid string even when a caller skips the length.
         if (!conn_ && !fixed_ && heap_) heap_[heapLen_] = '\0';
     }
 
-    // Append a printf-formatted fragment. The common case (one control, one
-    // module header) fits the FRAG_MAX stack buffer; a fragment that would
-    // exceed it — e.g. an unusually long text-control value — is re-formatted
-    // into a heap buffer so the output is never silently truncated.
+    /// Append a formatted fragment; the common case fits a stack buffer and a longer one is re-formatted so nothing is silently truncated.
     void appendf(const char* fmt, ...) MM_PRINTF_FORMAT(2, 3) {
         char frag[FRAG_MAX];
         va_list ap;
@@ -101,17 +115,12 @@ public:
         }
         // Fragment longer than the stack buffer.
         if (fixed_) {
-            // Fixed-buffer mode never heap-allocs — capacity is bounded by
-            // the caller's slice on purpose, and an alloc here would silently
-            // succeed even when the slice is too small for the formatted
-            // fragment. Flag overflow so the caller (e.g. FilesystemModule's
-            // writeValue) aborts the file/response.
+            // The fixed mode never allocates: @xref{overflow-is-a-flag-never-a-silent-truncation|why an allocation here would hide the problem}.
             overflowed_ = true;
             va_end(ap2);
             return;
         }
-        // Socket / heap-grow modes: format into an exact heap buffer so the
-        // long fragment isn't silently truncated.
+        // The growing modes format into an exactly-sized block, so a long fragment is never truncated.
         char* big = static_cast<char*>(platform::alloc(static_cast<size_t>(n) + 1));
         if (big) {
             std::vsnprintf(big, static_cast<size_t>(n) + 1, fmt, ap2);
@@ -121,43 +130,20 @@ public:
         va_end(ap2);
     }
 
-    // Generic value-fragment writers — produce a syntactically correct JSON
-    // value (number / bool / string) into the sink. Used by the ControlType
-    // serializers (Control.cpp) and by anyone bridging a typed value into
-    // wire-format text (scenario_runner's JsonVal → applyControlValue path).
-    // Accepts `double` because the only caller is `scenario_runner.cpp`'s
-    // JsonVal → JSON-text bridge — JsonVal stores numerics as `double` so
-    // it doesn't lose precision parsing scenario fixtures. The runner is
-    // desktop / test-only.
-    //
-    // **Production firmware must not call this** — see docs/contributing/coding-standards.md
-    // § Prefer integers: `double` runs in software emulation on ESP32 Xtensa
-    // (~30x slower than `float`). Production code paths use the typed
-    // serializers in `Control.cpp` (writeControlValue) which dispatch on
-    // ControlType and emit integer / bool / string fragments without going
-    // near `double`.
+    /// Write one syntactically correct value: @xref{the-number-writer-takes-a-double-and-firmware-must-not-call-it|why firmware uses the typed serializers instead}.
     void writeNumber(double v) {
-        // Integer-valued doubles render as ints (avoids "42.0000" noise);
-        // genuine fractionals use %g for compact display.
+        // A whole value renders as an integer, and a genuine fraction compactly.
         if (v == static_cast<double>(static_cast<long long>(v))) {
             appendf("%lld", static_cast<long long>(v));
         } else {
             appendf("%g", v);
         }
     }
+    /// Write a boolean literal.
     void writeBool(bool v) { append(v ? "true" : "false"); }
+    /// Write a string as a quoted literal, escaping what the standard requires.
     void writeJsonString(const char* s) {
-        // Walks the source char-by-char straight into the sink — no
-        // intermediate fixed buffer, so there's no truncation ceiling
-        // regardless of input length. Each per-char append is a small
-        // write the sink's per-mode logic handles uniformly (socket flush
-        // / heap grow / fixed-buffer overflow flag).
-        //
-        // RFC 8259 §7: strings MUST escape `"`, `\`, and any byte < 0x20.
-        // Bare control bytes in JSON are a parser error. Named escapes
-        // for the common ones (\n / \r / \t / \b / \f), `\u00XX` for the
-        // rest. Bytes ≥ 0x20 (including UTF-8 continuation bytes) pass
-        // through unmodified — the receiver decodes UTF-8 itself.
+        // A character at a time, so there is no truncation ceiling; the standard requires escaping the quote, the backslash and every control byte.
         if (!s) s = "";
         append("\"");
         char buf[8];  // longest emission is "\uXXXX" (6) + NUL; 8 is round
@@ -183,22 +169,18 @@ public:
     }
 
     // Socket mode: flush staged bytes to the socket. Call once at the end.
+    /// Push whatever is staged to the connection, in socket mode.
     void flush() { flushStage(); }
 
-    // Buffer mode: the collected JSON and its length (null-terminated).
-    // Fixed-buffer mode: same — data() points at the caller's buffer,
-    // size() is the bytes written so far.
+    /// The collected document and its length, terminated; in fixed mode this is the caller's own buffer.
     const char* data() const {
         if (fixed_) return fixed_;
         return heap_ ? heap_ : "";
     }
+    /// How many bytes have been written.
     size_t size() const { return fixed_ ? fixedLen_ : heapLen_; }
 
-    // Hand the heap buffer to the caller (buffer mode only), giving up ownership: the sink nulls its
-    // pointer so its destructor frees nothing, and the caller owns the (NUL-terminated) block. Free it
-    // with platform::free — the same allocator ensureHeap used. Returns nullptr in socket/fixed mode
-    // or if nothing was allocated. A move-out idiom (like unique_ptr::release): avoids copying a large
-    // built buffer out when the caller wants to keep it (the resumable state-frame send).
+    /// Hand the block to the caller and give up ownership, so a large built document is not copied out; nothing in the other modes.
     char* detach() {
         if (conn_ || fixed_) return nullptr;
         char* out = heap_;
@@ -208,14 +190,12 @@ public:
     }
 
     // Fixed-buffer mode only: did any append run out of capacity?
+    /// Whether a write was refused, which makes the document incomplete.
     bool overflowed() const { return overflowed_; }
 
-    // A PaletteOptionsFn call that wants ONE option's name rather than the whole option set (see
-    // Palette.h). -1, the default, is the ordinary "emit the options" call, so every existing
-    // caller is unchanged. It lives here because the function pointer takes only a sink: this is
-    // the one channel core has into the light domain, and widening the descriptor to carry a
-    // second pointer would cost memory on every control on the device for one display feature.
+    /// Which single option a palette call wants, the default meaning the whole set: it rides here because the callback takes only a sink, the one channel into the light domain.
     int nameIndex() const { return nameIndex_; }
+    /// Ask a palette callback for one option's name rather than the whole set.
     void requestName(uint8_t index) { nameIndex_ = static_cast<int>(index); }
 
 private:
@@ -229,23 +209,12 @@ private:
         }
     }
 
-    // Grow the heap buffer to hold at least `need` bytes plus a null terminator.
-    ///
-    /// Doubling is the right default (amortized O(1) appends), but the old and new buffers are both
-    /// live across the memcpy, so growing 16 KB to 32 KB asks for ~48 KB of CONTIGUOUS heap at once.
-    /// A classic ESP32 serving a 40 KB state document has the free bytes and not the block: the
-    /// allocation failed, every later append dropped, and the device shipped a truncated frame that
-    /// looked complete. So a refused doubling steps down toward the minimum rather than giving up:
-    /// slower to grow, and it fits where doubling cannot. (Measured on the bench 2026-09-08: both
-    /// classic boards cut their state at a power of two, losing 8-11 KB of the tree.)
+    /// Grow to hold at least what is needed plus a terminator: @xref{growth-steps-down-when-doubling-is-refused|what a refused doubling does}.
     bool ensureHeap(size_t need) {
         if (need + 1 <= heapCap_) return true;
         size_t want = heapCap_ == 0 ? 2048 : heapCap_ * 2;
         while (want < need + 1) want *= 2;
-        // Step down in QUARTERS of the current capacity rather than to `need + 1`. Backing off to the
-        // bare minimum serves this one append and then grows again on the next character, which is
-        // O(n^2) copying and thrashes exactly the fragmented heap that refused the doubling. A
-        // quarter still leaves useful headroom, so the next grow is thousands of appends away.
+        // In quarters rather than to the bare minimum: @xref{growth-steps-down-when-doubling-is-refused|why a minimal step thrashes}.
         const size_t step = heapCap_ / 4 > 4096 ? heapCap_ / 4 : 4096;
         const size_t floorCap = need + 1 > step ? need + 1 : step;
         for (;;) {
@@ -277,10 +246,7 @@ private:
     int  nameIndex_ = -1;   // >= 0: this sink is asking for that option's name (see requestName)
 };
 
-// Escape a string for embedding inside a JSON string literal: " → \" and
-// \ → \\. Writes into `out` (no surrounding quotes). Truncates rather than
-// overflowing if the escaped form exceeds outMax. Distinct from
-// FilesystemModule::writeJsonString, which appends to a (buf, pos) pair.
+/// Escape a string for embedding in a literal, without the surrounding quotes, truncating rather than overflowing its output.
 inline void jsonEscape(const char* in, char* out, size_t outMax) {
     if (outMax == 0) return;  // no room even for the terminator
     size_t oi = 0;
@@ -290,5 +256,7 @@ inline void jsonEscape(const char* in, char* out, size_t outMax) {
     }
     out[oi] = 0;
 }
+
+/// @}
 
 } // namespace mm

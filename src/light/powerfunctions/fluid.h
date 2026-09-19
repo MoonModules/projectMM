@@ -7,36 +7,12 @@
 
 namespace mm {
 
-// A stable-fluid velocity field: the medium itself, simulated rather than sampled.
-//
-// Every flow so far has been a FUNCTION of position and time: noise, curl, a wind. This is the
-// other kind. The velocity here is state that evolves from its own past, so pushing the medium in
-// one place changes where everything downstream goes, and a vortex forms because the math says it
-// must rather than because a rule drew one. That is the difference a viewer sees: a curl field is
-// beautiful and unchanging in character, while a fluid REACTS.
-//
-// The algorithm is Stam's (Jos Stam, "Stable Fluids", SIGGRAPH 1999), which is the standard choice
-// for exactly one reason: it cannot blow up. An explicit solver has a timestep small enough to stay
-// stable, and a frame that runs long breaks it; Stam's is unconditionally stable, so a device that
-// stalls for a second resumes with a plausible field instead of a screenful of infinities. On a
-// fixture that must never look broken, that property is worth more than accuracy.
-//
-// Four steps a frame, and the order is the algorithm:
-//
-//   1. `diffuse`   viscosity: each cell relaxes toward its neighbors' average.
-//   2. `project`   make it divergence-free: the step that turns a set of arrows into a FLOW.
-//   3. `advect`    the velocity carries itself, which is what makes a vortex persist and travel.
-//   4. `project`   again, because advection reintroduces divergence.
-//
-// Then the caller advects its own dye (the light) along the finished field with `draw::advect16`.
-//
-// **Q16.16 throughout, not float.** The render path is integer by contract, and a fluid is the
-// hardest case for that: `project` solves a linear system by relaxation, so an error that a float
-// would absorb accumulates over iterations. 16 fraction bits is what makes the pressure solve
-// converge at all; 8 would quantize the gradient to nothing on a slow flow.
-//
-// Sized for panels. The cost is per cell per iteration and there are several passes, so this is a
-// desktop and P4 effect; an S3 runs it on a small grid or not at all.
+/// A stable-fluid velocity field: the medium itself, simulated rather than sampled.
+///
+/// Its velocity is state that evolves from its own past, so a vortex forms because the maths says it must.
+/// Stam's solver, in fixed point because the render path is integer.
+///
+/// The four-step frame order and why sixteen fraction bits: power-functions.md#the-fluid-solver
 class Fluid {
 public:
     explicit Fluid(MoonModule& owner)
@@ -45,22 +21,13 @@ public:
     /// Q16.16: the fixed-point format the whole solver works in.
     static constexpr int32_t kOne = 1 << 16;
 
-    /// Size (or free) the grids. Returns whether a field is available, which is what an effect
-    /// reports: a device too small says so rather than rendering nothing in silence.
-    ///
-    /// Depth is a stack of INDEPENDENT slices, each its own 2D medium: the solve is per slice and
-    /// nothing is carried between them. A panel is depth 1 and pays nothing for the stack. A true
-    /// volumetric solve (pressure and advection across z) is a different solver, not a flag.
+    /// Size (or free) the grids. Returns whether a field is available, which is what an effect reports.
     bool resize(lengthType w, lengthType h, lengthType d = 1) {
         if (w <= 2 || h <= 2 || d < 1) { release(); return false; }   // a grid with no interior
         const size_t n = static_cast<size_t>(w) * h * d;
-        // Already this shape AND still allocated: MoonModule::release() frees every registered
-        // buffer behind this object's back (a disabled module, or a disabled ancestor), and the
-        // shape alone would then report a grid that is no longer there.
+        // Both this shape and still allocated: a freed buffer would otherwise report a grid that is gone.
         if (w == w_ && h == h_ && d == d_ && vx_) return true;
-        // The velocity is per cell, but the four working grids are per SLICE: the solve walks one
-        // slice at a time and never addresses another's, so sizing them to the volume allocated
-        // 19 unused copies on a 20-cube (121 KB for nothing).
+        // The working grids are per slice: sizing them to the volume cost 121 KB of unused copies on a 20-cube.
         const size_t slice = static_cast<size_t>(w) * h;
         const bool ok = vx_.resize(n) && vy_.resize(n) && vx0_.resize(slice)
                      && vy0_.resize(slice) && p_.resize(slice) && div_.resize(slice);
@@ -70,28 +37,32 @@ public:
         return true;
     }
 
+    /// Drop every field, returning the solver to its unsized state.
     void release() {
         vx_.resize(0); vy_.resize(0); vx0_.resize(0); vy0_.resize(0); p_.resize(0); div_.resize(0);
         w_ = h_ = d_ = 0; cells_ = 0;
     }
 
-    /// Re-seed to rest: every velocity zero. The resync point, for a fixture that has been
-    /// reconfigured under a running simulation.
+    /// Re-seed to rest: every velocity zero. The resync point, for a fixture that has been reconfigured under a running simulation.
     void reset() {
         if (!valid()) return;
         std::memset(vx_.data(), 0, vx_.bytes());
         std::memset(vy_.data(), 0, vy_.bytes());
     }
 
-    /// Ready to step. Read from the buffers, not from a cached shape: the owner's release() can
-    /// free them between two frames, and that is exactly the frame a stale flag crashes on.
+    /// Ready to step. Read from the buffers, not from a cached shape.
     bool valid() const { return cells_ > 0 && vx_ && vy_ && vx0_ && vy0_ && p_ && div_; }
+    /// The grid's width in cells.
     lengthType width() const { return w_; }
+    /// Its height in cells.
     lengthType height() const { return h_; }
+    /// How many slices it carries.
     lengthType depth() const { return d_; }
     /// Cells per slice: a slice's fields start at `z * plane()` in velocityX()/velocityY().
     size_t plane() const { return static_cast<size_t>(w_) * h_; }
+    /// The x velocity field, one Q16.16 value per cell.
     const int32_t* velocityX() const { return vx_.data(); }
+    /// The y velocity field, laid out the same way.
     const int32_t* velocityY() const { return vy_.data(); }
 
     /// Push the medium at one cell. The source term: an emitter, a control, a beat.
@@ -102,8 +73,7 @@ public:
         vy_[i] += dvy;
     }
 
-    /// One frame of the simulation. `viscosity` and `dt` are Q16.16; `iterations` is the pressure
-    /// solve's effort, and the honest cost knob: 5 is the usual default, 1 is visibly springy.
+    /// One frame of the simulation. `viscosity` and `dt` are Q16.16.
     void step(int32_t viscosity, int32_t dt, uint8_t iterations) {
         if (!valid()) return;
         const uint8_t iters = iterationsSanitized(iterations);
@@ -129,8 +99,6 @@ private:
     size_t idx(lengthType x, lengthType y) const { return static_cast<size_t>(y) * w_ + x; }
 
     /// Walls: the boundary mirrors the interior, with the normal component negated, so the medium
-    /// slides along an edge rather than through it. `b` says which component (1 = x, 2 = y, 0 = a
-    /// scalar like pressure).
     void setBoundary(int32_t* f, int b) {
         for (lengthType x = 1; x < w_ - 1; x++) {
             f[idx(x, 0)]      = (b == 2) ? -f[idx(x, 1)]      : f[idx(x, 1)];
@@ -147,8 +115,7 @@ private:
         f[idx(w_ - 1, h_ - 1)] = (f[idx(w_ - 2, h_ - 1)] + f[idx(w_ - 1, h_ - 2)]) / 2;
     }
 
-    /// Gauss-Seidel relaxation: the shared inner loop of both diffuse and project. Each cell
-    /// becomes a weighted average of itself and its four neighbors, repeated until it settles.
+    /// Gauss-Seidel relaxation.
     void relax(int32_t* f, const int32_t* f0, int32_t a, int32_t c, uint8_t iters, int b) {
         if (c == 0) return;
         for (uint8_t k = 0; k < iters; k++) {
@@ -156,9 +123,7 @@ private:
                 for (lengthType x = 1; x < w_ - 1; x++) {
                     const int64_t neigh = static_cast<int64_t>(f[idx(x - 1, y)]) + f[idx(x + 1, y)]
                                         + f[idx(x, y - 1)] + f[idx(x, y + 1)];
-                    // 64-bit for the product: a Q16.16 velocity times a Q16.16 coefficient is a
-                    // Q32.32 intermediate, and truncating it to 32 bits loses the whole integer
-                    // part on any but the slowest flow.
+                    // Widened for the product: truncating it loses the integer part on any but the slowest flow.
                     const int64_t v = (static_cast<int64_t>(f0[idx(x, y)]) << 16)
                                     + static_cast<int64_t>(a) * neigh;
                     f[idx(x, y)] = static_cast<int32_t>(v / c);
@@ -175,11 +140,7 @@ private:
         relax(f, f0, static_cast<int32_t>(a), static_cast<int32_t>((kOne + 4 * a)), iters, b);
     }
 
-    /// Make the field divergence-free: compute how much each cell is gaining or losing, solve for
-    /// a pressure whose gradient cancels it, then subtract that gradient.
-    ///
-    /// This is the step that separates a fluid from a field of arrows. Without it the medium piles
-    /// up in some places and drains from others, and anything carried by it clumps and vanishes.
+    /// Make the field divergence-free.
     void project(int32_t* vx, int32_t* vy, uint8_t iters) {
         int32_t* div = div_.data();
         int32_t* p = p_.data();
@@ -202,16 +163,14 @@ private:
         setBoundary(vy, 2);
     }
 
-    /// The velocity carries itself: backward-sampled, like every other advection here, because
-    /// that is what stays stable when a cell would otherwise move further than one cell per step.
+    /// The velocity carries itself.
     void advectSelf(int32_t* vx, int32_t* vy, const int32_t* vx0, const int32_t* vy0, int32_t dt) {
         for (lengthType y = 1; y < h_ - 1; y++) {
             for (lengthType x = 1; x < w_ - 1; x++) {
                 // Where this cell's contents came from, in Q16.16 cell coordinates.
                 int64_t sx = (static_cast<int64_t>(x) << 16) - ((static_cast<int64_t>(vx0[idx(x, y)]) * dt) >> 16);
                 int64_t sy = (static_cast<int64_t>(y) << 16) - ((static_cast<int64_t>(vy0[idx(x, y)]) * dt) >> 16);
-                // Clamped half a cell inside the wall, so the bilinear read below always has four
-                // real neighbors and the boundary handles the rest.
+                // Clamped half a cell inside the wall, so the bilinear read below always has four real neighbors and the boundary handles the rest.
                 const int64_t lo = kOne / 2, hiX = (static_cast<int64_t>(w_) << 16) - kOne - kOne / 2;
                 const int64_t hiY = (static_cast<int64_t>(h_) << 16) - kOne - kOne / 2;
                 sx = sx < lo ? lo : (sx > hiX ? hiX : sx);

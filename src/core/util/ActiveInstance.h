@@ -2,43 +2,46 @@
 
 namespace mm {
 
-/// The "one active instance" election as a core RAII member. Several instances of a module `T` may
-/// exist (two mics, say), but exactly one is "the active one" a consumer reaches through the static
-/// `active()` accessor. A module declares `ActiveInstance<T> seat_{*this};` and calls `claim()` when
-/// it becomes live and `vacate()` when it releases — the four moves that used to be hand-copied
-/// (claim, vacate-if-mine, vacate-on-destruct, survivor-reclaims-the-empty-seat) all live here now.
-///
-/// **The seat is per-`T`.** `active()` returns the one live winner, or nullptr when the seat is empty
-/// — the consumer null-checks (an audio effect falls back to a silent frame, a driver skips).
-///
-/// **`claim()` is idempotent claim-if-empty**: the first live instance wins and a later claimant does
-/// NOT displace it. That single semantic serves both roles — a module calls `claim()` in its build
-/// hook to take the seat, AND (if it wants a survivor to take over an emptied seat) calls the same
-/// `claim()` in its tick, where it does nothing while the seat is held and reclaims it the moment the
-/// holder vacated. So there is no separate "reclaim" method; the reclaim IS an idempotent re-claim.
-///
-/// **RAII vacate is the dangling-static guard.** The destructor vacates if this instance holds the
-/// seat, so a destroyed module can never leave `active()` pointing at freed memory — the bug this
-/// primitive exists to make unrepresentable. Copy and move are deleted: the seat is tied to a
-/// specific instance by reference, so relocating it would dangle `self_`; like the sibling
-/// `ScratchBuffer`, it is a fixed, non-relocatable owned member.
-///
-/// A module member destructs BEFORE the module's base subobject, so the destructor's `vacate()` reads
-/// only this object's own `seat_` (a static) and `self_` (a reference) — never a call into the
-/// half-destroyed owner. Safe in any construct/claim/vacate/destruct order.
+/// The seat itself, declared as a member of the instance that competes for it.
 template <class T>
+/// The one-active-instance election, as a member a module declares and claims.
+///
+/// Several instances of a type may exist, two microphones say, but exactly one is the one a consumer reaches.
+/// The four moves that used to be hand-copied all live here: claim, vacate if mine, vacate on destruction, and a survivor reclaiming an emptied seat.
+///
+/// @moreinfo
+///
+/// ## The claim is idempotent, so a reclaim is just another claim
+///
+/// The first live instance wins and a later claimant does not displace it.
+/// That one semantic serves both roles.
+/// A module claims in its build hook to take the seat, and calls the same claim in its tick, where it does nothing while the seat is held.
+/// The moment the holder vacates, that tick reclaims it, so there is no separate method for it.
+///
+/// ## Vacating on destruction is the dangling-pointer guard
+///
+/// The destructor vacates when this instance holds the seat, so a destroyed module can never leave the accessor pointing at freed memory.
+/// That is the bug this primitive exists to make unrepresentable.
+///
+/// A member destructs before its module's base, so the destructor reads only this object's own seat and reference, never calling into the half-destroyed owner.
+/// It is therefore safe in any order of construction, claim, vacate and destruction.
+///
+/// Copying and moving are deleted, the seat being tied to one instance by reference: relocating it would dangle, exactly as for the sibling scratch buffer.
 class ActiveInstance {
 public:
+    /// Declared as a member of the instance it seats.
     explicit ActiveInstance(T& self) : self_(self) {}
+    /// Vacates when this instance holds the seat, which is the dangling-pointer guard.
     ~ActiveInstance() { vacate(); }
 
+    /// Non-copyable: the seat is tied to one instance by reference.
     ActiveInstance(const ActiveInstance&) = delete;
     ActiveInstance& operator=(const ActiveInstance&) = delete;
+    /// Non-movable, for the same reason: relocating it would dangle.
     ActiveInstance(ActiveInstance&&) = delete;
     ActiveInstance& operator=(ActiveInstance&&) = delete;
 
-    /// Take the seat if it is empty (first live wins). Idempotent, so calling it again — e.g. from a
-    /// tick — is a no-op while held and the survivor's reclaim once the holder has vacated.
+    /// Take the seat when it is empty, the first live instance winning: @xref{the-claim-is-idempotent-so-a-reclaim-is-just-another-claim|why calling it again is safe}.
     void claim()  { if (!seat_) seat_ = &self_; }
     /// Give up the seat, but only if this instance holds it (never yanks another's seat).
     void vacate() { if (seat_ == &self_) seat_ = nullptr; }

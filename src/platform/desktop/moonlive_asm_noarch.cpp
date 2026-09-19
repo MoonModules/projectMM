@@ -1,16 +1,21 @@
 #include "core/moonlive/moonlive_emit.h"
 #include "core/moonlive/MoonLiveIr.h"
 
-// The lowering for a host with NO assembler, and only that: the third case beside
-// moonlive_asm_arm64.cpp and moonlive_asm_x86_64.cpp. "noarch" because that is exactly what it
-// serves, an architecture we have no backend for.
-//
-// Two ways to land here. An ISA nobody has written an assembler for, and a deliberate --no-jit
-// build (MM_MOONLIVE_FORCE_NO_HOST_JIT), which is a pre-merge gate: it is how a contributor sees
-// what an unsupported desktop sees. Both must LINK and run everything that is not a script.
-//
-// Unlike the ESP32 side, which fails the build for an unknown ISA (every ESP32 is Xtensa or
-// RISC-V, so a third is an unfinished port), a desktop legitimately has this case.
+/// @defgroup moonlive_asm_noarch MoonLive lowering, no assembler
+/// The third case beside the arm64 and x86-64 backends: an architecture we have none for.
+///
+/// @moreinfo
+///
+/// ## Two ways to land here
+///
+/// An instruction set nobody has written an assembler for, and a deliberate no-JIT build.
+/// That build is a pre-merge gate: it is how a contributor sees what an unsupported desktop sees.
+/// Both must link and run everything that is not a script.
+///
+/// ## Why a desktop may have no backend at all
+///
+/// The ESP32 side fails the build for an unknown instruction set, every chip being Xtensa or RISC-V, so a third is an unfinished port.
+/// A desktop legitimately has this case.
 
 #if !((defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)) && !defined(MM_MOONLIVE_FORCE_NO_HOST_JIT))
 

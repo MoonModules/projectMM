@@ -1,54 +1,34 @@
 #include "core/moonlive/MoonLiveSpill.h"
 #include "core/moonlive/moonlive_emit.h"
 
-// Linear-scan register allocation with spilling to the call frame. See MoonLiveSpill.h for why this
-// lives in core rather than in each backend.
-//
-// The shape of the frame is the part that has to survive what comes next. MoonLive is gaining
-// user-defined functions — with arguments, loops, and recursion — so the overflow storage is
-// deliberately a CALL FRAME addressed through a frame pointer, not a global slot file: slot `n` is
-// an offset from the frame the currently-executing routine owns, and a nested or recursive call
-// pushes its own. A global file would work for one top-level program and would then have to be
-// thrown away, because two activations of the same function would share the same slot and the inner
-// one would clobber the outer's values.
+// Linear-scan register allocation spilling to the call frame, so a nested call pushes its own.
 
 namespace mm::moonlive {
 
 namespace {
 
-// Reload temps: registers held back from allocation so a spilled operand has somewhere to land for
-// the one instruction that reads it. Four is the worst case, set by the widest op — the StoreElem
-// inline reads a, b, c AND d. A dst reuses a source temp rather than claiming a fifth: every op here
-// is one machine instruction that reads its sources and then writes its destination, so `mul d,a,b`
-// with d aliasing a is well-defined on all three ISAs, and on a target with twelve registers the
-// fifth would be a real cost.
+// Held back so a spilled operand has somewhere to land; four, because StoreElem reads four.
 constexpr uint8_t kMaxReloadTemps = 4;
 
-// One value's live range, in op indices. `end` is the last index that mentions the vreg, AFTER loop
-// extension. Sixteen bytes per vreg with kMaxVRegs = 32: a few hundred bytes of stack, small enough
-// to stay a local on the 12 KB task the compile shares (a classic ESP32 has already been watchdog
-// reset by this path; a heap allocation here would be a second failure mode for no gain).
+// A few hundred bytes of stack at kMaxVRegs, small enough to stay a local on the shared 12 KB task.
+/// One value's live range, in op indices.
 struct Interval {
-    uint16_t start = 0;
-    uint16_t end = 0;
-    VReg     vreg = 0;
-    bool     live = false;      // does this vreg appear at all?
-    bool     spilled = false;
-    uint8_t  slot = 0;          // frame slot, when spilled
-    VReg     assigned = 0;      // compacted register number, when not
+    uint16_t start = 0;         ///< the first op index mentioning the vreg
+    uint16_t end = 0;           ///< the last one, after loop extension
+    VReg     vreg = 0;          ///< the vreg this range describes
+    bool     live = false;      ///< whether the vreg appears at all
+    bool     spilled = false;   ///< whether it lost its register to the frame
+    uint8_t  slot = 0;          ///< frame slot, when spilled
+    VReg     assigned = 0;      ///< compacted register number, when not
 };
 
-// A loop, as op indices: the header (where the back edge lands) and the back edge itself. The
-// grammar has no break, continue or goto, so a loop is EXACTLY a BranchNe whose label was bound
-// earlier in the array — the op array is already in reverse postorder and no CFG has to be built.
-// That is the one bespoke simplification here, and it carries the guard below: a branch structure
-// that is not properly nested makes the pass refuse rather than allocate against a wrong interval,
-// so adding `break` later fails loudly instead of miscompiling in silence.
-struct Loop { uint16_t header; uint16_t back; };
+// A loop is exactly a BranchNe whose label was bound earlier, so no CFG has to be built.
+/// A loop, as the op index its back edge lands on and the back edge itself.
+struct Loop { uint16_t header;   ///< where the back edge lands
+              uint16_t back; };  ///< the back edge itself
 
-// Every vreg an op READS. Written as one function so the interval builder and the rewriter cannot
-// disagree about which operand fields an op uses — a mismatch there is exactly the bug that produces
-// a value spilled but never reloaded.
+// One function, so the interval builder and the rewriter cannot disagree about the fields.
+/// Every vreg an op reads, written into `out`; answers how many.
 uint8_t sourcesOf(const IrInst& in, VReg* out) {
     switch (in.op) {
         case IrOp::Const:                                   return 0;
@@ -58,32 +38,18 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::Mov:
         case IrOp::AddImm:
         case IrOp::Spill:      out[0] = in.a;               return 1;
-        // A `return` reads its value ONLY when it carries one: `imm` says so, because it is not a
-        // register field and the rewriter renumbers every vreg reported here. A bare return reports
-        // nothing, so its `a` stays whatever the emitter left and the lowering never reads it.
+        // A return reads its value only when `imm` says it carries one.
         case IrOp::Ret:        if (!in.imm) return 0;
                                out[0] = in.a;               return 1;
         case IrOp::LoadCtrl:   out[0] = kArg4;              return 1;   // reads the arena pointer
-        // A member STORE reads the VALUE being written, and nothing else. The arena pointer is
-        // deliberately NOT reported, for the same reason LoadIdx/StoreIdx do not report it: the
-        // rewriter below writes sources back POSITIONALLY, so listing kArg4 first shifts the value
-        // into `b` and leaves `a` holding kArg4's register. Both lowerings read the value from
-        // `op.a`, so every member assignment would store whatever that register held, the moment
-        // the allocator rewrites anything. The pointer is reached through host(kArg4) at lowering
-        // time and needs no live interval here.
+        // The value alone, since the rewriter writes sources back positionally.
         case IrOp::StoreCtrl:
         case IrOp::StoreCtrl32: out[0] = in.a; return 1;
         case IrOp::LoadCtrl32:  out[0] = kArg4;               return 1;   // reads the arena pointer
-        // An indexed access reads its INDEX (and, for a store, the value). The arena pointer is
-        // deliberately NOT reported: the rewriter below writes sources back POSITIONALLY (src[0]
-        // into in.a, src[1] into in.b), so listing kArg4 first would shift every real operand one
-        // place along, leaving the index in the value's field. LoadCtrl gets away with reporting
-        // it because it has no other source and reads the pointer through host(kArg4); these ops
-        // do the same, so kArg4 needs no live interval here either.
+        // The index, and for a store the value; the arena pointer is positional here too.
         case IrOp::LoadIdx:     out[0] = in.a;               return 1;
         case IrOp::StoreIdx:    out[0] = in.a; out[1] = in.b; return 2;
-        // Shl/Sar carry their shift amount in `imm`, so the vreg source is the value alone; Mulhi
-        // reads both operands exactly as Mul does.
+        // A shift carries its amount in `imm`, so the vreg source is the value alone.
         case IrOp::Shl:
         case IrOp::Shr:
         case IrOp::Sar:        out[0] = in.a;               return 1;
@@ -93,44 +59,27 @@ uint8_t sourcesOf(const IrInst& in, VReg* out) {
         case IrOp::BranchGe:
         case IrOp::BranchGeS:
         case IrOp::BranchNe:   out[0] = in.a; out[1] = in.b; return 2;
-        // A Call reads NO registers. Its arguments were staged into consecutive frame slots by the
-        // parser, so `imm` is their base and `b` is how MANY there are — a literal count, not a
-        // vreg. Reporting a/b/c as sources gave the count a live interval and let the rewrite below
-        // remap it into a register number; it survived only because a fixed ABI vreg maps to itself.
+        // No registers: arguments were staged into frame slots, so `b` is a literal count.
         case IrOp::Call:       return 0;
-        // Nor does a call to the script's OWN function: `imm` is the callee's function NUMBER, not
-        // a value, and the callee reads its arguments from frame slots exactly as a host built-in
-        // does.
+        // Nor a call to the script's own function, whose `imm` is a function number.
         case IrOp::CallScript: return 0;
         case IrOp::Inline:
-            // The inline ops read every operand field the host filled in. Both of today's ops also
-            // read kArg0..kArg2 (buf, nLights, cpl), but those are fixed ABI vregs this pass never
-            // reassigns, so they need no interval.
+            // Every field the host filled in; the fixed ABI vregs need no interval.
             out[0] = in.a; out[1] = in.b; out[2] = in.c; out[3] = in.d;
             return 4;
     }
     return 0;
 }
 
-// Does this op WRITE its dst? Branches, Label, Spill and the inline ops do not — their dst field is
-// a zero the front-end never fills in, and reading it as a definition would give vreg 0 (kArg0, the
-// buffer pointer) a spurious live range that the allocator would then try to manage.
-/// Whether an op DEFINES its `dst`, which is what gives it a live interval and what makes the
-/// rewriter remap it. Takes the whole instruction because `CallScript` answers per call: the
-/// statement form writes nothing, the expression form writes its result.
+// Branches, Label, Spill and the inline ops do not: their dst is a zero the front end never fills.
+/// Whether an op defines its `dst`, which is what gives it an interval and remaps it.
 bool writesDst(const IrInst& in) {
     switch (in.op) {
         case IrOp::Label: case IrOp::BranchGe: case IrOp::BranchGeS: case IrOp::BranchNe:
-        // A member store writes MEMORY, not a register: its `a` is the value and `imm` the arena
-        // offset, so reading its dst as a definition would give vreg 0 a spurious live range.
+        // A member store writes memory, so its dst is not a definition.
         case IrOp::StoreCtrl:
         case IrOp::StoreCtrl32:
-        // CallScript writes its dst only when the caller WANTED the value (`b != 0`). The flag has
-        // to be consulted: a statement call's dst field is 0, which is kArg4's neighbour kArg0, so
-        // treating every call as a definition would give that argument a spurious live interval.
-        // Reading it as never-defining is the other error, and the expensive one: the rewriter
-        // remaps every source but leaves an unmapped dst, so after a compaction the call wrote the
-        // pre-compaction register while its consumer read the new one, and the value was lost.
+        // Only when the caller wanted the value, since a statement call's dst is 0.
         case IrOp::CallScript: return in.b != 0;
         case IrOp::Spill: case IrOp::Inline: return false;
         default: return true;
@@ -139,56 +88,29 @@ bool writesDst(const IrInst& in) {
 
 }  // namespace
 
+/// Fit a program to a register budget, spilling to the frame; false when it cannot.
 bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
-    // The front end already owns slots 0..localSlots-1 for the script's variables, and both live in
-    // the ONE frame — so a spill numbered from zero would land on a loop counter. Start above them,
-    // and report the total the prologue must reserve.
+    // The front end owns the low slots, so a spill from zero would land on a loop counter.
     slotsUsed = ir.localSlots;
     if (!ir.ops) { spillDetail().guard = 1; return false; };
 
     spillDetail() = SpillDetail{};   // every field honest for whichever guard fires, including 1-3
     const uint8_t avail = budget.allocatable();
-    // The front end's own variables have to fit the frame whether or not anything spills — it hands
-    // out slot indices without knowing the target, and a slot the backend cannot address would be
-    // encoded as a truncated offset writing over something else. Checked BEFORE the early return
-    // below, or a program that needs no spilling skips the check entirely.
+    // Checked before the early return, since the front end allots slots without knowing the target.
     if (ir.localSlots > kMaxLocals || ir.localSlots > budget.slots) { spillDetail().guard = 2; return false; };
 
-    // Already fits: leave the program byte-identical. A script that never needed the allocator must
-    // not pay a renumbering for its existence — and this is the path every shipped script takes.
+    // Already fits, so leave it byte-identical: this is the path every shipped script takes.
     if (ir.vregsUsed <= avail) return true;
     if (ir.vregsUsed > kMaxVRegs) { spillDetail().guard = 3; return false; };
 
-    // The fixed ABI vregs (buf, nLights, cpl, t, ctrls) arrive in machine registers the host chose
-    // and every backend indexes them directly, so they can be neither renumbered nor spilled. They
-    // plus the reload temps are the floor: below it there is nothing left to allocate WITH, and the
-    // honest answer is to refuse rather than emit code that names a register the target lacks.
-    // Reserve temps for the widest op this program ACTUALLY contains, counting DISTINCT sources —
-    // not for the widest op the IR can express.
-    //
-    // The reservation is pure overhead for a program that never uses it, and it is subtracted from a
-    // register file that on Xtensa is ten deep. Reserving the theoretical maximum of four left
-    // 10 - 1 scratch - 5 fixed ABI vregs - 4 = ZERO keepable, so every looped script was refused
-    // outright ("codegen failed") — the allocator had nothing to allocate with. Counting what the
-    // program needs is both correct and what makes a loop fit at all on the smallest target.
-    // Only a FIXED ABI vreg is exempt: those arrive in registers and are never spilled, so an op
-    // reading `buf` or `t` needs no temp for it. Everything else may end up in a slot and therefore
-    // may need somewhere to land, so count the distinct non-ABI sources of the widest op present.
-    //
-    // Note the shape this leaves on Xtensa: 10 registers minus 3 inline scratch leaves 7, and the
-    // ABI vregs are no longer subtracted (see the note below the loop), so a widest-op reservation
-    // of 4 leaves 3 keepable, which every shipped script fits (pinned by the Xtensa codegen test
-    // that compiles all of them at the device's own budget). A "codegen failed" for one of those on
-    // a classic ESP32 is therefore NOT this pass: on 2026-09-09 it was the assembler's heap buffer
-    // failing to allocate on a fragmented board, misreported as a codegen fault. That allocation is
-    // gone (the assembler now emits into the caller's buffer) and the report says "no memory".
+    // Temps for the widest op present, since reserving four left zero keepable on Xtensa.
     uint8_t reloadTemps = 0;
     for (uint16_t i = 0; i < ir.count; i++) {
         VReg s[4];
         const uint8_t n = sourcesOf(ir.ops[i], s);
         uint8_t distinct = 0;
         for (uint8_t a = 0; a < n; a++) {
-            if (s[a] < kFirstTemp) continue;                 // a fixed ABI vreg: always a register
+            if (s[a] < kFirstTemp) continue;                 // a fixed ABI vreg is always a register
             bool seen = false;
             for (uint8_t b = 0; b < a; b++) if (s[b] == s[a]) { seen = true; break; }
             if (!seen) distinct++;
@@ -196,17 +118,14 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         if (distinct > reloadTemps) reloadTemps = distinct;
     }
     if (reloadTemps > kMaxReloadTemps) reloadTemps = kMaxReloadTemps;
-    // The fixed ABI vregs are NOT subtracted any more: core parks them in frame slots at entry, so
-    // they hold a register only for the parking store itself — which runs before any temp exists, so
-    // sharing those registers afterwards is not a conflict. Reserving five here was holding space for
-    // values that had already moved out, and on a ten-register target that was the entire budget.
+    // The ABI vregs are not subtracted, since parking them runs before any temp exists.
     { auto& d = spillDetail(); d.guard = 0; d.avail = avail; d.temps = reloadTemps; d.vregs = ir.vregsUsed; d.slots = ir.localSlots; }
     if (avail <= reloadTemps) { spillDetail().guard = 4; return false; };
     const uint8_t keepable = static_cast<uint8_t>(avail - reloadTemps);
 
     // --- 1. Find the loops, innermost first ----------------------------------------------------
-    // Bounded by kIrLabels because a loop needs a label, so this array cannot overflow a program the
-    // front-end could build.
+
+    // Bounded by kIrLabels, since a loop needs a label.
     Loop loops[kIrLabels];
     uint8_t loopCount = 0;
     {
@@ -220,14 +139,11 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             if (in.op != IrOp::BranchNe) continue;
             if (in.imm < 0 || in.imm >= kIrLabels) { spillDetail().guard = 5; return false; };      // an unbindable label: refuse
             const int32_t tgt = labelAt[in.imm];
-            if (tgt < 0 || static_cast<uint16_t>(tgt) > i) continue;  // forward branch — not a loop
+            if (tgt < 0 || static_cast<uint16_t>(tgt) > i) continue;  // a forward branch, not a loop
             if (loopCount >= kIrLabels) { spillDetail().guard = 6; return false; };
             loops[loopCount++] = {static_cast<uint16_t>(tgt), i};
         }
-        // Proper nesting is what makes "innermost first" meaningful and what the extension rule below
-        // assumes. Two loops must be disjoint or one must contain the other; anything else (which is
-        // what a `break` or a `goto` would produce) is refused here rather than allocated against an
-        // interval that does not describe the real control flow.
+        // Proper nesting is what makes innermost-first meaningful, so anything else is refused.
         for (uint8_t x = 0; x < loopCount; x++)
             for (uint8_t y = static_cast<uint8_t>(x + 1); y < loopCount; y++) {
                 const bool disjoint = loops[x].back < loops[y].header || loops[y].back < loops[x].header;
@@ -255,12 +171,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         if (writesDst(in)) mention(in.dst, i);
     }
 
-    // A value whose live range TOUCHES a loop is live to that loop's end. Naive first-def-to-last-use
-    // is wrong across a back edge: a value defined before the loop and last read early in the body
-    // looks dead from the second instruction onward, so the scan would hand its register to something
-    // else and the next iteration would read that other value. Extension can only LENGTHEN a range,
-    // so its error direction is a needless spill, never a wrong one. Innermost-first, because an
-    // extension to an inner loop's end may then have to reach the enclosing loop's end as well.
+    // A range touching a loop lives to its end, since extension can only cost a needless spill.
     for (uint8_t pass = 0; pass < loopCount; pass++) {
         // pick the innermost unprocessed loop = the one containing no other unprocessed loop
         uint8_t pickIdx = 0xff;
@@ -283,9 +194,8 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     }
 
     // --- 3. Linear scan (Poletto & Sarkar) ------------------------------------------------------
-    // Sweep the temps in order of increasing interval start, keeping an `active` set ordered by
-    // increasing end. When the set is full, the interval with the FURTHEST end is spilled — it is the
-    // one whose register would otherwise be tied up longest, so freeing it buys the most.
+
+    // Increasing interval start, and when the active set is full the furthest end spills.
     VReg order[kMaxVRegs];
     uint8_t nOrder = 0;
     for (uint8_t v = kFirstTemp; v < ir.vregsUsed; v++) if (iv[v].live) order[nOrder++] = v;
@@ -315,9 +225,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             }
             continue;
         }
-        // nActive >= keepable >= 1 here: the `avail <= reloadTemps` guard above makes keepable at
-        // least one, and this branch is only reached when nActive is not below it. Stated because
-        // the index below would read active[-1] if that invariant ever moved.
+        // keepable is at least one by the guard above, or the index below reads active[-1].
         if (nActive == 0) { spillDetail().guard = 8; return false; };
         const VReg furthest = active[nActive - 1];
         if (iv[furthest].end > iv[cur].end) {
@@ -332,22 +240,13 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             iv[cur].slot = nSpilled++;
         }
     }
-    // Bounded by kMaxLocals, NOT budget.slots: slots kMaxLocals..kTotalSlots-1 hold the parked host
-    // arguments (hostArgSlot), which are stored once at entry and reloaded wherever a script reads
-    // buf/nLights/cpl/t/ctrls. Allowing a spill into that range would overwrite them — budget.slots
-    // is the frame's whole capacity, of which only the bottom kMaxLocals are assignable.
+    // kMaxLocals rather than budget.slots, since the slots above hold the parked host arguments.
     spillDetail().spilled = nSpilled;
     if (nSpilled > kMaxLocals || nSpilled > budget.slots) { spillDetail().guard = 9; return false; };
 
     // --- 4. Compact the survivors ---------------------------------------------------------------
-    // The kept temps take the register numbers directly above the fixed ABI vregs, so the rewritten
-    // program's high-water mark drops to something the target actually has. The reload temps sit
-    // above them, and the backend's own inline scratch above that — a single ascending layout, which
-    // is what lets each backend keep computing its scratch from vregsUsed as it already does.
-    // Number the kept temps from the BOTTOM of the register file. The ABI vregs keep their own
-    // identity for the entry parking store, and that store runs before any temp exists — so an
-    // overlap afterwards is not a conflict. Starting at kFirstTemp reserved five registers for
-    // values that had already moved to the frame, which pushed the top temps past the budget.
+
+    // Numbered from the bottom, since starting at kFirstTemp reserved registers already parked.
     VReg next = 0;
     for (uint8_t v = kFirstTemp; v < ir.vregsUsed; v++)
         if (iv[v].live && !iv[v].spilled) iv[v].assigned = next++;
@@ -356,14 +255,8 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     const VReg newHighWater = static_cast<VReg>(firstTemp + reloadTemps);
 
     // --- 5. Rewrite -----------------------------------------------------------------------------
-    // Into a SECOND program: a Reload has to be inserted before the op that reads a spilled value and
-    // a Spill after the op that defines one, and a right-sized array has no room to shift into.
-    // NOTHING spilled: the program already fits the register file, so every vreg keeps a register
-    // and the rewrite below would copy the program op for op into a second array only to swap it
-    // back. Skip it. That is the common case (32 of the 33 shipped scripts) and it makes those
-    // compiles cost no allocation here at all, which on a classic ESP32 is the difference between
-    // holding two IR arrays at the peak and holding one. The compacted register numbering still
-    // has to be applied, since a kept vreg's `assigned` may differ from its original index.
+
+    // Nothing spilled, the common case: the compacted numbering is applied in place.
     if (nSpilled == ir.localSlots) {
         for (uint16_t i = 0; i < ir.count; i++) {
             IrInst& in = ir.ops[i];
@@ -381,16 +274,9 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         return true;
     }
 
+    // Into a second program, since a right-sized array cannot take an inserted Reload or Spill.
     IrProgram out;
-    // Sized to what the rewrite below will ACTUALLY emit, counted in a dry pass over the same rules:
-    // one Reload per distinct spilled source of an op, the op, one Spill per spilled destination.
-    // It used to reserve the worst case, six ops per input op, and that was the ceiling on a classic
-    // ESP32: for a 284-op script it asked for ~41 KB in one block while the first IR array, the
-    // staging buffer and the assembler were all still live, so on a heap whose largest free block
-    // had fragmented to 65 KB the allocation failed and the compile reported "codegen failed" for a
-    // script that spills nothing at all (bench 2026-09-09, plasma/balls/nebula/aurora). The exact
-    // count is a fraction of that for every shipped script, and it is also the honest number: an
-    // estimate that fails a script which fits is the wrong direction to be conservative in.
+    // Counted in a dry pass, since a worst-case reserve asked 41 KB and failed on a fragmented heap.
     uint32_t want = 0;
     for (uint16_t i = 0; i < ir.count; i++) {
         const IrInst& in = ir.ops[i];
@@ -410,30 +296,16 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     if (!out.reserve(static_cast<uint16_t>(want))) { spillDetail().guard = 11; return false; };
 
     auto emit = [&](const IrInst& in) {
-        // push() also re-validates every vreg against kMaxVRegs, so a rewrite that named a register
-        // outside the budget fails the compile here instead of reaching a backend's register map.
+        // push() re-validates every vreg, so a bad register fails here, not in a backend.
         if (!out.push(in)) { spillDetail().guard = 12; return false; };
         return true;
     };
 
-    // The function boundaries move with the ops. `fnIrStart` indexes the INPUT array, and this
-    // rewrite inserts a Reload before a read and a Spill after a define, so every index past the
-    // first insertion shifts. Left unmapped, the lowering closes a function at the wrong op: it
-    // emitted a `retw` in the middle of an expanding StoreElem, splitting the pixel write across
-    // two frames. Found by disassembling, because the emitted stream was structurally plausible
-    // (two entries, two retws, one call8) and only the POSITION of the boundary was wrong.
-    //
-    // REQUIRED, and the disassembly says otherwise. Removing this makes crosshair.mle emit a
-    // TIDIER-looking block (one entry/retw pair per function, at plausible offsets) and every
-    // host test still passes, because the host backend cannot reach this path. On an S3 that block
-    // boot-loops with StoreProhibited and the buffer pointer holding 0xff: a store through a
-    // register the split left holding a color byte. Verify a change here on a board, not on a
-    // listing and not on the suite.
+    // The boundaries shift with every insertion, and removing this remap boot-loops an S3.
     uint16_t newFnStart[kMaxIrEntries] = {};
 
     for (uint16_t i = 0; i < ir.count; i++) {
-        // Record where this function begins in the OUTPUT array, before anything is emitted for
-        // the op that starts it.
+        // Where this function begins in the output, before anything is emitted for its first op.
         for (uint8_t f = 0; f < ir.fnCount; f++)
             if (ir.fnIrStart[f] == i) { newFnStart[f] = out.count; }
 
@@ -441,9 +313,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         VReg src[4];
         const uint8_t n = sourcesOf(in, src);
 
-        // Reload each DISTINCT spilled source into its own temp; a repeated operand reuses the temp
-        // already holding it, which is both cheaper and necessary — two Reloads of the same slot into
-        // different temps would be pure waste on the tightest register file here.
+        // Each distinct spilled source into its own temp, since a repeat can reuse the same one.
         VReg tempOf[4] = {0, 0, 0, 0};
         uint8_t nTemp = 0;
         for (uint8_t s = 0; s < n; s++) {
@@ -461,8 +331,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
             if (!emit(rl)) { spillDetail().guard = 13; return false; };
         }
 
-        // Rewrite the operands in place: a spilled one now names its temp, a kept one its compacted
-        // number. LoadCtrl's source is kArg4, which is fixed, so it needs no case of its own.
+        // A spilled operand now names its temp, a kept one its compacted number.
         auto mapped = [&](VReg v, uint8_t slotIdx) -> VReg {
             if (v >= kMaxVRegs) return v;
             return iv[v].spilled ? tempOf[slotIdx] : iv[v].assigned;
@@ -475,9 +344,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
         const bool dstSpilled = writesDst(in) && in.dst < kMaxVRegs && iv[in.dst].spilled;
         const uint8_t dstSlot = dstSpilled ? iv[in.dst].slot : 0;
         if (writesDst(in)) {
-            // A spilled destination is computed into a reload temp and then stored. It may reuse a
-            // temp that carried a source: the op reads its sources and writes its destination as one
-            // instruction, so the aliasing is the ordinary `add d, d, b` every ISA here defines.
+            // Computed into a reload temp and stored; reusing a source temp is ordinary aliasing.
             in.dst = dstSpilled ? firstTemp : (in.dst < kMaxVRegs ? iv[in.dst].assigned : in.dst);
         }
         if (!emit(in)) { spillDetail().guard = 14; return false; };
@@ -491,7 +358,7 @@ bool spillToBudget(IrProgram& ir, const RegBudget& budget, uint8_t& slotsUsed) {
     }
 
     out.vregsUsed = newHighWater;
-    // Carry the function table across the swap, with the boundaries remapped to the output array.
+    // The function table crosses the swap with its boundaries remapped.
     out.fnCount = ir.fnCount;
     for (uint8_t f = 0; f < ir.fnCount; f++) out.fnIrStart[f] = newFnStart[f];
     ir.swap(out);

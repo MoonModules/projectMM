@@ -10,7 +10,7 @@ namespace mm {
 
 namespace fishart {
 
-// Every fish sprite indexes these slots, which the effect fills per fish.
+/// Every fish sprite indexes these slots, which the effect fills per fish.
 enum : uint8_t { kClear = 0, kBody = 1, kDark = 2, kLight = 3, kFin = 4, kEye = 5, kBand = 6 };
 inline constexpr uint8_t kPaletteCount = 7;
 

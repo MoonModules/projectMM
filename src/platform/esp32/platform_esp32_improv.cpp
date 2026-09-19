@@ -1,16 +1,43 @@
-// Improv-serial listener — UART0 + native-USB RPC dispatch.
-//
-// Cut out of platform_esp32.cpp (plan-23) for size + readability. Self-contained:
-// owns the g_improv state in an anonymous namespace, reaching back into the rest of
-// the platform layer only through public accessors declared in platform.h.
-//
-// Runs on EVERY ESP32 target, including Ethernet-only builds (MM_NO_WIFI). The serial
-// transport + the vendor RPCs (SET_TX_POWER, APPLY_OP — "Improv =
-// REST over serial") need no WiFi, so the installer can push a device-model's config
-// over serial to an eth device too. Only the WiFi-PROVISIONING RPCs (WIFI_SETTINGS,
-// GET_WIFI_NETWORKS) and their `esp_wifi_*` calls are `#ifndef MM_NO_WIFI`-guarded —
-// on eth those commands aren't offered (there's no WiFi STA to provision), and
-// GET_CURRENT_STATE reports based on the Ethernet link instead.
+/// @defgroup platform_esp32_improv The serial provisioning listener
+/// The serial and native-USB command dispatch.
+///
+/// Self-contained: it owns its state privately and reaches the rest of the layer only through declared accessors.
+///
+/// @moreinfo
+///
+/// ## It runs on every target, wireless or not
+///
+/// The serial transport and the vendor commands need no radio, so the installer can push a device model's config over serial to a wired device too.
+/// Only the provisioning commands and their radio calls are guarded out.
+/// A wired build does not offer those, having no station to provision, and the state query reports on the wired link instead.
+///
+/// ## Two transports, because the port may be either
+///
+/// Several chips have a built-in USB peripheral exposing a serial endpoint with no bridge chip, and many cheap boards wire the socket to it rather than to the hardware port.
+/// So the bytes arrive on one or the other, and both are listened on, which makes one firmware work on either kind of board.
+/// The install is soft-failing: when the secondary console grabbed the peripheral first, that path is skipped and the hardware port carries on alone.
+///
+/// One parser per transport, each keeping its own framing state and buffer.
+/// A shared one would let a partial frame on one side be corrupted by bytes arriving on the other, its state machine not knowing they came from different sources.
+/// Both are polled symmetrically, draining whichever has data and yielding only when both come up empty: an earlier shape blocked on one and starved the other.
+///
+/// ## Replies go back the way the request came
+///
+/// The task is single-threaded and handles one frame at a time, so one stored source is enough, set before dispatch and read by every send within it.
+/// Broadcasting to both stays available for status messages during startup, which reply to no particular request.
+/// A send on the USB path never blocks: a host that opened the endpoint without draining it would otherwise stall the task.
+/// And a reply dropped there is retried by the installer.
+///
+/// ## The two vendor operations
+///
+/// One carries a transmit-power cap, the escape hatch for a board whose supply browns out at full power.
+/// Its cap normally arrives over the network once the device is online, which such a board can never reach.
+/// It fails to associate before any of that exists, proven on the bench.
+/// This carries the cap over the same serial channel as the credentials, so it persists before the first association attempt.
+///
+/// The other carries one operation as a document, the same shape the network interface takes, so the installer can apply device-model defaults while it owns the port.
+/// Most fit one frame and a long value is chunked, with reassembly and the duplicate guard living in a core helper that is tested without hardware.
+/// Each frame is acknowledged so the installer can pace and retry, and the reassembled operation is applied on the main loop rather than this task.
 
 #include "platform/platform.h"
 
@@ -27,15 +54,7 @@
 #include "improv.h"
 #include "soc/soc_caps.h"
 
-// USB-Serial-JTAG: ESP32-S3 / S2 / C3 / C6 have a built-in USB-Serial-JTAG
-// peripheral that exposes a USB-CDC endpoint without an external bridge chip.
-// Many cheap S3 dev boards wire the USB-C port to
-// this peripheral, not to UART0 — meaning Improv RPC bytes from the host
-// arrive on USB-Serial-JTAG, not UART0. Listen on BOTH so the same firmware
-// works on boards with an external USB-Serial bridge (UART0) AND boards
-// with native USB (USB-Serial-JTAG). Soft-fail: if the driver install
-// errors (rare; usually means the secondary console grabbed it first), we
-// just skip the JTAG path and keep UART0.
+// The built-in USB peripheral, which many boards wire their socket to instead of the hardware port: @xref{two-transports-because-the-port-may-be-either|why both are listened on}.
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
 #include "driver/usb_serial_jtag.h"
 #endif
@@ -72,14 +91,8 @@ struct ImprovTaskState {
     uint8_t* txPowerOut = nullptr;
     std::atomic<bool>* txPowerReady = nullptr;
 
-    // Vendor APPLY_OP RPC (command 0xFC): one REST operation as JSON, pushed over
-    // serial during provisioning ("Improv = REST over serial"). The frame carries
-    // [0xFC][seq][last][chunk bytes…]; chunks are appended to opOut until last=1,
-    // then opReady is set and the module's tick applies the op on the MAIN loop
-    // (never the Improv task). Same producer/consumer dance as the credentials; the
-    // buffer is module-owned and sized to hold the largest op (a long pins list).
-    // Chunk reassembly + the sequence guard live in mm::ImprovOpReassembler, bound
-    // to opOut in the handler — only the buffer + the ready flag are shared state here.
+    // The operation buffer and its ready flag, the same producer and consumer dance as the credentials: @xref{the-two-vendor-operations|what it carries}.
+    // Module-owned and sized for the largest operation; only these two are shared state here.
     char* opOut = nullptr;
     size_t opOutLen = 0;
     std::atomic<bool>* opReady = nullptr;
@@ -96,36 +109,18 @@ static void improvSetStatus(const char* fmt, ...) {
     va_end(args);
 }
 
-// Tracks whether the USB-Serial-JTAG read driver is up. Set by improvTask
-// after a successful install; gates the JTAG TX in improvSend so a board
-// without the driver (install failed, or ESP32-classic) doesn't write
-// into a dead peripheral. Read+write happen on the same task so plain bool
-// is fine — no cross-task memory ordering concerns.
+// Whether the USB read driver is up, which gates sending on that transport so a board without it never writes into a dead peripheral.
+// Read and written on the same task, so a plain flag is enough.
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
 static bool g_jtagReady = false;
 #endif
 
-// Source-transport routing for replies. improvSend uses this to send a
-// reply ONLY on the transport that received the request that triggered
-// it, rather than broadcasting to both. The Improv task is single-
-// threaded and processes one frame at a time, so a single static here
-// is sufficient — set before improvDispatchFrame fires, read by every
-// improvSend* call within the dispatch (including the synchronous
-// pre-WiFi-result sends inside improvHandleProvision's 30 s wait, since
-// that wait blocks the same task and no other dispatch can start).
-// Broadcast-to-both stays available as the SourceBoth value for use
-// during init (improvSetStatus("listening") etc. — no specific source).
+// Which transport a reply goes back on: @xref{replies-go-back-the-way-the-request-came|why one stored value suffices}.
 enum class ImprovSource : uint8_t { Both, Uart, Jtag };
 static ImprovSource g_replySource = ImprovSource::Both;
 
-// Send a framed Improv message. ImprovFrameType values match the upstream
-// improv::ImprovSerialType numerically (we just don't include improv.h in
-// the host-side test path, so the host-only header has its own enum).
-// Routes to the transport that received the request being replied to
-// (g_replySource, set at the top of improvDispatchFrame). Falls back to
-// broadcast on both transports when no specific source is set — used
-// during init for status-state broadcasts that aren't replies to a
-// specific request.
+// Send a framed message, routed to the transport that received the request being replied to, or broadcast when no particular source is set.
+// The frame-type values match the upstream protocol numerically; the host test path keeps its own enumeration rather than including that header.
 static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload) {
     uint8_t frame[6 + 1 + 1 + 1 + kImprovMaxPayload + 1];
     size_t n = buildImprovFrame(type, payload.data(), payload.size(),
@@ -142,16 +137,8 @@ static void improvSend(ImprovFrameType type, const std::vector<uint8_t>& payload
     }
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
     if (g_jtagReady && g_replySource != ImprovSource::Uart) {
-        // Non-blocking: a host that opened the JTAG endpoint but isn't
-        // draining must not stall the Improv task — the task also services
-        // UART0 reads (10 ms blocking poll) and any TX-side wait here
-        // would compound that into laggy RX. usb_serial_jtag_write_bytes
-        // returns the byte count actually queued; on a backed-up host we
-        // drop the reply silently. Improv on USB-JTAG is opportunistic —
-        // the caller (web installer) retries on timeout via its own SDK
-        // path. ticks_to_wait=0 means "fill what fits in the TX FIFO
-        // headroom, drop the rest". Replies are small (<128 B) and fit
-        // in one transaction on any healthy host.
+        // Non-blocking, so a host that opened the endpoint without draining cannot stall the task: what fits is queued and the rest dropped, and the installer retries.
+        // Replies are small and fit one transaction on any healthy host.
         usb_serial_jtag_write_bytes(frame, n, 0);
     }
 #endif
@@ -182,17 +169,9 @@ static void improvSendDeviceInfo() {
 // these aren't offered (no STA to provision) and the esp_wifi_* calls aren't linked. ---
 
 static void improvSendWifiNetworks() {
-    // Synchronous-ish scan. Replies one network per RPC frame per the Improv
-    // spec, then a final empty payload to mark end-of-list. Limit to 10
-    // entries to keep the response set bounded.
-    //
-    // P4 remote-WiFi note: esp_wifi_scan_start needs the WiFi driver started. On
-    // native ESP32/S3 the driver is up by the time a user provisions. On the P4 the
-    // radio lives on the C6 and only comes up after the esp_hosted prelude in
-    // ensureWifiInit() (triggered by wifiApInit / wifiStaInit). If a scan is ever
-    // requested on a P4 that has not initialised WiFi, this returns an error
-    // cleanly (no crash) rather than scanning a cold link. The cold-provision
-    // bench check is filed in docs/work/future/backlog-core.md § Improv-as-REST.
+    // One network per frame as the protocol specifies, then an empty payload to end the list, bounded to keep the response set small.
+    // The scan needs the radio started, which on the chip whose radio lives on a companion happens only after its own prelude.
+    // A scan before that returns an error cleanly rather than scanning a cold link.
     wifi_scan_config_t scan_cfg = {};
     if (esp_wifi_scan_start(&scan_cfg, true /*block*/) != ESP_OK) {
         improvSendError(improv::ERROR_UNKNOWN);
@@ -219,11 +198,7 @@ static void improvSendWifiNetworks() {
                improv::build_rpc_response(improv::GET_WIFI_NETWORKS, {}, false));
 }
 
-// On WIFI_SETTINGS command: stash credentials for the module to consume.
-// The module's tick1s() polls `g_improv.ready` and calls
-// NetworkModule::setWifiCredentials, which writes through to the existing
-// wifiStaInit path. We don't call wifiStaInit from this task because we
-// don't want WiFi-driver work on the Improv parser task's stack.
+// Stash the credentials for the module to consume on its own tick, rather than bringing the radio up from the parser task's stack.
 static void improvHandleProvision(const improv::ImprovCommand& cmd) {
     if (wifiStaConnected()) {
         improvSetStatus("error: already connected");
@@ -274,21 +249,8 @@ static void improvHandleProvision(const improv::ImprovCommand& cmd) {
 
 #endif // MM_NO_WIFI — end WiFi-provisioning RPCs
 
-// SET_TX_POWER vendor RPC (command 0xFD) — the pre-association escape hatch
-// for boards whose LDO browns out at full TX power (weak-powered boards). Their
-// deviceModels.json cap (Network.txPowerSetting) normally arrives over HTTP after
-// the device is online — which a browning-out board can never reach: it fails
-// WiFi auth at 20 dBm before any HTTP exists (proven on the bench,
-// 2026-06-10). This RPC carries the cap over the same serial channel as the
-// credentials, so it persists BEFORE the first association attempt.
-//
-// Frame payload layout (after the standard Improv frame header):
-//   [0xFD]              command
-//   [data_len]          number of bytes that follow (= 1)
-//   [dBm]               0..21 whole dBm; 0 = no cap (lift)
-//
-// On valid: write into g_improv.txPowerOut, set txPowerReady. The module's
-// tick1s() forwards to NetworkModule::setTxPowerSetting (persist + apply).
+// The transmit-power operation, the escape hatch for a board that browns out at full power: @xref{the-two-vendor-operations|why it must arrive before association}.
+// The payload is one byte of whole decibels, zero lifting any cap; the module's tick persists and applies it.
 static constexpr uint8_t IMPROV_CMD_SET_TX_POWER = 0xFD;
 static constexpr uint8_t IMPROV_ERROR_INVALID_TX_POWER = 0x81;
 
@@ -311,21 +273,9 @@ static void improvHandleSetTxPower(const uint8_t* payload, uint8_t len) {
     improvSend(ImprovFrameType::RpcResponse, rpc);
 }
 
-// APPLY_OP vendor RPC (command 0xFC) — "Improv = REST over serial". Carries ONE
-// REST operation as JSON (the same shape an HTTP /api/modules or /api/control body
-// has): {"op":"add",…} / {"op":"set",…} / {"op":"clearChildren",…}. The installer
-// pushes these during provisioning while it owns the serial port, so device-model
-// defaults apply over serial — no HTTP, no mixed-content, no browser pull/handoff.
-//
-// Frame payload layout (after the standard Improv frame header):
-//   [0xFC]              command
-//   [seq]               chunk index, 0-based (seq 0 resets the reassembly buffer)
-//   [last]              1 if this is the final chunk, else 0
-//   [chunk bytes…]      a slice of the op JSON (≤ kImprovMaxPayload-3 bytes)
-// Most ops fit one frame (seq 0, last 1); a long value (e.g. a big pins list)
-// chunks. On last=1 the reassembled JSON is NUL-terminated and opReady is set; the
-// module's tick applies it on the MAIN loop (the factory/tree mutation must not run
-// on the Improv task). Ack each frame so the installer can pace + retry.
+// The apply operation, carrying one request as a document in the same shape the network interface takes: @xref{the-two-vendor-operations|why over serial}.
+// The payload is a chunk index, a last flag and a slice.
+// The first index resets the buffer and the last one marks it ready for the main loop to apply.
 static constexpr uint8_t IMPROV_CMD_APPLY_OP = 0xFC;
 static constexpr uint8_t IMPROV_ERROR_INVALID_OP = 0x82;
 
@@ -360,13 +310,8 @@ static void improvHandleApplyOp(const uint8_t* payload, uint8_t len) {
         return;
     }
 
-    // Chunk reassembly + the out-of-order/duplicate sequence guard live in
-    // mm::ImprovOpReassembler (core, desktop-unit-tested) so the algorithm is proven
-    // without hardware; this handler keeps only the serial I/O around it. Bound once
-    // to g_improv.opOut at first call — improvProvisioningInit sets opOut before the
-    // task starts, and there is a single Improv task per device for its lifetime, so
-    // the static never sees a stale buffer. Re-init with a different buffer is not
-    // supported (would need rebinding); the single-task design makes that moot.
+    // Reassembly and the duplicate guard live in a core helper tested without hardware, leaving only the serial handling here.
+    // Bound once at the first call, the buffer being set before the task starts and one task living for the device's lifetime, so it never sees a stale one.
     static mm::ImprovOpReassembler reasm(g_improv.opOut, g_improv.opOutLen);
     switch (reasm.feed(seq, last, chunk, chunkLen)) {
         case mm::ImprovOpReassembler::Result::Error:
@@ -447,12 +392,8 @@ static void improvDispatchFrame(const ImprovFrameParser& parser) {
     }
 }
 
-// Feed one byte into the parser and dispatch / error as needed. The
-// `source` argument identifies which transport the byte arrived on;
-// improvSend reads it via g_replySource to route the reply back to the
-// requesting transport only, avoiding broadcast to the silent side.
-// Reset to Both after dispatch so any subsequent unsolicited send
-// (e.g. from a future async path) broadcasts as before.
+// Feed one byte into the parser and dispatch as needed, the source naming which transport it arrived on so the reply routes back there alone.
+// Reset to both afterwards, so any later unsolicited send broadcasts as before.
 static void improvFeedByte(ImprovFrameParser& parser, uint8_t b, ImprovSource source) {
     switch (parser.feed(b)) {
         case ImprovFeedResult::NeedMore:
@@ -482,21 +423,13 @@ static void improvTask(void* /*arg*/) {
     if (uart_err == ESP_OK) {
         uartReady = true;
     } else {
-        // Don't park the task: if USB-Serial-JTAG works on this board,
-        // the task is still useful — Improv just won't reach via UART.
-        // ESP_LOGW lands in the serial log so a developer reading the
-        // monitor sees the cause; the compound status set below also
-        // surfaces it in the UI's `provision_status` control.
+        // Do not park the task, since the other transport may still work on this board; the warning reaches the log and the status below surfaces it in the interface.
         ESP_LOGW(IMPROV_TAG, "uart_driver_install failed: %s",
                  esp_err_to_name(uart_err));
     }
 
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
-    // USB-Serial-JTAG driver install. On native-USB boards (S3 / S2 / C3
-    // etc.) this is the interface the host actually talks to; UART0
-    // is unwired. Best-effort install — secondary console may have grabbed
-    // the peripheral first on some sdkconfig combinations; if so, skip and
-    // rely on UART0.
+    // The USB driver install, which on a native-USB board is the interface the host actually talks to; best-effort, since the secondary console may have taken the peripheral first.
     if (!usb_serial_jtag_is_driver_installed()) {
         usb_serial_jtag_driver_config_t jtag_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
         esp_err_t jtag_err = usb_serial_jtag_driver_install(&jtag_cfg);
@@ -537,26 +470,15 @@ static void improvTask(void* /*arg*/) {
     improvSetStatus("listening");
 #endif
 
-    // One parser per transport. Each parser keeps its own framing state
-    // and 128-byte payload buffer (~150 B per instance on stack). With a
-    // shared parser, a partial frame on UART would be corrupted by bytes
-    // arriving on JTAG (and vice versa) — the parser's state machine
-    // doesn't know they came from different sources. Two parsers keep
-    // the framing per-transport so a half-received frame on one side
-    // can't be confused by traffic on the other.
+    // One parser per transport, each with its own framing state and buffer: @xref{two-transports-because-the-port-may-be-either|why sharing one corrupts a partial frame}.
     ImprovFrameParser parser_uart;
 #if SOC_USB_SERIAL_JTAG_SUPPORTED
     ImprovFrameParser parser_jtag;
 #endif
     uint8_t b;
     for (;;) {
-        // Symmetric non-blocking poll of both transports. Each round
-        // drains up to 64 bytes from whichever side has data, then yields
-        // 10 ms once if both came up empty. Previous shape (10 ms blocking
-        // on UART, 0 ms drain on JTAG) introduced lumpy throughput on
-        // dual-transport boards because UART's blocking wait paused JTAG
-        // drainage; symmetric polling reads either side promptly without
-        // either starving the other.
+        // A symmetric non-blocking poll of both, draining whichever has data and yielding only when both come up empty.
+        // Blocking on one made the other lumpy on a board that has both.
         bool anyRead = false;
         if (uartReady) {
             for (int drained = 0; drained < 64; ++drained) {
@@ -577,11 +499,7 @@ static void improvTask(void* /*arg*/) {
         }
 #endif
         if (!anyRead) {
-            // Nothing on either side — yield so FreeRTOS can schedule the
-            // idle task and lower-priority work. 10 ms is the same wait
-            // the previous UART-blocking-poll achieved; we're trading
-            // an interrupt-driven wait for a scheduled delay, which is
-            // identical from the task's perspective.
+            // Nothing on either side, so yield and let lower-priority work run; the wait matches what the blocking poll achieved and is identical from this task's perspective.
             vTaskDelay(pdMS_TO_TICKS(10));
         }
     }

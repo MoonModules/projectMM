@@ -3,13 +3,11 @@
 
 #include <cstring>
 
-// MoonLive arm64 host assembler (Apple Silicon, arm64 Linux). Each named instruction is encoded
-// ONCE here; the shared IR lowering composes them. Branch displacements are resolved by
-// patchBranches() against bound labels, so no offset is ever hand-computed.
-//
-// One ISA per file, self-guarding, the shape the ESP32 backends already use: the file is always
-// compiled and its body disappears on a host this is not. It also carries its own lowerToBytes,
-// which is the two-line binding of core's IR walk to THIS assembler and can live nowhere else.
+/// @defgroup moonlive_asm_arm64 MoonLive arm64 assembler
+/// Each named instruction encoded once, composed by the shared lowering.
+///
+/// Branch displacements are resolved against bound labels, so no offset is ever computed by hand.
+/// One architecture per file, self-guarding: the file is always compiled and its body disappears on a host this is not.
 
 namespace mm::moonlive {
 
@@ -20,11 +18,9 @@ namespace mm::moonlive {
 // Index math uses the 64-bit views (xN) for addresses, 32-bit (wN) for counters/colors — same
 // register number, so one map suffices. x15 is the call() address/immediate scratch (not a vreg).
 static constexpr uint8_t kArm64Reg[kRegCount] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 5, 6, 7};
-// BOUNDS-CHECKED. The inline ops address their scratch as `vregsUsed + n`, so an index one past the
-// map is reachable whenever the reservation and the map disagree — and an out-of-bounds read returns
-// whatever byte follows the array, making the emitted instruction name a register chosen by
-// accident. Clamping turns that into a wrong-but-safe register instead of undefined behaviour; the
-// static_assert below and the lowerer's reservation are what stop it happening at all.
+// Bounds-checked: the inline operations address their scratch past the map whenever the reservation and the map disagree.
+// An out-of-bounds read returns whatever byte follows, so the emitted instruction names a register by accident; clamping makes that wrong but safe.
+// The assertion below and the lowering's reservation are what stop it happening at all.
 static uint8_t mr(Reg r) { return kArm64Reg[r < kRegCount ? r : kRegCount - 1]; }
 
 // A scratch register that is ALSO a vreg silently corrupts values — see the RISC-V backend, where
@@ -64,17 +60,10 @@ void HostAssembler::emitBytes(const uint8_t* p, size_t n) {
     std::memcpy(buf_ + len_, p, n); len_ += n;
 }
 
-// --- the call frame: the register allocator's overflow storage ---------------------------------
-//
-// x29 is the AAPCS frame pointer, callee-saved and outside both the vreg map and the {x15,x16,x17}
-// scratch set, so nothing this backend emits can disturb it. Slots are addressed from x29 rather
-// than sp precisely because call() moves sp by 128 bytes around every host call: sp-relative offsets
-// would be wrong for the duration of the call, and a script whose spilled value is read after a
-// random16() is the ordinary case, not an exotic one. It is also the layout a nested call needs —
-// each activation gets its own x29 — which is why the frame pointer is here now rather than added
-// later when script-defined functions arrive.
-//
-// Layout: [x29+0] = saved x29, [x29+8] = saved x30, slot n at [x29 + 16 + n*8].
+// The call frame, the register allocator's overflow storage, addressed from the standard frame pointer.
+// It is callee-saved and outside both the register map and the scratch set, so nothing emitted here can disturb it.
+// Slots are addressed from it rather than the stack pointer precisely because a host call moves that around, which would make those offsets wrong for the call's duration.
+// It is also the layout a nested call needs, each activation getting its own.
 static constexpr uint16_t kSlotBase = 16;
 
 void HostAssembler::prologue(uint8_t slots) {
@@ -119,12 +108,9 @@ void HostAssembler::slotAddr(Reg d, uint8_t slot) {
 }
 
 void HostAssembler::movImm(Reg d, int32_t imm) {
-    // movz builds a ZERO-extended 16-bit constant, so a negative immediate would land as its
-    // unsigned counterpart (-1 as 65535). The compiler emits Const(-1) to express subtraction —
-    // `a - b` is `a + (b * -1)` — and a wrapped -1 makes every subtraction correct only modulo 256.
-    // In a stored colour byte that is invisible; in a bounds-guarded index it silently drops the
-    // light, and in a host-call argument it is nonsense. movn is the negative form: it writes
-    // ~imm16, so movn #(~imm) materialises the true negative value.
+    // The plain move builds a zero-extended constant, so a negative one would land as its unsigned counterpart.
+    // The compiler emits a negative to express subtraction, and a wrapped one makes every subtraction correct only modulo a byte.
+    // Invisible in a stored color, silently dropping a light in a bounds-guarded index, and nonsense as a call argument; the negative form materializes the true value.
     if (imm < 0) {
         // movn writes ~imm16, reaching -65536..-1 in one instruction. Below that, movk patches
         // the high half over it: movn seeds every bit set, so only the two 16-bit fields need
@@ -237,12 +223,8 @@ void HostAssembler::branchGeU(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond:
 void HostAssembler::branchGeS(Reg a, Reg b, Label l) { cmp(a, b); branchIf(Cond::Ge, l); }
 void HostAssembler::branchNe(Reg a, Reg b, Label l)  { cmp(a, b); branchIf(Cond::Ne, l); }
 
-// movPtr: a full 64-bit address into a register, movz + three movk.
-//
-// The same four instructions call() emits for its target, parameterized on the destination. A
-// pointer cannot ride an immediate (IrInst::imm is int32_t) and cannot be a PC-relative literal
-// either, because the emitted block is copied to its final address after these bytes are built,
-// so an absolute materialization is what stays correct across that move.
+// A full address into a register, built in four instructions, the same ones a call emits for its target.
+// A pointer cannot ride the immediate field and cannot be a relative literal either, the block being copied to its final address after these bytes are built.
 void HostAssembler::movPtr(Reg d, const void* p) {
     const uint64_t addr = reinterpret_cast<uint64_t>(p);
     const uint8_t r = mr(d);
@@ -253,17 +235,10 @@ void HostAssembler::movPtr(Reg d, const void* p) {
 }
 
 void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
-    // Preserve EVERY register that may hold a live value across the call: the host args
-    // (x0/x1/x2/x3), the link register x30 (blr overwrites it; our function is a leaf), and the
-    // whole vreg scratch pool (x4-x7, x9-x14) — because a value computed before the call (e.g.
-    // a first random16's result) can be live across a SECOND call. Saving the full pool makes
-    // the live-vreg-across-call contract hold for any expression; it's a cold path (once per
-    // call, not per pixel). 128-byte frame (8 pairs) keeps sp 16-aligned.
-    //
-    // x3 is kArg3, the elapsed time — which scripts now read as the system variable `t`, so a
-    // built-in clobbering it (legal for any callee under the AAPCS) would be a silent wrong-value
-    // bug in any animated script that calls anything. Saved before it could become one. It pairs
-    // with x8, which this backend never uses, because stp works on pairs.
+    // Preserve every register that may hold a live value across the call: the host arguments, the link register, and the whole scratch pool.
+    // A value computed before one call can be live across a second.
+    // So saving the full pool makes the contract hold for any expression, on a path taken once per call rather than per light.
+    // The elapsed-time argument is among them, since a built-in clobbering it is legal under the convention and would be a silent wrong-value bug in any animated script that calls anything.
     emit32(0xa9b807e0u);   // stp x0, x1,  [sp, #-128]!
     emit32(0xa9017be2u);   // stp x2, x30, [sp, #16]
     emit32(0xa90723e3u);   // stp x3, x8,  [sp, #112]
@@ -305,12 +280,8 @@ void HostAssembler::call(Reg d, Reg a, Reg b, Reg c, const void* fn) {
 }
 void HostAssembler::ret() { emit32(0xd65f03c0u); }
 
-// bl <label>: a call to a function in THIS block: the script-to-script call.
-//
-// `bl` links the return address into x30, which the callee's prologue saves into its own frame, so
-// calls nest and therefore recurse.
-//
-// Pass the host arguments on (the contract is with IrOp::CallScript in core).
+// A call to a function in this block, linking the return address into the standard register.
+// Which the callee's prologue saves into its own frame so calls nest and therefore recurse.
 void HostAssembler::callLabel(Label l, Reg d, bool take) {
     // The same preservation call() gives a builtin: the whole vreg pool, the host args and x30 to
     // the stack, the result parked in x15 (outside the pool) across the restore. Without it a value
@@ -343,12 +314,9 @@ void HostAssembler::callLabel(Label l, Reg d, bool take) {
 }
 
 void HostAssembler::patchBranches() {
-    // Nothing was emitted if the buffer never allocated, so there is nothing to patch —
-    // stated rather than left to the reader to derive from fixupCount_ being 0. And an
-    // OVERFLOWED compile is refused by lowerWith after finalize(), so patching it is pointless —
-    // and unsafe: a fixup recorded just before emit32 dropped its instruction points at the
-    // buffer's end, and the memcpy below would write past buf_ (found as heap corruption on the
-    // x86-64 backend; the pattern is identical here).
+    // Nothing was emitted if the buffer never allocated, so there is nothing to patch.
+    // An overflowed compile is refused afterwards, so patching it is pointless and unsafe.
+    // A fixup recorded just before a dropped instruction points past the buffer's end, found as heap corruption on the sibling backend.
     if (!buf_ || overflow_) return;
     for (uint8_t i = 0; i < fixupCount_; i++) {
         const Fixup& f = fixups_[i];

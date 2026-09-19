@@ -7,55 +7,39 @@
 #include <cstdio>
 #include <cstring>
 
+/// @defgroup moonlive_script_file MoonLive script files
+/// @{
+/// Where scripts live and how a file name states its role.
+///
+/// One language, five extensions: the engine stays role-blind and the extension alone decides which picker offers a file.
+///
+/// @moreinfo
+///
+/// ## Two directories
+///
+/// A user directory the UI writes and the loader prefers, and a factory directory the picker offers and the UI downloads from on first use.
+/// The split is the revert mechanism: un-editing is a local delete rather than a download.
+
 namespace mm::moonlive {
 
-/// Where a scripted module's script file lives. One fixed directory, the way `/.config` holds
-/// persisted state: a module stores a NAME, not a path, so it cannot reach outside this folder and
-/// the File Manager has one obvious place to look.
-/// The USER's scripts, which the UI writes and the loader prefers. An edit made in the device's
-/// own editor lands here, so a factory script of the same name is shadowed from that moment on:
-/// pushing a new version of a shipped script to `kFactoryScriptDir` will NOT be seen once a user
-/// has saved their own copy. (Two names differing only in case are one file on a case-insensitive
-/// desktop and two on the device's LittleFS, which makes that shadowing easy to miss.)
+// A module stores a name, not a path, so it cannot reach outside this folder.
+/// Where a user's scripts live, which the UI writes and the loader prefers.
 inline constexpr const char* kScriptDir = "/moonlive";
 
-/// Where the FACTORY scripts land: the ones the picker offers from the shipped catalog and the UI
-/// downloads on first use. Separate from kScriptDir, and that split is the whole revert mechanism.
-///
-/// The script editor only ever saves to kScriptDir, so editing a factory script writes a second
-/// file of the same name there rather than changing this one, and resolveScript below prefers it.
-/// Un-editing is then deleting that copy, a LOCAL operation: with one directory an edit would
-/// overwrite the only copy and getting the original back would mean downloading it again, needing
-/// internet at exactly the moment a rig is already on site.
-///
-/// Dot-prefixed for the same reason `/.config` is: the File Manager hides it unless `hidden=1`, so
-/// the factory copies do not clutter the tree, while staying plain readable text for anyone who
-/// looks. A library you learn from has to be readable.
+// The split is the revert mechanism: un-editing is a local delete rather than a download.
+/// Where the factory scripts land, which the picker offers and the UI downloads on first use.
 inline constexpr const char* kFactoryScriptDir = "/.moonlive";
 
-/// A script's ROLE, in its file name. One language, five extensions: an effect is `.mle`, a
-/// layout `.mll`, a modifier `.mlm`, a service `.mls`, a palette `.mlp`.
-///
-/// Stated by the author rather than derived from the script's contents. Deriving it is tempting
-/// (the entry point a class defines already tells the engine which moment to call), but that
-/// couples a UI filter to a language feature: the day a modifier wants a per-frame `tick()`, every
-/// modifier would start appearing in effect pickers with no code changed anywhere. A name is
-/// explicit, visible in any file listing without opening the file, and cannot drift.
-///
-/// The engine itself is role-BLIND and stays that way: it runs whichever moment the binding asks
-/// for, so a class defining several is still legal. The extension decides which picker offers a
-/// file, not what the engine will do with it.
+// The engine stays role-blind, so the extension alone decides which picker offers a file.
+/// A script's role, carried in its file name: one language, five extensions.
 inline constexpr const char* kEffectExt   = ".mle";
 inline constexpr const char* kLayoutExt   = ".mll";
 inline constexpr const char* kModifierExt = ".mlm";
 inline constexpr const char* kServiceExt  = ".mls";
 inline constexpr const char* kPaletteExt  = ".mlp";
 
-/// What a NEW script starts out as, per role. A created file is a WORKING example rather than an
-/// empty one: an empty file fails to parse the moment it is made, so the first thing a new script
-/// would say is an error message. Each role gets the moment it is actually asked about (`tick` for
-/// an effect, `placeLights` for a layout, `modifyLogical` for a modifier) and one control, so the
-/// shape of a script is visible before a line is typed.
+// A working example rather than an empty file, which would fail to parse the moment it is made.
+/// What a new script starts out as, per role.
 inline constexpr const char* kEffectTemplate =
     "class NewEffect {\n"
     "  byte bpm = 60;\n"
@@ -95,15 +79,11 @@ inline constexpr const char* kModifierTemplate =
     "  }\n"
     "}\n";
 
-/// A SERVICE reads hardware and drives controls, so its template is a button: poll a pin on the
-/// 50 Hz tick, and on a change write the control surface. It shows the two things that make a
-/// service a service (`tick20ms` rather than `tick`, and `setControl` as the output) and the edge
-/// state that stops it firing every tick, which is the thing a mapping row cannot express.
+/// A service template: poll a pin on the 50 Hz tick, and write the control surface on a change.
 inline constexpr const char* kServiceTemplate =
     "class NewService {\n"
     "  int pin = 0;\n"
-    // last starts at 1, the level an idle pull-up reads: starting at 0 made the first tick see a
-    // change that had not happened and write the control before anyone touched the button.
+    // 1 is the level an idle pull-up reads, so the first tick sees no change that never happened.
     "  int last = 1;\n"
     "\n"
     "  void defineControls() {\n"
@@ -114,16 +94,13 @@ inline constexpr const char* kServiceTemplate =
     "    int now = gpioRead(pin);\n"
     "    if (now != last) {\n"
     "      last = now;\n"
-    // INVERTED: the wiring is active-low (a switch to ground with a pull-up), so a pressed button
-    // reads 0 and the switch it drives wants 1.
+    // Inverted, since active-low wiring means a pressed button reads 0.
     "      setControl(\"switch1\", 1 - now);\n"
     "    }\n"
     "  }\n"
     "}\n";
 
-/// What a `script` control tells the UI: where the files are, which of them to offer, and what a
-/// new one starts as. Borrowed by the control descriptor (addFilePath), so these live here next to
-/// the directory they name rather than being repeated in each binding.
+/// The template a new palette script starts from.
 inline constexpr const char* kPaletteTemplate =
     "class NewPalette {\n"
     "  byte bpm = 20;\n"
@@ -139,18 +116,16 @@ inline constexpr const char* kPaletteTemplate =
     "  }\n"
     "}\n";
 
+// Beside the directory they name, rather than repeated in each binding.
+/// What a `script` control tells the UI: the directory, the extension, and the new-file template.
 inline constexpr const char* kEffectPick[3]   = {kScriptDir, kEffectExt,   kEffectTemplate};
 inline constexpr const char* kLayoutPick[3]   = {kScriptDir, kLayoutExt,   kLayoutTemplate};
 inline constexpr const char* kModifierPick[3] = {kScriptDir, kModifierExt, kModifierTemplate};
 inline constexpr const char* kServicePick[3]  = {kScriptDir, kServiceExt,  kServiceTemplate};
 inline constexpr const char* kPalettePick[3]  = {kScriptDir, kPaletteExt,  kPaletteTemplate};
 
-/// Is `ext` one of the script extensions? One definition, beside the extensions themselves.
-///
-/// It lives here because two test files had each grown their own copy: when `.mls` was added to one
-/// of them the other kept the old list, and since both were `inline` the linker picked whichever it
-/// liked. The result was a sweep that could not see a whole role of script while every other check
-/// agreed the file was there. A single definition is what makes that impossible.
+// One definition, because two copies drifted and the linker picked whichever it liked.
+/// Whether `ext` is one of the script extensions.
 inline bool isScriptExt(const char* ext) {
     if (!ext) return false;
     return std::strcmp(ext, kEffectExt) == 0 || std::strcmp(ext, kLayoutExt) == 0 ||
@@ -158,11 +133,8 @@ inline bool isScriptExt(const char* ext) {
            std::strcmp(ext, kPaletteExt) == 0;
 }
 
-/// Is `name` one of the scripts we ship? Beside `isScriptExt` for the same reason: the catalog is
-/// the only list of shipped names, so a second copy would drift the day a script is added.
-///
-/// The distinction matters wherever a script name leaves the device: a shipped name comes from our
-/// own catalog, while a name a user invented is text they typed.
+// The catalog is the only list of shipped names, so a second copy would drift.
+/// Whether `name` is one of the scripts the firmware ships.
 inline bool isFactoryScript(const char* name) {
     if (!name || !*name) return false;
     const char* ext = std::strrchr(name, '.');
@@ -180,42 +152,24 @@ inline bool isFactoryScript(const char* name) {
     return false;
 }
 
-/// The largest script the loader will read into RAM at once. Not a language limit — the buffer is
-/// sized to the FILE and freed the moment the compile ends — but a bound so a stray large file
-/// cannot ask a 320 KB device for an allocation it will not survive.
+// A bound rather than a language limit, so a stray large file cannot exhaust a small device.
+/// The largest script the loader reads into RAM at once.
 inline constexpr long kScriptFileMax = 16384;
 
-/// Longest script name accepted, and the bound on the path buffer below. The bindings size their
-/// `script` control buffer from this (`kMaxScriptName + 1`), so a name this loader would accept can
-/// always be held: a shorter control would truncate silently, and truncation can strip the
-/// extension that makes a name valid at all.
+// The bindings size their control buffer from this, so an accepted name is always holdable.
+/// Longest script name accepted, and the bound on the path buffer below.
 inline constexpr size_t kMaxScriptName = 40;
 
-/// Read `<kScriptDir>/<name>` and compile it. The source lives in a right-sized heap buffer for the
-/// duration of the compile and is freed before returning, so a module holds a filename (~32 B) and
-/// the emitted code — never the script text. That is the whole point: the fixed per-module arrays
-/// this replaces cost ~2 KB EACH, resident whether or not a script was loaded.
-///
-/// Returns true when the script compiled. On any failure `err` names it, in the words a user needs:
-/// which file, and what was wrong with it.
-/// FNV-1a over the script text. A caller that must know "did this change" keeps 4 bytes rather than
-/// a second copy of the source, which is the whole reason the text is not resident any more.
+// A caller needing to know whether this changed keeps 4 bytes rather than a copy of the source.
+/// FNV-1a over the script text.
 inline uint32_t scriptHash(const char* s, size_t len) {
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; i++) { h ^= static_cast<uint8_t>(s[i]); h *= 16777619u; }
     return h;
 }
 
-/// Where `name` actually lives: the user's copy if there is one, else the factory copy.
-///
-/// ONE resolver for both readers below. They used to build the path themselves, and the day a
-/// second directory appeared that would have been two places to keep in step: a fork compiled from
-/// kScriptDir while its hash came from the factory copy would look changed on every prepare sweep
-/// and recompile forever.
-///
-/// Writes the resolved path into `out` and returns true when a file is there. False means neither
-/// directory has it, and `out` then holds the USER path, so a caller reporting an error names the
-/// place a user would put one.
+// One resolver, or a fork compiles from one directory and hashes from the other.
+/// Where `name` lives: the user's copy when there is one, else the factory copy.
 inline bool resolveScript(const char* name, char* out, size_t outLen) {
     std::snprintf(out, outLen, "%s/%s", kScriptDir, name);
     if (platform::fsSize(out) >= 0) return true;
@@ -226,17 +180,8 @@ inline bool resolveScript(const char* name, char* out, size_t outLen) {
     return true;
 }
 
-/// LINEAGE: the hash of the shipped copy a user's edit was forked FROM, kept beside the fork.
-///
-/// The fork itself cannot carry it. A script is user-facing text shown in the device's own editor,
-/// so a provenance line in the file would be visible, editable and lost on the first paste. A
-/// sidecar is the standard answer (a `.orig` next to a patched config), and hidden here for the
-/// same reason `/.moonlive` is: the File Manager does not show dot files unless asked.
-///
-/// It answers the one question the shadow marker cannot: has the SHIPPED copy moved since the fork
-/// was made? Without it, an edit and a stale leftover look identical forever, which is what let 29
-/// pre-`void tick()` copies sit on a bench P4 failing every compile with offsets into files nobody
-/// had written that day.
+// A sidecar, since a provenance line inside user-facing text would be edited away.
+/// Where the lineage hash of a forked script is kept.
 inline void scriptLineagePath(const char* name, char* out, size_t outLen) {
     std::snprintf(out, outLen, "%s/.%s.from", kScriptDir, name);
 }
@@ -251,8 +196,8 @@ inline bool noteScriptLineage(const char* name, uint32_t hash) {
     return n > 0 && platform::fsWriteAtomic(path, text, static_cast<size_t>(n));
 }
 
-/// The hash a fork was made from, or false when no lineage was recorded (an older fork, or a script
-/// the user wrote themselves). Absent lineage means "cannot say", never "unchanged".
+// Absent lineage means "cannot say", never "unchanged".
+/// The hash a fork was made from, or false when none was recorded.
 inline bool scriptLineage(const char* name, uint32_t& out) {
     if (!name || !name[0]) return false;
     char path[128];
@@ -267,17 +212,8 @@ inline bool scriptLineage(const char* name, uint32_t& out) {
     return true;
 }
 
-/// True when the user's copy of `name` is HIDING a shipped one: both directories hold it, so the
-/// resolver above compiles the user's and every push to the factory copy is invisible. The binding
-/// says so in its status, because from outside the two cases look identical, and a stale user copy
-/// has twice been chased as a compiler bug: once as a control that never appeared, once as an
-/// old-syntax copy failing with offsets that matched nothing in the file just written.
-/// Record lineage for a just-written file, if it is a fork: a path in the user script directory
-/// naming a script the firmware also ships. Anything else (a config file, a user's own script, a
-/// write to the factory directory) is not a fork and is left alone.
-///
-/// Takes the WRITTEN path rather than a name, so the one caller is the write hook and no caller has
-/// to work out whether a write was a fork.
+// Takes the written path rather than a name, so no caller works out whether a write was a fork.
+/// Record lineage for a file as it is written, when it forks a script the firmware also ships.
 inline void noteForkedFrom(const char* path) {
     if (!path) return;
     char prefix[64];
@@ -286,9 +222,7 @@ inline void noteForkedFrom(const char* path) {
     const char* name = path + plen;
     if (!name[0] || std::strchr(name, '/') || name[0] == '.') return;   // nested, or our own sidecar
 
-    // A REVERT arrives here too: applyFileChanged fires on a delete as well as a write, and the
-    // fork is already gone by then. Drop the lineage with it, or a later fork of the same name
-    // would be compared against a hash from a fork that no longer exists.
+    // A revert arrives here too, so the lineage drops with the fork it described.
     char user[96];
     std::snprintf(user, sizeof(user), "%s/%s", kScriptDir, name);
     if (platform::fsSize(user) < 0) {
@@ -298,10 +232,7 @@ inline void noteForkedFrom(const char* path) {
         return;
     }
 
-    // Only when the fork is CREATED. Re-stamping on every save would mark the fork up to date with
-    // whatever the library holds at that moment, which silently erases the very thing the record
-    // exists to show: that the shipped copy moved while the user was not looking. Lineage is the
-    // point the fork BRANCHED from, and a branch point does not move.
+    // Only on creation: a branch point does not move, and re-stamping would erase what it shows.
     uint32_t already = 0;
     if (scriptLineage(name, already)) return;
 
@@ -316,11 +247,8 @@ inline void noteForkedFrom(const char* path) {
     platform::free(text);
 }
 
-/// True when the SHIPPED copy has changed since the user forked it: both files exist, a lineage
-/// was recorded, and the factory copy no longer hashes to what the fork was made from.
-///
-/// False when there is no lineage. An older fork, or a script the user wrote, cannot be compared,
-/// and claiming an update on a guess would send someone to discard work for nothing.
+// False without lineage, since claiming an update on a guess would send someone to discard work.
+/// Whether the shipped copy has changed since the user forked it.
 inline bool scriptFactoryMovedOn(const char* name) {
     uint32_t from = 0;
     if (!scriptLineage(name, from)) return false;
@@ -344,15 +272,8 @@ inline bool scriptShadowsFactory(const char* name) {
     return platform::fsSize(path) >= 0;
 }
 
-/// The hash of `name`'s CURRENT text, without compiling it.
-///
-/// Answers "has the file changed since I compiled it" for the cost of ONE read, which is what a
-/// binding asks on every prepare sweep. It costs the same whole-file read compileScriptFile makes
-/// and skips everything after: the parse, the codegen, and the exec-block allocation.
-///
-/// False when the file is missing, unreadable or outside the accepted bounds, which the caller
-/// treats as "not the thing I compiled" and lets compileScriptFile report properly. Reporting the
-/// diagnostic here too would put the same message in two places.
+// One read, skipping the parse, the codegen and the exec-block allocation after it.
+/// The hash of `name`'s current text, without compiling it.
 inline bool scriptFileHash(const char* name, uint32_t& out) {
     if (!name || !name[0]) return false;
     char path[96];
@@ -360,18 +281,7 @@ inline bool scriptFileHash(const char* name, uint32_t& out) {
     const long size = platform::fsSize(path);
     if (size <= 0 || size > kScriptFileMax) return false;
 
-    // ONE read of the WHOLE file, not a chunked walk. fsReadAt opens and closes the file on every
-    // call, so hashing a 2 KB script through a small stack window cost 16 open/close cycles per
-    // module per prepare sweep. On a P4 that boot-looped with `Cache error`: LittleFS sits behind
-    // the flash cache and the sweep runs three scripted modules at once.
-    //
-    // Hashing only a WINDOW was the other tempting fix and is worse: four shipped scripts are over
-    // 1 KB, so an edit past the window would go undetected and the module would keep running the
-    // previous program. A change-detector that misses changes is not one.
-    //
-    // The heap allocation is the same one compileScriptFile makes, on the same cold path, and it is
-    // freed before returning. It buys the whole file with one open, and this runs only when a
-    // prepare sweep asks, not per frame.
+    // One read: a chunked walk opens and closes per call, which boot-looped a P4.
     char* text = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
     if (!text) return false;                          // no memory is "cannot answer", not "unchanged"
     const int got = platform::fsRead(path, text, static_cast<size_t>(size) + 1);
@@ -381,50 +291,32 @@ inline bool scriptFileHash(const char* name, uint32_t& out) {
     return ok;
 }
 
-/// As compileScriptFile, and additionally reports the source's hash so a caller can tell a changed
-/// script from an unchanged one without holding the text.
+/// As compileScriptFile, and additionally reports the source's hash.
 inline bool compileScriptFile(MoonLive& engine, const char* name,
                               const BuiltinTable& builtins, const SysVarTable& sysvars,
                               const char*& err, uint32_t* hashOut = nullptr) {
-    // FIRST, before any validation can return: drop whatever is already compiled. Every check
-    // below leaves through `return false`, and only engine.compile() releases the previous
-    // program, so without this a rejected script (renamed, deleted, emptied) leaves the OLD one
-    // executing while the module reports an error. The card says "script not found" and the
-    // fixture keeps rendering the script that is gone.
-    //
-    // freeCode, not free: the control ARENA must survive, or a scripted control loses the live
-    // value the user set whenever a compile fails.
+    // freeCode first, since a rejected script must not keep executing and the arena must survive.
     engine.freeCode();
 
-    // The script directory must exist before anything can be SAVED into it, and on a fresh device
-    // nothing has created it yet — the write endpoint does not make parent directories, so a first
-    // save would fail with nowhere obvious to look. Creating it here (mkdir -p, a no-op when it is
-    // already there) means naming a script is enough to make the folder appear.
+    // The write endpoint makes no parent directories, so naming a script is what creates this.
     platform::fsMkdir(kScriptDir);
 
     if (!name || !name[0]) { err = "no script — set the script name"; return false; }
 
-    // A BASENAME only. The fixed directory is the point — a module names a script, it does not
-    // address the filesystem — so a separator or a `..` would let a control value reach outside
-    // kScriptDir (`../.config/NetworkModule.json` reads the device's saved credentials). Rejected
-    // rather than sanitised: a name that needs rewriting to be safe is a name a user mistyped.
+    // A basename only, rejected rather than sanitized: one needing a rewrite was mistyped.
     for (const char* c = name; *c; c++)
         if (*c == '/' || *c == '\\') { err = "script name is a file in the script folder, not a path"; return false; }
     if (std::strcmp(name, "..") == 0 || std::strncmp(name, "../", 3) == 0) {
         err = "script name is a file in the script folder, not a path"; return false;
     }
-    // One of the three script extensions, so a stray name cannot pull in an unrelated file that
-    // happens to sit alongside. ANY of them: the loader is role-blind, exactly as the engine is,
-    // and which picker offered the file is the binding's business. The upper bound also lets the
-    // compiler see that the snprintf below cannot truncate.
+    // Any script extension, since the loader is role-blind exactly as the engine is.
     const size_t len = std::strlen(name);
     const char* tail = len >= 4 ? name + len - 4 : "";
     if (len < 5 || len > kMaxScriptName || !isScriptExt(tail)) {
         err = "script name must end in .mle, .mll, .mlm, .mls or .mlp"; return false;
     }
 
-    // The user's copy wins over the factory one of the same name: that is what makes editing a
-    // factory script a fork rather than a change to it.
+    // The user's copy wins, which is what makes editing a factory script a fork.
     char path[96];
     resolveScript(name, path, sizeof(path));
 
@@ -433,8 +325,7 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
     if (size == 0)              { err = "script is empty";  return false; }
     if (size > kScriptFileMax)  { err = "script too large"; return false; }
 
-    // +1 for the NUL the lexer reads as End. fsRead null-terminates on success, but the buffer has
-    // to have room for it.
+    // +1 for the NUL the lexer reads as End, which fsRead writes on success.
     char* text = static_cast<char*>(platform::alloc(static_cast<size_t>(size) + 1));
     if (!text) { err = "no memory for the script"; return false; }
 
@@ -444,10 +335,11 @@ inline bool compileScriptFile(MoonLive& engine, const char* name,
     if (hashOut) *hashOut = scriptHash(text, static_cast<size_t>(read));
     const bool ok = engine.compile(text, builtins, sysvars);
     if (!ok) err = engine.error();
-    // Freed on BOTH paths, before returning: the text has done its job either way, and a failed
-    // compile is exactly when a device can least afford to leak.
+    // Freed on both paths, since a failed compile is when a device can least afford to leak.
     platform::free(text);
     return ok;
 }
+
+/// @}
 
 }  // namespace mm::moonlive

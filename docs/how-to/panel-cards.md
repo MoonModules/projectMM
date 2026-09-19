@@ -371,4 +371,4 @@ The mismatch is not subtle in one direction: leave a downgraded card on `v13 and
 - **[Setting up a Colorlight Card with FPP v6.3 and LED Vision 8.5](https://www.youtube.com/watch?v=L4lHbwUszAs)**: a video walkthrough of the card and panel side. A different sender, the same cards and the same LEDVision work.
 - **[Drivers](../moonmodules/light/drivers.md#panelcard)**: the Panel Card control reference.
 - **[Layouts](../moonmodules/light/layouts.md#panels)**: the Panels layout in full.
-- **[Effects](../moonmodules/light/effects.md)** and **[live scripting](../moonmodules/light/MoonLiveEffect.md)**: a wall is a big canvas, and scripted effects are the fastest way to fill it.
+- **[Effects](../moonmodules/light/effects.md)** and **[live scripting](../moonmodules/light/moonlive.md)**: a wall is a big canvas, and scripted effects are the fastest way to fill it.

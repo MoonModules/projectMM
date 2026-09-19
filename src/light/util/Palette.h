@@ -9,39 +9,43 @@
 
 namespace mm {
 
-// A color palette: the active palette is 16 evenly-spaced RGB entries (the CRGBPalette16 model),
-// and colorFromPalette() reads a 0-255 wheel index by interpolating between the two bracketing
-// entries. The gradient definitions (a {pos,R,G,B,…} stop list) live in flash and expand into the
-// 16 entries on selection, off the hot path; the per-light lookup is then a single scale8 blend.
-//
-// Prior art: FastLED's gradient palettes (CRGBPalette16 / ColorFromPalette), the convention WLED +
-// MoonLight share — the recognisable names + model are carried; this implementation is our own, on
-// our RGB/scale8. The gradient *data* in kBuiltinPalettes is from MoonLight's palettes.h (a public
-// palette set), reformatted; see docs/work/future/backlog-light.md.
+/// @defgroup palette Color palettes
+/// @{
+/// Sixteen evenly-spaced entries a wheel index reads by interpolating between the two that bracket it.
+///
+/// @moreinfo
+///
+/// ## Gradients expand once
+///
+/// A gradient is a stop list in flash that expands into the sixteen entries on selection, off the hot path.
+/// The per-light lookup is then a single blend.
+///
+/// ## Prior art
+///
+/// FastLED's gradient palettes, the convention WLED and MoonLight share, so the recognisable names and model are carried.
+/// The implementation is our own; the gradient data is a public palette set, reformatted.
 struct Palette {
+    /// Entries a palette holds, evenly spaced across the wheel.
     static constexpr uint8_t kEntries = 16;
     RGB entry[kEntries] = {};
 
-    // Build the 16 entries from a gradient-stop list: {pos0,R,G,B, pos1,R,G,B, …} with pos 0..255,
-    // ascending, ending at 255. Each of the 16 evenly-spaced sample positions is the linear blend
-    // of the two stops it falls between. Off the hot path (called on selection).
+    /// Build the 16 entries from a gradient-stop list.
     void fromGradient(const uint8_t* stops, size_t count) {
         const size_t nStops = count / 4;
         if (nStops == 0) { for (auto& e : entry) e = {0, 0, 0}; return; }
         for (uint8_t i = 0; i < kEntries; i++) {
-            // The sample position for entry i, spread 0..255 across the 16 entries.
+            /// The sample position for entry i, spread 0..255 across the 16 entries.
             const uint8_t pos = static_cast<uint8_t>((static_cast<uint16_t>(i) * 255) / (kEntries - 1));
             entry[i] = sampleGradient(stops, nStops, pos);
         }
     }
 
 private:
-    // The color at `pos` (0..255) on the gradient: find the bracketing stops and lerp.
+    /// The color at `pos` (0..255) on the gradient: find the bracketing stops and lerp.
     static RGB sampleGradient(const uint8_t* stops, size_t nStops, uint8_t pos) {
-        // Before the first stop (a gradient whose first stop sits above 0): clamp to it, so the
-        // `pos - p0` below can't underflow.
+        // Before the first stop (a gradient whose first stop sits above 0).
         if (pos <= stops[0]) return {stops[1], stops[2], stops[3]};
-        // Walk to the last stop whose position <= pos.
+        /// Walk to the last stop whose position <= pos.
         size_t s = 0;
         while (s + 1 < nStops && stops[(s + 1) * 4] <= pos) s++;
         const uint8_t* lo = stops + s * 4;
@@ -49,13 +53,13 @@ private:
         const uint8_t* hi = stops + (s + 1) * 4;
         const uint8_t p0 = lo[0], p1 = hi[0];
         if (p1 == p0) return {lo[1], lo[2], lo[3]};
-        // Fraction of the way from lo to hi, as 0..255 for scale8.
+        /// Fraction of the way from lo to hi, as 0..255 for scale8.
         const uint8_t frac = static_cast<uint8_t>((static_cast<uint16_t>(pos - p0) * 255) / (p1 - p0));
         return lerpRGB({lo[1], lo[2], lo[3]}, {hi[1], hi[2], hi[3]}, frac);
     }
 
 public:
-    // Linear blend a→b by frac (0 = a, 255 = b). Integer-only.
+    /// Linear blend a→b by frac (0 = a, 255 = b).
     static RGB lerpRGB(const RGB& a, const RGB& b, uint8_t frac) {
         const uint8_t inv = static_cast<uint8_t>(255 - frac);
         return { static_cast<uint8_t>(scale8(a.r, inv) + scale8(b.r, frac)),
@@ -64,13 +68,10 @@ public:
     }
 };
 
-// The per-light lookup: `index` is a 0..255 wheel position (wraps), mapped across the 16 entries;
-// blend the two bracketing entries, then scale by `brightness`. Hot-path-cheap (two scale8 + a
-// blend). This is the single seam every palette-driven effect calls, so the palette source is
-// swappable behind one signature without touching effects.
+/// The per-light lookup: `index` is a 0..255 wheel position (wraps), mapped across the 16 entries;
 inline RGB colorFromPalette(const Palette& p, uint8_t index, uint8_t brightness = 255) {
-    // Position across 16 entries: the high nibble selects the entry, the low byte the blend.
-    const uint8_t hi = static_cast<uint8_t>(index >> 4);                 // 0..15 — bracket start
+    /// Position across 16 entries: the high nibble selects the entry, the low byte the blend.
+    const uint8_t hi = static_cast<uint8_t>(index >> 4);                 // 0..15, bracket start
     const uint8_t frac = static_cast<uint8_t>((index & 0x0F) * 17);      // 0..255 within the bracket
     const RGB& a = p.entry[hi];
     const RGB& b = p.entry[(hi + 1) & 0x0F];                             // wrap 15→0
@@ -83,12 +84,10 @@ inline RGB colorFromPalette(const Palette& p, uint8_t index, uint8_t brightness 
     return c;
 }
 
-// Cross-fade two colors: `amt`/255 of the way from `a` to `b` (amt 0 = a, 255 = b). The textbook
-// RGB lerp, the staple for compositing/transitions. Prior art: FastLED's blend (colorutils).
+/// Cross-fade two colors: `amt`/255 of the way from `a` to `b` (amt 0 = a, 255 = b).
 inline RGB blend(RGB a, RGB b, uint8_t amt) { return Palette::lerpRGB(a, b, amt); }
 
-// Dim a color toward black by `amt`/255 (amt 0 = unchanged, 255 = black) — the per-frame fade
-// that gives effects a decaying trail. Prior art: FastLED's fadeToBlackBy.
+/// Dim a color toward black by `amt`/255: the per-frame fade that gives effects a decaying trail.
 inline void fadeToBlackBy(RGB& c, uint8_t amt) {
     const uint8_t keep = static_cast<uint8_t>(255 - amt);
     c.r = scale8(c.r, keep);
@@ -97,15 +96,10 @@ inline void fadeToBlackBy(RGB& c, uint8_t amt) {
 }
 
 // --- Built-in palettes -------------------------------------------------------------------------
-// Gradient-stop definitions in flash ({pos,R,G,B,…}). The full MoonLight set: the gradient *data*
-// is from MoonLight's palettes.h (a public palette set, the WLED/SoundReactive gradient lineage),
-// reformatted into our {pos,R,G,B} stop layout (source: MoonLight's Modules/palettes.h). The
-// handful of procedurally-generated FastLED/MoonLight entries (Rainbow, Party, …) MoonLight builds
-// from code rather than a gradient array; we generate the equivalents the same way (rainbow via
-// hsvToRgb, the rest from representative stops) so the named set a MoonLight user knows is present.
+/// Gradient-stop definitions in flash ({pos,R,G,B,…}).
 namespace palettes {
 
-// Gradient definitions — verbatim {pos,R,G,B,…} from MoonLight's palettes.h, names kept recognisable.
+/// Gradient definitions, verbatim from MoonLight's palettes.h, with names kept recognisable.
 inline constexpr uint8_t kParty[]       = {0,85,0,171, 42,150,0,107, 85,201,0,42, 128,212,32,0, 170,191,98,0, 213,128,160,0, 255,85,212,0};   // FastLED party-colors stops
 inline constexpr uint8_t kForest[]      = {0,0,100,0, 64,34,139,34, 128,0,128,0, 192,107,142,35, 255,0,100,0};
 inline constexpr uint8_t kLava[]        = {0,0,0,0, 46,18,0,0, 96,113,0,0, 108,142,3,1, 119,175,17,1, 146,213,44,2, 174,255,82,4, 188,255,115,4, 202,255,156,4, 218,255,203,4, 234,255,255,4, 244,255,255,71, 255,255,255,255};
@@ -169,17 +163,14 @@ inline constexpr uint8_t kYellowout[]   = {0,0,1,255, 63,0,55,255, 127,0,255,255
 // A built-in is a gradient ({stops,len}) or the special "rainbow" (generated via hsvToRgb).
 /// A built-in palette: its name, its gradient, and the tags the picker filters on.
 ///
-/// `tags` describes what the palette LOOKS LIKE, which is the question someone scrolling sixty
-/// entries is actually asking: warm or cold, one hue or many, calm or loud. It is not a category
-/// system to be completed, and an untagged palette is a valid state rather than an omission: an
-/// empty string simply means the palette is findable by name and swatch, as it was before.
+/// `tags` describes what the palette LOOKS LIKE, which is the question someone scrolling sixty entries is asking.
+/// Warm or cold, one hue or many, calm or loud.
+/// It is not a category system to be completed, and an untagged palette stays findable by name and swatch.
 struct Builtin { const char* name; const uint8_t* stops; size_t len; bool rainbow;
                  const char* tags = ""; };
 
 #define MM_PAL(name, arr) {name, arr, sizeof(arr), false}
-/// The same, with tags. Two macros rather than a default argument in one, because the table is
-/// written two entries per line and a trailing string on every row would cost the readability that
-/// layout exists for.
+/// The same, with tags: two macros rather than one with a default, the table running two to a line.
 #define MM_PAL_T(name, arr, tags) {name, arr, sizeof(arr), false, tags}
 inline constexpr Builtin kBuiltins[] = {
     {"Rainbow",       nullptr, 0, true, "🌈⚡️"},
@@ -219,24 +210,21 @@ inline constexpr uint8_t kCount = sizeof(kBuiltins) / sizeof(kBuiltins[0]);
 
 }  // namespace palettes
 
-// The global active palette effects read — the AudioService::latestFrame() static-seam pattern.
-// Drivers owns the `palette` select control and calls setActive() on change; effects just call
-// colorFromPalette(*Palettes::active(), idx).
+/// The global active palette effects read: the AudioService::latestFrame() static-seam pattern.
 class Palettes {
 public:
+    /// The palette effects read, which the drivers module sets.
     static const Palette* active() { return &active_; }
 
-    /// Restore a previously captured palette verbatim. For tests that must hand back the global
-    /// they disturbed; `setActive` cannot express this because the index is not stored.
+    /// Restore a previously captured palette verbatim. For tests that must hand back the global they disturbed.
     static void setActiveDirect(const Palette& p) { active_ = p; }
 
-    // Expand built-in `index` into the active palette (off the hot path — on selection).
+    /// Expand built-in `index` into the active palette, off the hot path, on selection.
     static void setActive(uint8_t index) {
         active_ = fromBuiltin(index);
     }
 
-    // Build the 16-entry palette for built-in `index` (rainbow generated via hsvToRgb, the rest
-    // expanded from their gradient stops). Shared by setActive() and the default + the swatches.
+    /// Build the 16-entry palette for built-in `index` (rainbow generated via hsvToRgb, the rest expanded from their gradient stops).
     static Palette fromBuiltin(uint8_t index) {
         if (index >= palettes::kCount) index = 0;
         const auto& b = palettes::kBuiltins[index];
@@ -250,63 +238,41 @@ public:
         return p;
     }
 
-    // --- Representative color of a palette (for the HomeKit color-wheel → palette mapping) ---
-    //
-    // HomeKit (via MQTT/Homebridge) has no "palette" concept but a native color wheel, so we map a
-    // wheel color to the nearest palette. Each palette's representative (hue, sat) is COMPUTED from
-    // its expanded entries — the textbook "dominant color": average the 16 RGB entries, convert to
-    // HSV. No hand-maintained table (it auto-covers every built-in + any future one). A rainbow/
-    // multi-hue palette averages toward grey → low saturation, which correctly matches the wheel's
-    // desaturated centre rather than any single hue. Off the hot path (called on an MQTT set / get).
+    // --- Representative color, for mapping an external color wheel onto a palette --- 
 
-    // Representative hue (0..359) of built-in `index`. See representativeHueSat().
+    /// Representative hue (0..359) of built-in `index`.
     static uint16_t representativeHue(uint8_t index) {
         uint16_t hue = 0, sat = 0;
         representativeHueSat(index, hue, sat);
         return hue;
     }
 
-    // Representative RGB color of built-in `index` — the palette's identity color, useful anywhere
-    // an external surface (HA WLED /json seg[0].col, an MQTT hsv/get with an RGB-shaped payload,
-    // a future HomeKit RGB accessory) needs one RGB triple to name "the color of this palette".
-    // Full V=255 in HSV, so the reported hue survives external dimming applied on top (HA's slider
-    // multiplies segment.bri × state.bri, so baking in brightness here would double-dim).
-    // Rainbow / grey palettes (sat=0) intentionally resolve to white (255,255,255) — the honest
-    // representation of a multi-hue gradient's identity. A degenerate index or a future palette that
-    // averages to true zero would fall out as (0,0,0); no fallback here — callers decide policy.
+    /// Representative RGB color of built-in `index`: the palette's identity color, for any external
     static RGB representativeRgb(uint8_t index) {
         uint16_t hue = 0, sat = 0;
         representativeHueSat(index, hue, sat);
-        // hue 0..359 → h 0..255 for hsvToRgb's 6-sector integer map (Palette.h convention: hue units
-        // are 0..359 externally; core/color.h uses 0..255 internally).
+        // hue 0..359 → h 0..255 for hsvToRgb's 6-sector integer map (Palette.h convention.
         return hsvToRgb(static_cast<uint8_t>((hue * 256u) / 360u),
                         static_cast<uint8_t>(sat), 255);
     }
 
-    // RGB → nearest palette, the one call every RGB-input consumer (HA's WLED color picker via
-    // /json/state, an ESP-NOW / REST color message, a future BLE-mesh command …) should reach for
-    // instead of open-coding the RGB→HSV conversion. Converts to (hue, sat) with the same maths
-    // representativeHueSat uses on the palette side — so the input and the palette centroids are
-    // measured on the same axes — then delegates to nearestForHue for the 2D distance sweep.
+    /// RGB to the nearest palette: the one call every RGB-input consumer should reach for rather
     static uint8_t nearestForRgb(uint8_t r, uint8_t g, uint8_t b) {
         uint16_t hue = 0, sat = 0;
         rgbToHueSat(r, g, b, hue, sat);
         return nearestForHue(hue, static_cast<uint8_t>(sat));
     }
 
-    // The palette whose representative (hue, sat) is closest to the target, by 2D distance in
-    // (circular-hue, saturation) space. `hue` 0..359, `sat` 0..255. Low target saturation snaps to a
-    // desaturated palette (e.g. Rainbow); a vivid hue snaps to the matching single-hue palette.
+    /// The palette whose representative (hue, sat) is closest to the target, by 2D distance in (circular-hue, saturation) space.
     static uint8_t nearestForHue(uint16_t hue, uint8_t sat) {
-        hue %= 360;   // fold any caller's value into 0..359 — a >=360 hue would otherwise make the
+        hue %= 360;   // fold any caller's value into 0..359, since a >=360 hue would make the
                       // circular-distance fold below underflow and the squared distance overflow int32
         uint8_t best = 0;
         uint32_t bestDist = 0xFFFFFFFF;
         for (uint8_t i = 0; i < palettes::kCount; i++) {
             uint16_t ph = 0, ps = 0;
             representativeHueSat(i, ph, ps);
-            // Circular hue distance (0..180), scaled so hue and sat weigh comparably (hue 0..359 vs
-            // sat 0..255): fold the hue delta to ≤180, then to a 0..255-ish range.
+            // Circular hue distance (0..180), scaled so hue and sat weigh comparably (hue 0..359 vs sat 0..255).
             uint16_t dh = static_cast<uint16_t>((hue > ph) ? (hue - ph) : (ph - hue));
             if (dh > 180) dh = static_cast<uint16_t>(360 - dh);
             const int32_t hueDelta = (static_cast<int32_t>(dh) * 255) / 180;   // 0..255
@@ -317,8 +283,7 @@ public:
         return best;
     }
 
-    // Compute a palette's representative hue (0..359) + saturation (0..255) from the average of its
-    // expanded RGB entries. Pure; no allocation.
+    /// Compute a palette's representative hue (0..359) + saturation (0..255) from the average of its expanded RGB entries.
     static void representativeHueSat(uint8_t index, uint16_t& hueOut, uint16_t& satOut) {
         const Palette p = fromBuiltin(index);
         uint32_t rs = 0, gs = 0, bs = 0;
@@ -332,8 +297,7 @@ public:
     }
 
 private:
-    // Integer RGB → (hue 0..359, saturation 0..255). The textbook max/min/delta HSV derivation; V is
-    // unused (we only match on hue+sat). Achromatic (delta 0) → hue 0, sat 0.
+    /// Integer RGB → (hue 0..359, saturation 0..255).
     static void rgbToHueSat(uint8_t r, uint8_t g, uint8_t b, uint16_t& hue, uint16_t& sat) {
         const uint8_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
         const uint8_t mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
@@ -348,50 +312,31 @@ private:
         hue = static_cast<uint16_t>(h % 360);
     }
 
-    // Default to a full rainbow (index 0): always colorful, so an effect renders visible output
-    // before any palette is selected. setActive() (Drivers setup) overrides from the saved index.
+    /// Default to a full rainbow (index 0).
     static inline Palette active_ = fromBuiltin(0);
 };
 
 // Emit the palette dropdown's options for a ControlType::Palette control (the PaletteOptionsFn):
-// one {"name":…,"colors":"rrggbb rrggbb …"} object per built-in, the colors being the 16 entries
-// as space-separated hex so the UI renders each option as a gradient swatch.
-/// How many SCRIPTED palettes the picker offers, and their names. Set by Drivers from the catalog
-/// plus whatever `.mlp` files the device carries, because Palette.h knows nothing about the
-/// filesystem and must not learn: this is the same one-pointer seam `Palettes::active()` is.
+/// How many SCRIPTED palettes the picker offers, and their names. Set by Drivers from the catalog plus whatever `.mlp` files the device carries, because Palette.h knows nothing about the filesystem and must not learn.
+/// This is the same one-pointer seam `Palettes::active()` is.
 ///
-/// They sort FIRST in the picker, ahead of the sixty built-ins. A scripted palette is the thing a
-/// user just wrote or downloaded, so it is what they are looking for; a built-in is always there.
+/// They sort FIRST in the picker, ahead of the sixty built-ins. A scripted palette is one the user wrote or downloaded, so it is what they are looking for.
+/// A built-in is always there.
 struct LivePalettes {
+    /// How many scripted palettes the picker offers.
     static uint8_t count() { return count_; }
+    /// One scripted palette's name, or empty when the index names none.
     static const char* nameAt(uint8_t i) { return (i < count_ && names_ && names_[i]) ? names_[i] : ""; }
-    /// What the script declared about itself, for the picker's emoji filter. Empty when the device
-    /// carries a `.mlp` the catalog does not know, which is a script the user wrote: it is findable
-    /// by name, it just carries no chips.
+    /// What the script declared about itself, for the picker's emoji filter. Empty when the device carries a `.mlp` the catalog does not know, which is a script the user wrote.
     static const char* tagsAt(uint8_t i) { return (i < count_ && tags_ && tags_[i]) ? tags_[i] : ""; }
 
     /// REFERENCES the caller's arrays; it does not copy them.
-    ///
-    /// The names live in the publisher's own member array, which outlives the seam in practice: the
-    /// module that owns the palette control is the one that publishes, and it republishes whenever
-    /// its controls are rebuilt. A copy here would cost ~640 bytes of static RAM on every board,
-    /// including the ones with no PSRAM, to duplicate strings that already exist.
-    ///
-    /// The contract that makes this safe: a publisher must clear the seam before its arrays go.
     static void set(const char* const* names, const char* const* tags, uint8_t n) {
         names_ = names;
         tags_ = tags;
         count_ = names ? (n > kMax ? kMax : n) : 0;
     }
     /// Detach, for a publisher whose storage is about to go away.
-    ///
-    /// Takes the publisher's OWN array so a departing publisher cannot unpublish somebody else's:
-    /// a second Drivers (a probe, a module the user added and removed, a tree rebuilt around the
-    /// live one) publishes and is then destroyed, and an unconditional clear() would leave the
-    /// running Drivers' palettes silently missing from the picker. Clearing only when the seam
-    /// still points at the caller's storage makes publish/clear pair per owner rather than
-    /// globally, which is what made this a dangling pointer in the first place: whoever released
-    /// last decided what the seam held.
     static void clear(const char* const* names = nullptr) {
         if (names && names_ != names) return;      // someone else owns the seam now: leave it
         names_ = nullptr;
@@ -400,15 +345,6 @@ struct LivePalettes {
     }
 
     /// Scripted palettes sort LAST, after the built-ins, and the position is the whole point.
-    ///
-    /// A palette selection is an INDEX: it is persisted, it rides `seg[0].pal` over the WLED API,
-    /// and Home Assistant's integration renders `paletteNames` positionally. So an index that means
-    /// a different palette tomorrow is a silent corruption of every saved setting.
-    ///
-    /// Putting the scripted ones first would do exactly that: saving one more `.mlp` shifts every
-    /// built-in up by one, and a stored `palette: 12` quietly becomes palette 11. Last means the
-    /// sixty built-in indices are fixed forever and only the scripted tail renumbers, which is the
-    /// same trade WLED makes by growing its custom palettes downward from 255.
     static bool isLive(uint8_t pickerIndex) { return pickerIndex >= palettes::kCount; }
     /// The index into the underlying array (scripted or built-in) behind a picker index.
     static uint8_t sourceIndex(uint8_t pickerIndex) {
@@ -426,7 +362,8 @@ struct LivePalettes {
         return *a ? 1 : (*b ? -1 : 0);
     }
 
-    static constexpr uint8_t kMax = 16;   // a device carries a handful; the picker stays readable
+    /// The most scripted palettes a device carries, which keeps the picker readable.
+    static constexpr uint8_t kMax = 16;
 private:
     static inline const char* const* names_ = nullptr;
     static inline const char* const* tags_ = nullptr;
@@ -434,11 +371,7 @@ private:
 };
 
 inline void paletteOptions(JsonSink& sink) {
-    // A NAME REQUEST rather than an options dump: core sets nameIndex to ask "what is palette N
-    // called", because it has no palette table of its own and this function pointer is the only
-    // channel it has into the light domain (Control.h, PaletteOptionsFn). Answering here costs one
-    // branch and no extra descriptor field, where dumping all 60 options just to read one name out
-    // of ~9 KB of JSON would need a buffer no ESP32 task stack can spare.
+    /// A NAME REQUEST rather than an options dump.
     const uint8_t live = LivePalettes::count();
     if (sink.nameIndex() >= 0) {
         const uint8_t i = static_cast<uint8_t>(sink.nameIndex());
@@ -456,15 +389,10 @@ inline void paletteOptions(JsonSink& sink) {
             sink.appendf("%s%02x%02x%02x", e > 0 ? " " : "", p.entry[e].r, p.entry[e].g, p.entry[e].b);
         sink.append("\"}");
     }
-    // Then the scripted tail, each marked with 🎨 so the list says at a glance which entries are
-    // code rather than a fixed gradient. A scripted palette's swatch is whatever is CURRENTLY
-    // active: its colors exist only once it has ticked, so any other guess would not match the wall.
+    // Then the scripted tail, each marked with 🎨 so the list says at a glance which entries are code rather than a fixed gradient.
     for (uint8_t i = 0; i < live; i++) {
         const Palette& p = *Palettes::active();
-        // The name alone: the 🎨 marker rides in `tags`, which the picker renders as a chip and
-        // filters on. Repeating it in the name showed it twice on every scripted row.
-        // `live` says this row runs a script, so the UI can mark it the way it marks a scripted
-        // effect without inferring it from the file extension.
+        // The name alone.
         sink.appendf(",{\"name\":\"%s\",\"live\":true,\"tags\":\"%s\",\"colors\":\"",
                      LivePalettes::nameAt(i), LivePalettes::tagsAt(i));
         for (uint8_t e = 0; e < Palette::kEntries; e++)
@@ -473,27 +401,23 @@ inline void paletteOptions(JsonSink& sink) {
     }
 }
 
-// Emit the built-in palette names as a bare JSON string array (`"Default","Rainbow",…`), the
-// element list WLED's /json `palettes` array carries — HA's WLED integration renders one dropdown
-// entry per name, indexed by position (so seg[0].pal picks into this list). Same source of truth as
-// paletteOptions (kBuiltins), just names without the color swatches the native UI needs.
+/// Emit the built-in palette names as a bare JSON string array, the element list WLED's /json
 inline void paletteNames(JsonSink& sink) {
     for (uint8_t i = 0; i < palettes::kCount; i++)
         sink.appendf("%s\"%s\"", i > 0 ? "," : "", palettes::kBuiltins[i].name);
-    // The scripted tail too, in the SAME order the picker and `seg[0].pal` use. This list is
-    // positional: HA renders one dropdown entry per name and sends back the index, so stopping at
-    // the built-ins left every scripted palette unnameable and unselectable there while the device's
-    // own `palette` control accepted exactly those indices. paletteCount() below is what keeps the
-    // WLED `palcount` field agreeing with this list.
-    for (uint8_t i = 0; i < LivePalettes::count(); i++)
-        sink.appendf(",\"%s\"", LivePalettes::nameAt(i));
+    // The scripted tail too, in the SAME order the picker and `seg[0].pal` use.
+    for (uint8_t i = 0; i < LivePalettes::count(); i++) {
+        // The escaping writer: a user-supplied name with a quote would end the string early.
+        sink.append(",");
+        sink.writeJsonString(LivePalettes::nameAt(i));
+    }
 }
 
-/// How many entries paletteNames() writes: the built-ins plus whatever scripted palettes the device
-/// currently carries. One home for the count, so the WLED shim's `palcount` cannot drift from the
-/// array it describes.
+/// How many entries paletteNames() writes.
 inline uint8_t paletteCount() {
     return static_cast<uint8_t>(palettes::kCount + LivePalettes::count());
 }
+
+/// @}
 
 }  // namespace mm

@@ -70,18 +70,25 @@ Headers carry more than twice the prose findings of every `.md` page together.
 | 1 | sentence length | | 364 | `src/light/effects` |
 | | | | 3 | `src/light/drivers` |
 
-**`check_docgen`**: **7199 findings across 227 headers**, every `.h` under `src/` except the vendored ones. A root rather than a list of directories, because a list is a tolerance wearing different clothes: each directory it omits is silently exempt, and nobody notices a new one appearing. `src/light/drivers` is at **0** and the rest is the work.
+**`check_docgen`**: **2040 findings**, over every `.h` and `.cpp` under `src/` except the vendored ones. A root rather than a list of directories, because a list is a tolerance wearing different clothes: each directory it omits is silently exempt, and nobody notices a new one appearing.
 
-The largest single rule is the hard wrap at **2948**, which the one-line budget could never reach: it bites only in the class comment and the `@moreinfo` appendix, the two blocks allowed to run long.
+Findings split by whether the file publishes a page, which is what decides severity: **1196 errors** in headers and catalog pages, **844 warnings** in implementation files. Only the errors fail the gate, so the remaining `.cpp` work cannot hold a header's commit hostage. The split is a staging device and names its own removal: when the warning column reaches zero it goes and everything blocks, the way Vale's config promotes a page to error as the sweep finishes it.
 
-| Findings | Area |
-|---|---|
-| 1066 | `src/light/effects` |
-| 252 | `src/light/moonlive` |
-| 239 | `src/platform/platform.h` |
-| 239 | `src/light/layouts` |
-| 185 | `src/core/moonlive` |
-| 153 | `src/light/modifiers` |
+| Errors | Warnings | Area |
+|---:|---:|---|
+| 288 | 140 | `core/system.md` |
+| 248 | 0 | `light/layouts.md` |
+| 240 | 0 | `light/power-functions.md` |
+| 163 | 0 | `light/modifiers.md` |
+| 132 | 0 | `core/services.md` |
+| 71 | 664 | tests, which no card covers |
+| 2 | 40 | unassigned: files no summary page owns |
+
+`ScratchBuffer.h` still renders no `@moreinfo` appendix on its generated page, and the cause is not yet identified. Its group is closed correctly and it is not the empty-group shape the checker now reports, so the two known causes are both ruled out. Worth one session with the Doxygen XML rather than another guess: three wrong theories died to the same mistake of reasoning from one example.
+
+Two `@defgroup` ids are still duplicated, `moonlive_asm_riscv` and `moonlive_asm_xtensa`, each declared in a per-ISA header. Doxygen merges same-named groups, so one absorbs the other's page, which is the fault that took `drivers_PinList.md` off the site until the core parser's group was renamed. Nothing reports it yet.
+
+Seven areas are at **0**: `light/drivers.md`, `light/effects.md`, `light/moonlive.md`, `light/supporting.md`, `core/supporting.md`, `core/ui.md` and `platform/index.md`. The live ranking is [docgen.md](../../reference/metrics/docgen.md), which the check writes.
 
 Red by design. The way to green is solving each file, never widening a tolerance, and once green it stays green because nothing new is exempt by construction.
 
@@ -90,6 +97,8 @@ Red by design. The way to green is solving each file, never widening a tolerance
 ### One file, one pass
 
 A file visited twice costs twice, and the second visit re-reads everything the first already loaded. So every gate runs against one file before moving to the next, and the file is read once.
+
+**Top down, never finding by finding.** The unit of work is the declaration and what a reader needs to know about it, not the line a counter flagged. Read the file's structure, decide what each seam says, and write the comment that says it. A sweep driven by the finding list instead patches flagged lines one at a time, re-counts, and patches again: the count falls slowly, the prose stays shaped by whatever the previous author wrote, and promoting a `//` to a `///` *raises* the count, because a documented member is measured where an undocumented one is not. That is the bottom-up trap, and the finding list is a check on the result rather than a worklist to burn down.
 
 1. **Read the findings first, not the file.** `check_docgen` names every rule it breaks and `vale <file>` names every line. Together they say what the edit must contain, so the file is opened knowing the whole job.
 2. **Dump the comment runs once.** One pass prints every multi-line `//` and `///` run with the line it precedes. That output is the working set: do not re-read the file per finding.
@@ -101,11 +110,28 @@ A file visited twice costs twice, and the second visit re-reads everything the f
 8. **Verify once.** `check_docgen` and `vale` on that file. Both silent, or go back to step 7 with what they now say.
 9. **Build only when the batch ends**, never per file: comments cannot break a build, and the compile is the expensive step.
 
+**The shape of a swept header**, which the three rules below enforce between them:
+
+| Position | Spelling | Budget |
+|---|---|---|
+| The file's first comment | `///`, a `@defgroup` block or the class comment | 10 lines, plus an `@moreinfo` appendix of 10 per `## ` section |
+| Every class or struct | `///` | 10 lines, plus an `@moreinfo` appendix of 10 per `## ` section |
+| Every public member | `///` | **one line** |
+| A note beside code | `//` | **one line**, and only where a reader of the source needs it |
+
+`@moreinfo` is the one home for depth, and only a lead carries one: the file's, or a class's. On a member it is depth in the wrong place, because the generated page shows a member's single line as its summary. That rule was briefly relaxed during the platform sweep and put a four-line block on every function in the file; the fix was to delete 230 appendix lines and move the handful of load-bearing findings up into the file lead.
+
+A header that opens with `//` generates nothing: Doxygen reads `//` as a note to the next reader of the source. Four of the six platform headers opened that way, so their pages were a bare member list with no statement of what the file is for.
+
+**Backlogged: a declaration-only header's functions never reach its generated page.** moxygen renders a `@defgroup`'s functions when they are `inline` definitions (`ParallelSlots.h`, `Hub75Slots.h`) and not when they are bare declarations. `platform.h` is 202 declarations against 3 definitions, so its page carries the 18 handle structs and none of `millis`, `alloc`, `gpioRead`, `ethSendRaw` or `hub75Init`: 245 functions, each with a `///` line nobody reads. The eight `Detail: technical` links on [the platform page](../../moonmodules/platform/index.md) therefore promise the interface and deliver the types it passes around, and they cannot carry per-section anchors until the sections exist. Doxygen's own XML is correct (one `func` section, 246 entries), so the fix is in the rendering: a moxygen template or upgrade, or rendering that section ourselves from the XML the generator already parses. Worth deciding alongside whether moxygen still earns its place against Doxygen's own HTML or Breathe into Sphinx, since the workarounds around it now number seven.
+
+**Backlogged: require every `@moreinfo` section to be referenced.** `check_docgen` verifies that an `@xref{anchor}` names a heading in the same file, which catches a renamed heading silently dropping a link. The reverse rule, that every section carries at least one `@xref` pointing at it, is not enforced: 101 headers carry `@moreinfo` subsections and one uses `@xref`, so it would land roughly 300 findings on prose that is correct as written. Worth revisiting once the sweep has settled how often a reader is meant to arrive at a subsection through a link rather than by scrolling.
+
 **What the edit must fix, all of it, in that one pass:**
 
 - Every `//` run over one line, and every `///` run over one line that is not the class comment.
 - A `///` on every public member the check names.
-- The class `///` at 10 lines, its `@moreinfo` appendix at 20, every comment line at 20 words.
+- The class `///` at 10 lines, each `@moreinfo` `## ` section at 10, every sentence in a comment at 30 words.
 - No hard wrap: one line per sentence, in the class comment and the appendix alike.
 - One `@card <Name>.gif` on the class `///`, since the catalog rule is a gif for effects, modifiers and layouts.
 - Every em-dash, `e.g.`, British spelling and weasel Vale reports.
@@ -116,7 +142,7 @@ A file visited twice costs twice, and the second visit re-reads everything the f
 - **Present tense, positive form.** A comment narrating what the code no longer does is history, and git holds that. A real constraint stays; a bare absence goes.
 - **A rule states a test**, and how it came to be broken belongs in the commit that fixed it. This is what most over-budget comments turn out to be: a bench story where one sentence would do.
 - **Say it, then stop: about 40 words.** Past that a reader skims, and a skimmed comment is not followed.
-- **A sentence is one thought.** Past twenty words it is usually two, joined by a comma that a full stop should have been. The 20-word cap enforces the count; this says what to do about it.
+- **A sentence is one thought.** Past twenty words it is usually two, joined by a comma that a full stop should have been. The 30-word cap enforces the count; this says what to do about it.
 - **The text never refers to itself.** "As described above" and "see the section below" are the author stepping in front of the content.
 - **One parenthetical per sentence**, and the textbook name for a thing rather than ours.
 

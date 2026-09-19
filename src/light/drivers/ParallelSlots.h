@@ -27,7 +27,66 @@ namespace mm {
 ///     slot 2: 0x00             every lane low, the pulse tail
 ///
 /// A short lane leaves both slot 0 and slot 1 once its lights run out.
-/// It then idles low rather than flashing white.
+/// It then idles low rather than flashing white, its mask bit being clear.
+///
+/// ## What the encoders take
+///
+/// `Slot` is deduced from the call: a `uint8_t` for an 8-lane bus and a `uint16_t` for a 16-lane one.
+/// One bus word is one slot, bit L being data line L, so the word width is the lane count and the 8-bit call sites need no change.
+///
+/// `wire` holds the corrected wire bytes lane-major, indexed as `wire[lane * channels + channel]`.
+/// Only lanes set in the active mask are read, so an inactive lane may hold garbage.
+/// The lane stride is `channels` rather than a fixed four, so a light of any channel count works.
+///
+/// ## The shift-register path
+///
+/// The same wire contract is fanned out through \'595 expanders, so each data pin drives several strands.
+/// The fan-out multiplies the slot count rather than the pin count.
+///
+/// The part is a 74HCT and not a plain 74HC.
+/// At 5 V the plain part's input threshold sits above 3.3 V, so a high is not guaranteed to read as a 1.
+/// The symptom is flaky strands rather than dead ones.
+///
+/// The fan-out grows on pins rather than cascade depth, because depth doubles the required pixel clock and there is no exact divide in the band that would need.
+/// The board details are on the drivers page.
+///
+/// ## Two shift-mode optimisations worth knowing
+///
+/// The prefill writes the frame's constant words once, because only one of a slot's three words carries pixel data.
+/// Rewriting the other two per light would burn two thirds of the encoder's stores.
+///
+/// The active-pin helper is deliberately not called by the whole-slot encoder.
+/// There the mask test is fused with the lane gather, so routing it through the helper would walk the pins twice.
+///
+/// ## Why the 64-bit mask is split into halves
+///
+/// Splitting once makes every strand test a 32-bit variable shift, which is a single Xtensa instruction.
+/// The direct form, masking against a `1ULL` shifted by a runtime value, compiles on the 32-bit Xtensa to an `__ashldi3` library call of roughly 50 cycles.
+/// At 144 tests a row that call cost about 7,000 cycles a row, the encoder's dominant cost, attributed on the bench.
+/// It is the sibling of the 32-bit SWAR lesson: 64-bit operations synthesize on this target.
+///
+/// The SWAR pack follows the same shape.
+/// Lane `p` is byte `p` of the 8x8 matrix: byte `p` of the first register when `p` is under four, byte `p - 4` of the second otherwise.
+/// A 16-lane bus needs a second pair for pins 8 to 15, which the 8-bit path never touches and the compiler drops.
+///
+/// ## What a prefill run covers
+///
+/// The `rows` argument is how many rows share one active set.
+/// The caller re-prefills per run of rows with the same mask, because an exhausted strand changes the mask at the row where it runs out.
+/// Uniform-length strands, the common case, are a single run.
+///
+/// ## Why the transpose is the emit
+///
+/// Each shift cycle's eight bit-planes are stored the moment they are computed, while they are still in registers.
+/// Staging them in an array first cannot work on this target.
+/// Eight cycles of two words each exceeds the register file, so every plane spills to the stack and is reloaded once per bit.
+/// Measured on an S3, that staging cost 97 word loads and stores a light against the 17 byte-stores of actual output.
+///
+/// This is the lesson the lane array taught one level down, where removing it took a light from 8.85 to 6.19 microseconds, and staging the planes was the identical pattern.
+/// hpwit's driver stages nothing either, his transpose storing straight into the DMA buffer at its pulse offsets; that was studied rather than copied.
+///
+/// The price is a strided store, one cycle's eight planes landing a bit-stride apart rather than contiguously.
+/// That is one address add per store, far cheaper than a spill and a reload.
 ///
 /// ## Why the transpose is SWAR
 ///
@@ -74,16 +133,6 @@ inline void MM_RAMFUNC transposeLanes16x8(const uint8_t* in, uint16_t* out) {
         out[b] = static_cast<uint16_t>(lo[b]) | static_cast<uint16_t>(hi[b] << 8);
 }
 
-// Encode one ROW (the same light index across all lanes) into 3-slot bus words.
-//   Slot:       uint8_t for an 8-lane (8-bit) bus, uint16_t for a 16-lane (16-bit)
-//               bus: one bus word per slot, bit L = data line L, so the word width
-//               IS the lane count. Deduced from the call, so the 8-bit call sites
-//               (uint8_t mask + uint8_t* out) are source-unchanged.
-//   wire:       kMaxLanes × `channels` corrected wire bytes, lane-major
-//               (wire[lane * channels + channel]); only lanes set in activeMask are
-//               read: inactive lanes may hold garbage. The lane stride IS `channels`
-//               (not a fixed 4), so a light of any channel count (RGB / RGBW / RGBCCT /
-// An exhausted strand's mask bit is clear, so it idles LOW instead of flashing.
 /// Encode one row, one light across every lane, in direct mode with one lane per pin.
 template <class Slot>
 inline void MM_RAMFUNC encodeWs2812ParallelSlots(const uint8_t* wire, Slot activeMask,
@@ -105,18 +154,10 @@ inline void MM_RAMFUNC encodeWs2812ParallelSlots(const uint8_t* wire, Slot activ
     }
 }
 
-// Shift-register encode: the same wire contract fanned out through '595 expanders, so each data
-// pin drives several strands. The fan-out multiplies the slot COUNT, not the pin count.
-
-// 74HCT, not 74HC: at 5 V the plain part's input threshold sits above 3.3 V, so a HIGH is not
-// guaranteed to read as a 1 and the symptom is flaky strands rather than dead ones. The fan-out
-// grows on PINS rather than cascade depth, because depth doubles the required pixel clock and
-// there is no exact divide in the band that would need. The board details are on the drivers page.
 /// Outputs per physical data pin when a 74HCT595 expander is fitted; one register is eight.
 inline constexpr uint8_t kPinExpanderOutputs = 8;   // one 74HCT595 per data pin
 
-// Without it the register keeps presenting the last data byte, so an odd one never resets.
-/// Close a shift-register frame with one latch-only word, at the start of the latch pad.
+/// Close a shift-register frame with one latch-only word, without which the register keeps presenting the last data byte.
 template <class Slot>
 inline void MM_RAMFUNC encodeWs2812ShiftLatchPad(uint8_t latchBit, Slot* out) {
     *out = static_cast<Slot>(Slot(1) << latchBit);
@@ -153,8 +194,7 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
             else                             transposeLanes16x8(lanes, plane[c]);
         }
         for (int bit = 7; bit >= 0; bit--) {   // MSB-first per byte, as the wire contract
-            // THE ONE-SLOT PIPELINE: a '595 updates its outputs only on the latch, so each slot
-            // must clock in the byte the strand will SEE one slot later, hence the rotation below.
+            // The one-slot pipeline: a '595 updates on the latch, so each slot clocks in the byte the strand sees one slot later.
             for (uint8_t c = 0; c < outPerPin; c++) {
                 const Slot first = (c == 0) ? latch : Slot(0);   // RCLK on word 0 of each slot
                 // clocked in slot N  ->  seen by the strand in slot N+1
@@ -167,8 +207,6 @@ inline void encodeWs2812ShiftSlots(const uint8_t* wire, uint64_t activeMask,
     }
 }
 
-// The whole-slot encoder deliberately does NOT call this: there the mask test is FUSED with the
-// lane gather, so routing it through here would walk the pins twice.
 /// Which pins carry an active strand on each shift cycle, one bus word per cycle.
 template <class Slot>
 inline void MM_RAMFUNC shiftActivePins(uint64_t activeMask, uint8_t physPins, uint8_t outPerPin,
@@ -189,8 +227,6 @@ inline void MM_RAMFUNC shiftActivePins(uint64_t activeMask, uint8_t physPins, ui
     }
 }
 
-// Only one of a slot's three words carries pixel data, so rewriting the other two per light
-// burns two thirds of the encoder's stores.
 /// Write the frame's constant shift-mode words once, so the per-light encoder skips them.
 template <class Slot>
 inline void MM_RAMFUNC prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t physPins, uint8_t latchBit,
@@ -202,12 +238,7 @@ inline void MM_RAMFUNC prefillWs2812ShiftConstants(uint64_t activeMask, uint8_t 
     Slot activePins[kPinExpanderOutputs] = {};
     shiftActivePins<Slot>(activeMask, physPins, outPerPin, activePins);
 
-    // Every channel, every bit of THIS row gets the same start/tail. The data word is left alone:
-    // the encoder owns it.
-    //
-    // `rows` is how many rows share this active set. The caller re-prefills per RUN of rows with the
-    // same mask, because an exhausted strand changes the mask at the row where it runs out (see
-    // ParallelLedDriver::prefillShiftFrame). Uniform-length strands: the common case, are one run.
+    // Every channel and bit of this row shares a start and tail; the data word belongs to the encoder.
     const uint32_t bitsPerLight = static_cast<uint32_t>(channels) * 8u;
     for (uint32_t row = 0; row < rows; row++) {
         for (uint32_t b = 0; b < bitsPerLight; b++) {
@@ -231,33 +262,16 @@ inline void MM_RAMFUNC encodeWs2812ShiftData(const uint8_t* wire, uint64_t activ
     const Slot latch = static_cast<Slot>(Slot(1) << latchBit);
     // Words per WS2812 bit: each bit is one 3-word slot per shift cycle.
     const size_t bitStride = static_cast<size_t>(3) * outPerPin;
-    // The 64-bit mask split into 32-bit halves ONCE: every strand test below is then a 32-bit
-    // variable shift: a single Xtensa instruction, instead of `activeMask & (1ULL << v)` with a
-    // runtime v, which the 32-bit Xtensa compiles to a __ashldi3 LIBRARY CALL (~50 cycles). At 144
-    // tests per row that call was ~7,000 cycles/row: the encoder's dominant cost, cycle-attributed
-    // on the bench (the sibling of the 32-bit SWAR lesson: 64-bit ops synthesize on this target).
+    // The mask is split into 32-bit halves once, so every strand test below is one Xtensa shift.
     const uint32_t maskLo = static_cast<uint32_t>(activeMask);
     const uint32_t maskHi = static_cast<uint32_t>(activeMask >> 32);
 
-    // **The transpose IS the emit: each shift cycle's eight bit-planes are stored the moment they are
-    // computed, while they are still in registers.** Staging them in a planes[] array first cannot work
-    // on this target: 8 cycles × 2 words exceeds the register file, so every plane spills to the stack
-    // and is reloaded once per bit. Measured on an S3, that staging cost 97 word load/stores per light
-    // against the 17 byte-stores of actual output.
-    //
-    // This is the same lesson the `lanes[8]` array taught one level down (8.85 → 6.19 µs/light when it
-    // went); planes[] was the identical pattern. hpwit's driver has no staging either: his transpose
-    // stores straight into the DMA buffer at its pulse offsets. Studied, then written fresh here.
-    //
-    // The price is a strided store (one cycle's eight planes land `bitStride` apart, not contiguously),
-    // which is one address add per store: far cheaper than a spill plus a reload.
+    // The transpose IS the emit: each plane is stored while still in registers, never staged.
     for (uint8_t ch = 0; ch < channels; ch++) {
         Slot* chBase = out + static_cast<size_t>(ch) * 8 * bitStride;
         for (uint8_t c = 0; c < outPerPin; c++) {
             const uint8_t pos = static_cast<uint8_t>(outPerPin - 1 - c);
-            // Pack the lane bytes straight into the SWAR register pair: lane p is byte p of the 8×8
-            // matrix, i.e. byte p of A (p<4) or byte p-4 of B (p≥4). A 16-lane bus needs a second pair
-            // for pins 8..15; the 8-bit path never touches it and the compiler drops it.
+            // Lane p is byte p of the 8x8 matrix, so it packs straight into the SWAR register pair.
             uint32_t loA = 0, loB = 0, hiA = 0, hiB = 0;
             for (uint8_t p = 0; p < physPins && p < kLanes; p++) {
                 const uint8_t v = static_cast<uint8_t>(p * outPerPin + pos);

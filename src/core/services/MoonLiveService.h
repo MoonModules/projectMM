@@ -3,7 +3,7 @@
 #include "core/module/MoonModule.h"
 #include "core/moonlive/MoonLive.h"
 #include "core/moonlive/MoonLiveBuiltins_service.h"
-#include "light/moonlive/MoonLiveScript.h"        // the file/compile/status half, domain-neutral
+#include "light/moonlive/MoonLiveScript.h"        // the control seam it drives holds a draw::Canvas
 
 #include <cstring>
 

@@ -7,31 +7,51 @@
 
 namespace mm {
 
-/// Lookup table mapping logical light indices to physical light indices. Four mapping types describe how logical lights relate to physical lights: 1:1 identical (logical index == physical index — a grid with no serpentine and no modifiers, no table needed), 1:1 shuffled (each logical → one physical, reordered — a serpentine grid), 1:0 unmapped (logical has no physical output — a sparse layout like a wheel), and 1:N multimap (logical → multiple physical — a mirror/clone modifier). The last three all need a table.
+/// The table mapping each logical light to the physical lights it drives.
 ///
-/// **API:** the code API answers one question — does this LUT have a mapping table? `hasLUT` returns true when a table is allocated (1:1 shuffled, 1:0, 1:N). `setIdentity(count)` sets the table-free identity mode (`hasLUT` false; `forEachDestination(i, cb)` calls `cb(i)`). `build(logicalCount, maxDest)` allocates the CSR arrays. Callers don't need to know which mapping type is used — Drivers checks `hasLUT` to decide whether to allocate an output buffer, BlendMap checks it to choose between memcpy (identity) and LUT-based mapping. Naming: `setIdentity` / `hasLUT` rather than a "one-to-one" flag, because "one-to-one" reads as covering all 1:1 mappings, but the table-free fast path applies only to the *sequential identity* case.
+/// A logical light can map to one physical light, to none, or to many.
+/// The sequential identity case needs no table at all and is the fast path.
 ///
-/// **Storage (CSR):** two arrays — `offsets_[li]..offsets_[li+1]` index a run of physical destinations for logical light `li`, and the destinations array holds the flat list of physical indices. `nrOfLightsType` is `uint16_t` on no-PSRAM, `uint32_t` on PSRAM. `totalDestinations` is provided by the `Layouts` container, so destinations are always within valid bounds.
+/// @moreinfo
 ///
-/// **Paged destinations (no-PSRAM fragmentation fallback):** the destinations array can be large for a many-to-one modifier on a big grid (a 128×128 XY mirror → 32768 entries × 2 B ≈ 64 KB). On a no-PSRAM ESP32 the largest *contiguous* free block can be smaller than that even when total free heap is fine — a fragmentation cliff, not exhaustion. So when a single block won't allocate but total heap allows it, destinations are split into fixed-size power-of-two PAGES that each fit a fragmented heap. Paging is the exception, not the rule: PSRAM boards (alloc is PSRAM-first → one huge block) and every no-PSRAM case where the single block fits keep the flat single array and the flat hot-path walk, byte-identical to a non-paged build. Only the one failing config (no-PSRAM + large grid + fragmented heap) pages, where the alternative is the modifier silently degrading to 1:1. `offsets_` is always a single small allocation; output is identical either way, so paging is purely an allocation detail.
+/// ## Four mapping kinds
 ///
-/// **Prior art:** MoonLight's `PhysMap` — a memory-optimal union (2 B no-PSRAM / 4 B PSRAM) with the map type stored in each entry, `oneToOneMapping` / `allOneLight` fast-path flags, and `forEachLightIndex` for 1:N iteration (https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Layers/PhysMap.h). projectMM renames `oneToOneMapping` → `setIdentity` / `!hasLUT` for the reason above.
+/// Identity means the logical index is the physical index, which a plain grid gives.
+/// A shuffled map reorders, as a serpentine grid does.
+/// An unmapped logical light has no physical output, which a sparse layout produces.
+/// A multimap drives several physical lights from one logical light, which mirroring produces.
+/// The last three need a table.
+///
+/// ## Compressed sparse row
+///
+/// Two arrays: one indexes each logical light into a run, the other holds the flat destinations.
+/// The container supplies the total, so every destination is in bounds by construction.
+///
+/// ## Paged destinations
+///
+/// A large map on a board without PSRAM can exceed the largest contiguous block while heap remains.
+/// The destinations then split into power-of-two pages that each fit a fragmented heap.
+/// Paging is the exception: output is identical either way, so it stays an allocation detail.
 class MappingLUT {
 public:
+    /// An empty table, in identity mode until one is built.
     MappingLUT() = default;
+    /// Release whatever the table allocated.
     ~MappingLUT() { free(); }
 
+    /// Never copied: the table owns its allocations and two owners would double-free them.
     MappingLUT(const MappingLUT&) = delete;
     MappingLUT& operator=(const MappingLUT&) = delete;
 
-    /// Destinations page size. Power of two so the page split/index is a
-    /// shift/mask (Xtensa has no hardware divide). 4096 entries × 2 B = 8 KB —
-    /// small enough to fit a badly fragmented heap with margin, and to stay
-    /// fittable as the heap shrinks with future modules.
+    // A power of two, so the page split is a shift and a mask: Xtensa has no hardware divide.
+    /// How many destinations one page holds, sized to fit a fragmented heap.
     static constexpr nrOfLightsType kPageEntries = 4096;
-    static constexpr nrOfLightsType kPageShift = 12;          // 1<<12 == 4096
+    /// The shift that turns a destination index into a page number.
+    static constexpr nrOfLightsType kPageShift = 12;
+    /// The mask that turns a destination index into a slot within its page.
     static constexpr nrOfLightsType kPageMask = kPageEntries - 1;
-    static constexpr int kMaxPages = 64;                      // 64 × 4096 = 256 K dests (512 KB) cap
+    /// How many pages the table can hold, capping it at 256K destinations.
+    static constexpr int kMaxPages = 64;
     static_assert((kPageEntries & kPageMask) == 0, "kPageEntries must be a power of two");
 
     /// Fast path: logical == physical, no table needed. `hasLUT` returns false.
@@ -41,11 +61,8 @@ public:
         logicalCount_ = count;
     }
 
-    /// Allocate CSR arrays for 1:N mapping. Returns false only on genuine
-    /// exhaustion (tier 3) — the caller then degrades to 1:1. The three tiers:
-    ///   1. single contiguous block fits        → flat array (today's path)
-    ///   2. no single block, total heap allows   → paged array
-    ///   3. total heap (minus reserve) too small → false (caller degrades)
+    // Three tiers: a single block, then pages, then refusal when the heap cannot hold it.
+    /// Allocate the table, returning false only when memory genuinely cannot hold it.
     bool build(nrOfLightsType logicalCount, nrOfLightsType maxDestinations) {
         free();
         identity_ = false;
@@ -55,8 +72,7 @@ public:
         size_t offsetBytes = static_cast<size_t>(logicalCount + 1) * sizeof(nrOfLightsType);
         size_t destBytes = static_cast<size_t>(maxDestinations) * sizeof(nrOfLightsType);
 
-        // offsets_ is small (one entry per logical light + 1) and always a
-        // single allocation; only destinations_ can hit the cliff.
+        // Only the destinations array can hit the fragmentation cliff; offsets is small.
         offsets_ = static_cast<nrOfLightsType*>(platform::alloc(offsetBytes));
         if (!offsets_) { free(); return false; }
         std::memset(offsets_, 0, offsetBytes);
@@ -87,11 +103,11 @@ public:
         }
     }
 
+    /// Release the table and return to the identity fast path.
     void free() {
         if (offsets_) { platform::free(offsets_); offsets_ = nullptr; }
         if (destinations_) { platform::free(destinations_); destinations_ = nullptr; }
-        // Free pages in reverse allocation order (give the allocator the best
-        // chance to coalesce the freed blocks back together).
+        // Reverse order, giving the allocator its best chance to coalesce the blocks.
         for (int i = pageCount_ - 1; i >= 0; i--) {
             platform::free(pages_[i]);
             pages_[i] = nullptr;
@@ -105,37 +121,35 @@ public:
         overwrites_ = true;
     }
 
+    /// Whether a table is allocated, rather than the identity fast path.
     bool hasLUT() const { return !identity_; }
+    /// Whether the destinations are split into pages.
     bool isPaged() const { return paged_; }
+    /// How many logical lights the table covers.
     nrOfLightsType logicalCount() const { return logicalCount_; }
+    /// How many physical destinations the table holds in total.
     nrOfLightsType destinationCount() const { return destinationCount_; }
 
+    // True lets blendMap plain-copy, around four times faster than the additive path.
     /// Whether each physical destination is written by at most one logical light.
-    /// True for every current producer (mirror, serpentine shuffle, sparse
-    /// box→driver) — their destinations are distinct, so blendMap can plain-copy
-    /// (≈4× faster than the read-add-clamp additive path). Set false only for a
-    /// map that intentionally folds multiple sources onto one destination (for
-    /// example future multi-layer compositing), where additive blending is required.
     bool overwrites() const { return overwrites_; }
+    /// Declare whether destinations are distinct, which chooses the copy or additive blend.
     void setOverwrites(bool v) { overwrites_ = v; }
 
-    /// Memory accounting — actual bytes used, not capacity (destinations may be
-    /// over-allocated), 0 for identity. `estimateBytes` returns the total allocation
-    /// size for a prospective build. Paging doesn't change the total.
+    /// The bytes the table uses, which is zero in identity mode.
     size_t memoryUsed() const {
         if (identity_) return 0;
         return static_cast<size_t>(logicalCount_ + 1) * sizeof(nrOfLightsType)
              + static_cast<size_t>(destinationCount_) * sizeof(nrOfLightsType);
     }
 
+    /// The bytes a prospective build would take, which paging does not change.
     static size_t estimateBytes(nrOfLightsType logicalCount, nrOfLightsType maxDest) {
         return static_cast<size_t>(logicalCount + 1) * sizeof(nrOfLightsType)
              + static_cast<size_t>(maxDest) * sizeof(nrOfLightsType);
     }
 
-    /// Hot-path: iterate physical destinations for a logical index. In identity mode
-    /// it calls back with the logical index itself (no table read); otherwise it walks
-    /// the CSR run, switching pages at each 4096 boundary in the paged case.
+    /// Walk the physical destinations of one logical light, on the hot path.
     template<typename F>
     void forEachDestination(nrOfLightsType logicalIdx, F&& callback) const {
         if (identity_) {
@@ -146,17 +160,13 @@ public:
         nrOfLightsType start = offsets_[logicalIdx];
         nrOfLightsType end = offsets_[logicalIdx + 1];
         if (!paged_) {
-            // Single contiguous array — the common case (PSRAM, small grids).
-            // Byte-identical to a non-paged build; `paged_` is branch-predicted
-            // not-taken so this stays the flat hot loop.
+            // The common case, where the branch predicts not-taken and this stays flat.
             for (nrOfLightsType i = start; i < end; i++) {
                 callback(destinations_[i]);
             }
             return;
         }
-        // Paged: walk the run, switching pages at each 4096 boundary. A single
-        // logical entry's run may straddle a boundary, so recompute the page
-        // pointer at the start and whenever the slot wraps to 0.
+        // One run can straddle a page boundary, so recompute the page when the slot wraps.
         for (nrOfLightsType i = start; i < end; i++) {
             const nrOfLightsType* page = pages_[i >> kPageShift];
             callback(page[i & kPageMask]);
@@ -168,10 +178,7 @@ private:
     bool allocateDestinations(size_t destBytes, nrOfLightsType maxDestinations) {
         if (destBytes == 0) { paged_ = false; return true; }  // nothing to map
 
-        // Tier 1: a single contiguous block fits. maxAllocBlock()==0 means
-        // "unlimited / not meaningful" (desktop) → take the single block too, so
-        // the desktop suite exercises the same flat path the device uses below
-        // the fragmentation cliff.
+        // A zero maxAllocBlock means unlimited, so the desktop exercises the flat path too.
         size_t maxBlock = platform::maxAllocBlock();
         if (maxBlock == 0 || maxBlock >= destBytes) {
             destinations_ = static_cast<nrOfLightsType*>(platform::alloc(destBytes));
@@ -179,9 +186,7 @@ private:
             // Fall through to paging if the single alloc lost a race.
         }
 
-        // Tier 3 gate: refuse if total free (minus the reserve that protects
-        // stacks / WiFi / HTTP) can't hold it. Cramming the heap to 100% would
-        // starve those — an honest "skipped" beats a silent failure elsewhere.
+        // Refuse rather than cram the heap: starving the stacks fails somewhere else instead.
         size_t freeHeap = platform::freeHeap();
         if (freeHeap != 0) {  // 0 == desktop (unlimited) → always page-able
             size_t budget = freeHeap > platform::HEAP_RESERVE

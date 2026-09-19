@@ -1,21 +1,29 @@
 #pragma once
 
-// Improv-WiFi serial framing — pure C++, no ESP-IDF or stdlib-network deps.
-//
-// Wire format (https://www.improv-wifi.com/serial/):
-//   [I][M][P][R][O][V][version=1][type][length][payload×length][checksum]
-//
-// The parser is a state machine fed one byte at a time. The framing layer
-// here is intentionally separate from the Improv RPC semantics (the
-// upstream `improv/improv` library — ESP Component Registry; source:
-// improv-wifi/sdk-cpp on GitHub — handles RPC payload parsing via
-// `improv::parse_improv_data`). Splitting at this boundary lets us:
-//   - Unit-test the framing on the host (test/test_improv_frame.cpp).
-//   - Keep the ESP32 task (platform_esp32.cpp) thin: feed bytes from the
-//     UART driver into ImprovFrameParser, react to complete frames.
-//   - Re-use the builder for both the ESP32 send path and the Python CLI
-//     spec (which reimplements the same framing in moondeck/build/
-//     improv_provision.py — same wire format, two languages).
+/// @defgroup ImprovFrame Improv-WiFi serial framing
+/// @{
+/// The wire framing for Improv-WiFi provisioning, in pure C++ with no ESP-IDF or network headers.
+///
+/// @moreinfo
+///
+/// ## The wire format
+///
+/// Every frame is the same shape, per the [Improv serial spec](https://www.improv-wifi.com/serial/):
+///
+/// ```text
+/// [I][M][P][R][O][V][version=1][type][length][payload...length][checksum]
+/// ```
+///
+/// The parser is a state machine fed one byte at a time, and the builder writes the same shape into a caller-owned buffer.
+///
+/// ## Why framing is split from the RPC semantics
+///
+/// The payload inside a frame is an Improv RPC body, which the upstream `improv/improv` library parses through `improv::parse_improv_data`.
+/// Keeping that out of this header buys three things:
+///
+/// - The framing is unit-tested on the host, in `test/test_improv_frame.cpp`.
+/// - The ESP32 task in `platform_esp32.cpp` stays thin, feeding UART bytes in and reacting to whole frames, including both headers and dispatching at the boundary.
+/// - The builder serves both the ESP32 send path and `moondeck/build/improv_provision.py`, which reimplements the same wire format in Python for the provisioning CLI.
 
 #include <cstdint>
 #include <cstddef>
@@ -23,18 +31,13 @@
 
 namespace mm {
 
-// Framing constants — match the spec verbatim. The library also defines
-// these (improv.h: IMPROV_SERIAL_VERSION etc.) but we don't pull that in
-// here to keep this header dependency-free for host-side testing.
 // --8<-- [start:frame-constants]
+/// Framing constants, matching the spec verbatim so the header needs no library include.
 inline constexpr uint8_t kImprovMagic[6] = {'I','M','P','R','O','V'};
 inline constexpr uint8_t kImprovSerialVersion = 1;
 inline constexpr size_t  kImprovMaxPayload    = 128;  // RPC bodies are well under this
 
-/// Frame types from the spec; named without the protocol prefix to avoid
-/// shadowing the library's `improv::ImprovSerialType` enum where both are
-/// in scope (the test code only includes this header; the ESP32 task
-/// includes both and dispatches at the boundary).
+/// Frame types from the spec, named without the prefix so they never shadow the library's own `improv::ImprovSerialType` where both are in scope.
 enum class ImprovFrameType : uint8_t {
     CurrentState = 0x01,
     ErrorState   = 0x02,
@@ -51,14 +54,10 @@ enum class ImprovFeedResult : uint8_t {
     OversizePayload, // length byte > kImprovMaxPayload; resync
 };
 
-/// Byte-at-a-time framing parser. Resets to the magic-search state after
-/// every completed frame (or error). Caller owns the parser; one instance
-/// per UART channel.
+/// Byte-at-a-time framing parser, one per UART channel, resetting to the magic search after every frame it completes or drops.
 class ImprovFrameParser {
 public:
-    /// Feed one received byte. Returns NeedMore until a full frame has been read.
-    /// On FrameReady the caller can read lastType() + lastPayload()/lastPayloadLen();
-    /// those buffers are valid until the next feed() call.
+    /// Feed one received byte, the result naming what the parser now holds.
     ImprovFeedResult feed(uint8_t byte) {
         switch (state_) {
             case State::Magic0: case State::Magic1: case State::Magic2:
@@ -82,11 +81,7 @@ public:
                     headerBytes_[6] = byte;
                     state_ = State::Type;
                 } else {
-                    // Bad version — drop and resync. If the bad byte happens
-                    // to be the magic start, re-enter the magic search at
-                    // Magic1 (same handling as the Magic-state resync above)
-                    // so we don't lose an 'I' that begins a new frame
-                    // arriving right after a corrupted header.
+                    // A bad version resyncs at Magic1 when the byte is itself an 'I', so a frame behind a corrupted header is not lost.
                     state_ = State::Magic0;
                     if (byte == kImprovMagic[0]) {
                         headerBytes_[0] = byte;
@@ -125,8 +120,11 @@ public:
         return ImprovFeedResult::NeedMore;  // unreachable; quiets some compilers
     }
 
+    /// The type byte of the last completed frame.
     uint8_t        lastType()       const { return type_; }
+    /// The last completed frame's payload, valid until the next @ref feed.
     const uint8_t* lastPayload()    const { return payload_; }
+    /// How many bytes of @ref lastPayload the last frame filled.
     uint8_t        lastPayloadLen() const { return expectedLen_; }
 
 private:
@@ -142,18 +140,14 @@ private:
     uint8_t payloadPos_  = 0;
 };
 
-// XOR-style checksum (sum mod 256) — same as the spec's. Exposed so
-// frame-builders + tests can reuse it.
+/// The spec's checksum, a sum taken modulo 256, exposed so builders and tests share one copy.
 inline uint8_t improvChecksum(const uint8_t* data, size_t len) {
     uint32_t sum = 0;
     for (size_t i = 0; i < len; i++) sum += data[i];
     return static_cast<uint8_t>(sum & 0xFF);
 }
 
-// Build a complete frame: [magic][version][type][length][payload][checksum].
-// Caller-owned output buffer; returns the total byte count written, or 0 on
-// overflow (outLen too small) / oversize payload. No allocation; suitable
-// for both ESP-IDF tasks and host-side tests.
+/// Build one frame into `out`, returning the bytes written, or 0 when it does not fit.
 inline size_t buildImprovFrame(ImprovFrameType type,
                                const uint8_t* payload, size_t payloadLen,
                                uint8_t* out, size_t outLen) {
@@ -175,4 +169,5 @@ inline size_t buildImprovFrame(ImprovFrameType type,
     return p + 1;
 }
 
+/// @}
 } // namespace mm

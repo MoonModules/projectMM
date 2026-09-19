@@ -1,6 +1,8 @@
+// The out-of-line half of ScratchBuffer: the free-list registration and the resize that owns memory.
+
 #include "core/util/ScratchBuffer.h"
 
-#include "core/module/MoonModule.h"    // full definition — register/deregister into the free list
+#include "core/module/MoonModule.h"    // full definition: register/deregister into the free list
 #include "platform/platform.h"  // alloc / free
 
 #include <cstring>              // memset

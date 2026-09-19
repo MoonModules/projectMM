@@ -6,24 +6,33 @@
 
 namespace mm {
 
-// Domain-neutral core primitive: parse a comma-separated GPIO list ("18,17,16"). Lives in core (not
-// the light layer) because both a light driver's `pins` control AND the core PinsModule's pin-ownership
-// map read the same CSV — so the dependency runs domain→core, never core→light. strtol-based like
-// parseDottedQuad (Control.h). Returns nullptr on success or a static error literal the caller feeds
-// straight into setStatus(). Host-tested by unit_RmtLedDriver_pins.cpp + unit_PinsModule.cpp.
+/// @defgroup CorePinList Parsing a comma-separated GPIO list
+/// @{
+/// One text control such as `18,17,16` turned into the pins a driver claims.
+///
+/// @moreinfo
+///
+/// ## Why this lives in core
+///
+/// Both a light driver's `pins` control and the core `PinsModule` pin-ownership map read the same CSV.
+/// The parser therefore sits in core, and the dependency runs from the domain into core rather than the other way.
+/// It is `strtol`-based like `parseDottedQuad` in `Control.h`, and returns null on success or a static error literal the caller hands straight to `setStatus`.
+/// `unit_RmtLedDriver_pins.cpp` and `unit_PinsModule.cpp` pin it on the host.
+///
+/// ## What a token may be
+///
+/// A token is a single pin such as `17` or an inclusive range such as `20-23`, and the two mix freely as in `20-22,35,38-40`.
+/// That is the same range idiom the IP destination list uses, so a human types consecutive entries once, and spaces around tokens are fine because `strtol` skips them.
+///
+/// ## What gets rejected, and why the ceiling matters
+///
+/// The parser refuses empty input, bad tokens, trailing commas, duplicates, ranges that run backwards, pins above the chip's `MM_MAX_GPIO` ceiling, and more entries than the caller's lane cap allows.
+///
+/// The ceiling check is the crash guard.
+/// A pin like 999 parses as a valid integer but is not a GPIO, and handing it to IDF's `gpio_func_sel` faults with a GPIO number error and resets the board.
+/// Rejecting it at the one parse boundary every driver shares, RMT, Parlio and i80 alike, keeps a garbage pin from reaching hardware, so no driver re-guards it.
 
-// Parse "18,17,16" into out[0..maxPins). A token may be a single pin ("17") or an inclusive RANGE
-// ("20-23" → 20,21,22,23), and the two mix freely ("20-22,35,38-40") — the same range idiom as the
-// IP-destination list (parseIpList), so a human types consecutive pins once. Spaces around tokens are
-// fine (strtol skips them). Rejects empty input, bad tokens, trailing commas, duplicates, ranges that
-// run backwards (hi < lo), out-of-range pins (> the chip's MM_MAX_GPIO ceiling), and more than maxPins
-// entries (the chip's channel/lane cap). The ceiling check is the crash guard: an in-CSV pin like 999
-// parses as a valid integer but is not a GPIO — handing it to IDF's gpio_func_sel() faults ("GPIO number
-// error" → reset, WROVER bench 2026-07-13). Rejecting it here — at the one parse boundary every driver
-// (RMT/Parlio/i80) shares — keeps a garbage pin from ever reaching hardware, so no driver has to re-guard it.
-//
-// Append one pin, enforcing the chip ceiling, the duplicate check, and the lane cap. Returns an error
-// literal or nullptr; used for both a single token and each step of an expanded range.
+/// Append one pin, enforcing the chip ceiling, the duplicate check and the lane cap.
 inline const char* appendPin(long v, uint16_t* out, uint8_t maxPins, uint8_t& nOut) {
     if (v < 0 || v > 0xFFFF) return "invalid pin list";
     if (v > MM_MAX_GPIO) return "pin out of range for this chip";
@@ -34,6 +43,7 @@ inline const char* appendPin(long v, uint16_t* out, uint8_t maxPins, uint8_t& nO
     return nullptr;
 }
 
+/// Parse `s` into `out`, `nOut` receiving the count, returning null or an error literal.
 inline const char* parsePinList(const char* s, uint16_t* out, uint8_t maxPins, uint8_t& nOut) {
     nOut = 0;
     if (!s || !*s) return "invalid pin list";
@@ -62,4 +72,5 @@ inline const char* parsePinList(const char* s, uint16_t* out, uint8_t maxPins, u
     }
 }
 
+/// @}
 } // namespace mm

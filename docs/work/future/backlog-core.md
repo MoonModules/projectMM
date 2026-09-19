@@ -614,7 +614,7 @@ Related: this is the render/output-buffer face of the same non-PSRAM fragmentati
 
 ### Filesystem-change notification (live preset refresh) — undesigned
 
-ControlModule rebuilds its preset list by rescanning `/.config/presets`, and that rescan runs at startup and after every save, rename, delete and reorder. So a preset file **uploaded or deleted through the File Manager** appears only once the module next rescans (a reboot, or any preset action on the surface), not the instant the file lands. Documented as the actual behaviour in [control.md](../../moonmodules/core/control.md).
+ControlModule rebuilds its preset list by rescanning `/.config/presets`, and that rescan runs at startup and after every save, rename, delete and reorder. So a preset file **uploaded or deleted through the File Manager** appears only once the module next rescans (a reboot, or any preset action on the surface), not the instant the file lands. Documented as the actual behaviour in [the Control card](../../moonmodules/core/system.md#presets).
 
 The fix is a **core-neutral filesystem-change notification**: FileManagerModule (or the `platform::fs*` write paths) signals "this path changed", and a module with a folder it cares about re-reads. Deliberately not built yet — it is a new core seam serving one caller today, which is the shape [architecture.md § Core primitives, not one-offs](../../explanation/architecture/index.md#core-and-light-domain) warns about. **Build trigger**: a second consumer appears (a scripted-effect folder for MoonLive is the likely one, since live scripts uploaded as files have exactly the same staleness), or the manual-refresh step proves annoying in real use.
 

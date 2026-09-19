@@ -10,7 +10,7 @@ namespace mm {
 
 namespace toasterart {
 
-// Palette: 0 transparent, then chrome greys, slot dark, wing grey, toast browns.
+/// The shared palette: 0 is transparent, then chrome greys, slot dark, wing grey and toast browns.
 inline constexpr RGB kPalette[] = {
     {0, 0, 0},        // 0: transparent key (never read)
     {188, 192, 200},  // 1: chrome body
@@ -23,8 +23,7 @@ inline constexpr RGB kPalette[] = {
 };
 inline constexpr uint8_t kPaletteCount = sizeof(kPalette) / sizeof(kPalette[0]);
 
-// Toaster, 12x9, 4 frames (wing up / mid / down / mid). Rows top to bottom; the wing sits on
-// the upper-left, the slot on top of the chrome loaf, feet below.
+/// Toaster, 12x9 in 4 frames of wing up, mid, down and mid, rows top to bottom, the wing upper-left and the slot on the chrome loaf.
 inline constexpr uint8_t W = 12, H = 9, F = 4;
 inline constexpr uint8_t kToaster[] = {
     // frame 0: wing up

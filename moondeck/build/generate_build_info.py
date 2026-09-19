@@ -1,31 +1,9 @@
 #!/usr/bin/env python3
 """Generate src/core/util/build_info.h.
 
-Writes a single header carrying every compile-time identity fact the runtime
-exposes through SystemModule:
-
-  MM_VERSION       — semver. Defaults to library.json (local/dev builds), but
-                     the release pipeline overrides it with a -D flag (same
-                     mechanism as MM_RELEASE / MM_FIRMWARE_NAME) so a published
-                     build carries a precise version: the core semver for a
-                     stable release, or a monotonic `<core>-dev.<N>` for a
-                     moving `latest` build (see moondeck/build/compute_version.py).
-  MM_BUILD_DATE    — __DATE__ " " __TIME__, evaluated by the compiler.
-  MM_FIRMWARE_NAME — set by the build system as a -D flag (see
-                     moondeck/build/build_esp32.py firmware_cmake_args() and
-                     moondeck/build/package_desktop.py). The header carries an
-                     #ifndef "unknown" fallback for builds that didn't set it.
-                     "Firmware" is the compiled-binary variant; the physical
-                     board is a separate concept the device cannot self-identify.
-                     See docs/explanation/architecture/index.md § Firmware vs board.
-  MM_RELEASE       — release-channel tag (`latest`, `v1.0.0`), set by the
-                     release workflow as a -D flag. #ifndef "" fallback for
-                     local/dev builds (no channel). MM_VERSION = what code;
-                     MM_RELEASE = which channel.
-
-The generator rewrites the whole file from this template each time
-library.json changes; the #ifndef defaults below are part of the template,
-so they survive regeneration.
+Writes a single header carrying every compile-time identity fact the runtime exposes through
+SystemModule. What each macro means lives in the header's own lead, which this template writes;
+the `#ifndef` defaults are part of that template, so they survive regeneration.
 """
 
 import json
@@ -69,73 +47,82 @@ build = build_id()
 
 content = f'''#pragma once
 
-// Auto-generated from library.json by moondeck/build/generate_build_info.py
-// -- do not edit by hand. Regenerated when library.json changes.
+/// @defgroup build_info Compile-time identity
+/// @{{
+/// Every fact about which binary this is, as the build system knew it.
+///
+/// @moreinfo
+///
+/// This header is generated from `library.json` by `moondeck/build/generate_build_info.py`, so an edit belongs in that script rather than here.
+///
+/// ## What each macro answers
+///
+/// | Macro | What it names |
+/// |-------|---------------|
+/// | `MM_VERSION` | the semver, defaulting to `library.json` and overridden by the release pipeline through `compute_version.py` |
+/// | `MM_BUILD_DATE` | roughly when the including translation unit was compiled, for a human to read |
+/// | `MM_BUILD_ID` | the short git hash the binary was built from, suffixed with `+` when the tree was dirty, or `nogit` without a checkout |
+/// | `MM_FIRMWARE_NAME` | the compiled-binary variant, such as `esp32-eth` or `esp32s3-n16r8` |
+/// | `MM_RELEASE` | the release channel the binary shipped on, such as `latest` or `v1.0.0` |
+///
+/// Each carries an `#ifndef` default, so a local build needs no flag.
+/// A release `MM_VERSION` is the core semver for a stable tag, or `<core>-dev.<N>` for a moving `latest` build so successive builds are orderable.
+///
+/// ## Why the build id is the identity, not the date
+///
+/// `__DATE__` and `__TIME__` expand when the including translation unit compiles, and only that unit's own dependencies trigger a rebuild.
+/// Edit a driver `.cpp` and the date does not move, so a freshly flashed board still reports the old timestamp.
+/// Two different builds can also carry the same date.
+/// A stale date reads as a flash that did not take and sends you debugging the wrong binary.
+///
+/// The build id comes from git at generate time and is regenerated on every build, the CMake rule being always out of date by design.
+/// It therefore names the source rather than a compile moment.
+/// Read it off a running device to answer what landed, which has to be answerable before any bench measurement can be trusted.
+///
+/// ## Firmware against board, and version against release
+///
+/// A firmware is the compiled-binary variant; the physical board is a separate concept the device cannot identify on its own, which the architecture page covers.
+/// `build_esp32.py` passes the firmware name through `firmware_cmake_args`, and `package_desktop.py` does the same for a release desktop build.
+/// A local CMake build falls through to `unknown`, since it is never published.
+///
+/// `MM_VERSION` says what code this is and `MM_RELEASE` says which channel it shipped on.
+/// A moving `latest` build and a tagged release can share a semver and differ in channel.
+/// A local build has no channel at all, so SystemModule then shows the bare semver.
 
-// MM_VERSION defaults to the in-tree library.json semver, but the release
-// pipeline overrides it with -DMM_VERSION="<computed>" (compute_version.py):
-// the core semver for a stable tag, or `<core>-dev.<N>` for a moving `latest`
-// build so successive latest builds are orderable. #ifndef so a local build
-// needs no flag.
 #ifndef MM_VERSION
 #define MM_VERSION    "{version}"
 #endif
 
-// MM_BUILD_DATE — when the TU that includes this header was compiled. **Do NOT use it to
-// tell which code is on a board.** __DATE__/__TIME__ expand at the *including* TU's
-// compile, and only that TU's own dependencies trigger a rebuild — edit a driver .cpp and
-// this date does not move, so a freshly flashed board still reports the OLD timestamp.
-// Trusting it as a firmware-identity signal misleads: two different builds can carry the same date.
-// Use MM_BUILD_ID for identity; this is a human-readable "roughly when" only.
 #define MM_BUILD_DATE __DATE__ " " __TIME__
 
-// MM_BUILD_ID — the short git hash this binary was built from, `+`-suffixed when the tree
-// was dirty ("a1b2c3d4+"), or "nogit" without a git checkout. THIS is the firmware-identity
-// signal: it is regenerated from git on every build (the CMake rule is deliberately always
-// out-of-date), so it names the SOURCE rather than a compile timestamp. Read it off a
-// running device to answer "did my flash land, and with what?" — the question that must be
-// answerable before any bench measurement can be trusted.
 #ifndef MM_BUILD_ID
 #define MM_BUILD_ID   "{build}"
 #endif
 
-// Compile-time identity from build flags. The build script that knows the
-// value passes it as a -D, and SystemModule surfaces it on the device card
-// (and the OTA path reads it to pick a matching release asset).
-//
-// "Firmware" here is the compiled-binary variant (esp32 / esp32-eth /
-// esp32-16mb / esp32s3-n16r8) — see docs/explanation/architecture/index.md § Firmware
-// vs board. The physical hardware ("board") is a separate concept the
-// device cannot identify on its own.
-//
-//   ESP32:   moondeck/build/build_esp32.py firmware_cmake_args() -> -DMM_FIRMWARE_NAME="<key>"
-//   Desktop: moondeck/build/package_desktop.py for release builds; local
-//            CMake builds fall through to "unknown" today (no harm:
-//            local builds aren't published).
 #ifndef MM_FIRMWARE_NAME
 #define MM_FIRMWARE_NAME "unknown"
 #endif
 
-// MM_RELEASE — the release-channel tag this binary was published under
-// (`latest`, `v1.0.0`, `v1.0.0-rc2`). Set by the release workflow as a -D
-// flag (same mechanism as MM_FIRMWARE_NAME). MM_VERSION is the semver from
-// library.json — what code this is; MM_RELEASE is which channel it shipped
-// on — a moving `latest` build and a tagged release can share a semver but
-// differ in channel. Empty default: a local / dev build has no channel, and
-// SystemModule shows just the bare semver in that case.
 #ifndef MM_RELEASE
 #define MM_RELEASE ""
 #endif
 
 namespace mm {{
 
+/// The semver this binary reports.
 constexpr const char* kVersion      = MM_VERSION;
+/// Roughly when it was compiled, for a human rather than for identity.
 constexpr const char* kBuildDate    = MM_BUILD_DATE;
+/// The git hash it was built from, which is the identity signal.
 constexpr const char* kBuildId      = MM_BUILD_ID;
+/// Which compiled-binary variant this is.
 constexpr const char* kFirmwareName = MM_FIRMWARE_NAME;
+/// Which release channel it shipped on, empty for a local build.
 constexpr const char* kRelease      = MM_RELEASE;
 
 }} // namespace mm
+
+/// @}}
 '''
 
 # Force UTF-8 on both read and write — Python's default on Windows is cp1252,

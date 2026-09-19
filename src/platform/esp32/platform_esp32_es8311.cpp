@@ -1,18 +1,16 @@
-// ES8311 audio-codec init — the I2C control half of the microphone path on boards
-// whose mic is an analog part behind an ES8311 I2S codec (the ESP32-S31
-// Function-CoreBoard), rather than a direct digital I2S MEMS mic. The I2S *read*
-// stays in platform_esp32_i2s.cpp (audioMic*); this file only brings the codec up
-// over I2C so it streams its ADC (mic) onto the I2S bus the read then drains. So
-// the audio domain code (AudioService) is unchanged — it calls audioCodecInit (a
-// no-op on direct-mic boards) before audioMicInit, and reads samples as always.
-//
-// Uses Espressif's esp_codec_dev managed component (the recognised ES8311 driver),
-// gated to the S31 in main/idf_component.yml. This is the platform layer's first
-// I2C master bus — owned here, behind the boundary.
-//
-// Compiles on every ESP32 chip: the codec path is under SOC_I2S_SUPPORTED and the
-// esp_codec_dev availability gate; everything else gets an inert stub (audioCodecInit
-// returns true — nothing to bring up — so the uniform AudioService call works).
+/// @defgroup platform_esp32_es8311 The audio codec bring-up
+/// The control half of the microphone path on boards whose part is analog behind a codec.
+///
+/// The read itself stays with the other audio seam; this file only brings the codec up so it streams its converter onto the bus that read then drains.
+///
+/// @moreinfo
+///
+/// ## The domain code is unchanged
+///
+/// It calls the codec init, a no-op on a board with a direct microphone, before the microphone init, and reads samples as always.
+/// The driver is the vendor's own managed component, gated to the one board that needs it.
+/// This is the layer's first master bus on that interface, owned here behind the boundary.
+/// Everything else gets an inert stub that reports success, having nothing to bring up, so the one call works everywhere.
 
 #include "platform/platform.h"
 

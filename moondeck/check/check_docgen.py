@@ -8,7 +8,7 @@
 """The documentation the build GENERATES, held to the standards that describe it.
 
 Two surfaces, one check, because they are one pipeline: the hand-written catalog pages
-that render as card tables, and the `///` comments in the headers that become the
+that render as card tables, and the `///` comments in the sources that become the
 technical pages beside them. A rule about the first is a rule about a cell width; a rule
 about the second is a rule doxygen enforces by silently dropping what it cannot read.
 Prose is NOT here: em-dashes, spelling and weasel words are Vale's, and a second prose
@@ -89,18 +89,70 @@ PREVIEWLESS_PAGES = _hooks.PREVIEWLESS_PAGES
 # A card is read across a row; a member comment is read beside the thing it describes,
 # and the generated page shows its first sentence as the summary. So the budget is one
 # line, and a deep dive goes after `@moreinfo` where a post-process moves it below the
-# member lists. The numbers come from the tree: a member line is 14 words at the median
-# and 19 at p95, so 20 words bites the outliers and leaves the normal case alone.
-# EVERY header under src, not a list of directories. A list is a tolerance wearing different
-# clothes: each directory it omits is silently exempt, and nobody notices a new one appearing.
-HEADER_ROOT = "src"
+# member lists. The word cap is 30: a sentence is one thought and past twenty it is
+# usually two, but that is writing advice, and a gate stops a commit only on a real
+# ramble. Measured over the tree, 20 fired on the median sentence and 30 leaves the
+# outliers alone. Vale's SentenceLength carries the same 30 as a suggestion.
+# EVERY C++ source in the repository, not a list of directories inside one of them. A list is a
+# tolerance wearing different clothes: each directory it omits is silently exempt, and nobody
+# notices a new one appearing. `src` is the bulk; the rest are the entry points, the ISA generator
+# and the tests, which sat outside it only by build-system convention.
+#
+# `test` is in scope even though nothing generates a page from it: these rules are about how the
+# code READS, which is why a test's comments are held to them like any other source we own. Only
+# the page rules key off a generated page, and they run from `_orphan_pages` over src/{core,light}.
+HEADER_ROOTS = ("src", "test", "esp32/main", "moonbase/main", "moondeck/moonlive")
+# `.cpp` too: a rule that stopped at the header was a tolerance the file extension decided, and
+# the same `///` and `//` comments live on both sides of a split. A `.cpp` gets no generated page,
+# so only the comment-shape rules reach it; the page rules key off the header that names it.
+HEADER_SUFFIXES = ("*.h", "*.cpp")
 # Upstream code, vendored rather than written here, spelled exactly as check_prose.py spells it.
-HEADER_EXEMPT = ("src/platform/desktop/vendor/", "src/ui/vendor/")
+# `test/doctest.h` is the single-header doctest release: vendored the same way, just not under a
+# directory named for it, and holding a hundred findings nobody here will ever fix.
+HEADER_EXEMPT = ("src/platform/desktop/vendor/", "src/ui/vendor/", "test/doctest.h")
 MAX_CLASS_DOC = 10      # lines of `///` directly above `class X`
-MAX_MOREINFO = 20       # lines of the `@moreinfo` appendix
+MAX_MOREINFO_SECTION = 10  # lines of ONE `## ` section inside the `@moreinfo` appendix
 MAX_MEMBER_DOC = 1      # lines of a `///` run that is NOT a class comment
-MAX_DOC_WORDS = 20      # words on one comment line, `///` or `//`
-MAX_CODE_COMMENT = 1    # lines of a `//` run inside a class body
+MAX_DOC_WORDS = 30      # words in one sentence of a comment, `///` or `//`
+MAX_CODE_COMMENT = 1    # lines of a `//` run in a header, which has a page to keep readable
+# A `.cpp` generates no page, so the one-line cap there enforced a documentation constraint on
+# text that never reaches the documentation. It read as verbosity control and was not: the word
+# budget below is what catches a rambling comment, and it applies to both. What the line count
+# catches in an implementation file is an ESSAY, so the limit is where one starts rather than at
+# one line. Past it the reasoning belongs in the file lead's appendix with an `@xref` back.
+MAX_CODE_COMMENT_CPP = 4
+
+
+def _generates_a_page(rel: str) -> bool:
+    """Whether this file becomes a generated documentation page.
+
+    A header does; an implementation file does not. THE REASON, not the extension, is what the
+    three rules below actually test: a page is what a member doc becomes a row on, and what a
+    line budget keeps readable. Spelling it `rel.endswith(".cpp")` at each site stated the
+    syntactic fact three times and left the semantic one unwritten, so a future `.hpp` or an
+    excluded vendor header would be judged by a rule whose reason does not apply to it.
+    """
+    return not rel.endswith(".cpp")
+
+def _blocks(key: str) -> bool:
+    """Whether a finding fails the gate or annotates it.
+
+    The same split `_generates_a_page` draws, carried through to severity. A header's comments
+    ARE the published page, so a finding there is a documentation defect and blocks. An
+    implementation file publishes nothing: its comments are a note to the next reader, and an
+    over-long one is worth fixing without being worth stopping a commit for.
+
+    Keeping both in one report is the point. A warning that vanishes is a warning nobody fixes,
+    so the count stays visible per area and the sweep still closes it; what changes is that the
+    remaining implementation-file work cannot hold a header's commit hostage.
+
+    TEMPORARY, and it names its own removal: this is a staging device for the sweep, not a claim
+    that an implementation comment matters less. When the `.cpp` side reaches zero this function
+    goes and every finding blocks, the same way `.vale.ini` promotes a page to error once the
+    sweep has finished it and loses its per-page section when the last page lands.
+    """
+    return _generates_a_page(key.partition("::")[0])
+
 
 # No hard wrap: a sentence continued on the next `///` line. The one-line budget above already
 # forbids this on a member or code comment, so it bites only where a block is ALLOWED to be
@@ -283,9 +335,47 @@ def _details_tables(rel: str, text: str):
 _RULE_NAMES = (
     "details table cell", "details table has", "details section", "details heading",
     "public function has no", "public variable has no", "second column",
+    "file opens with //", "file lead missing", "@moreinfo on a member", "@xref",
+    "code comment", "comment line",
+    "appendix section",
     "class comment", "member comment", "no image", "image is", "one control",
-    "description", "controls", "doc sentence", "appendix", "hard wrap",
+    "description", "controls", "doc sentence", "hard wrap",
 )
+
+
+# A rule's key is a prefix of the message, which is stable but reads as a fragment in prose
+# ("31 public function has no"). The report says what a reader would say out loud. Keys absent
+# here fall through to themselves, so a new rule needs no edit until its wording is awkward.
+_RULE_LABELS = {
+    "code comment": "over-long comment runs",
+    "hard wrap": "hard wraps",
+    "public function has no": "undocumented functions",
+    "public variable has no": "undocumented variables",
+    "member comment": "member deep dives",
+    "file opens with //": "files opening with //",
+    "file lead missing": "missing file leads",
+    "class comment": "over-long class comments",
+    "doc sentence": "over-long sentences",
+    "comment line": "over-long comment lines",
+    "appendix section": "over-long appendix sections",
+    "@moreinfo on a member": "@moreinfo on a member",
+    "@xref": "unresolved @xref",
+    "no image": "cards with no image",
+    "image is": "wrong image format",
+    "one control": "cards listing one control",
+    "description": "over-long descriptions",
+    "second column": "wrong second column",
+    "details section": "misplaced details sections",
+    "details heading": "wrong details heading",
+    "details table has": "over-wide details tables",
+    "details table cell": "prose in a details table",
+    "controls": "over-long control lists",
+}
+
+
+def _rule_label(key: str) -> str:
+    """The human name for a rule key, for prose in the report."""
+    return _RULE_LABELS.get(key, key)
 
 
 def _rule_name(reason: str) -> str:
@@ -298,16 +388,21 @@ def _rule_name(reason: str) -> str:
 
 
 def _headers():
-    """Every header the rules cover, repo-relative.
+    """Every source file the rules cover, repo-relative.
 
     RECURSIVE: the old per-directory glob was flat, so a header one level down was never
     read and its findings never counted. Widening the root without this would have reported
     a clean run over an empty set, which is the failure this check exists to prevent.
     """
-    for p in sorted((ROOT / HEADER_ROOT).rglob("*.h")):
-        rel = p.relative_to(ROOT)
-        if not str(rel).startswith(HEADER_EXEMPT):
-            yield rel
+    seen = set()
+    for root in HEADER_ROOTS:
+        for suffix in HEADER_SUFFIXES:
+            for p in sorted((ROOT / root).rglob(suffix)):
+                rel = p.relative_to(ROOT)
+                if str(rel).startswith(HEADER_EXEMPT) or rel in seen:
+                    continue
+                seen.add(rel)
+                yield rel
 
 
 def _sentences(text: str):
@@ -323,7 +418,7 @@ def _sentences(text: str):
     return [p for p in (x.strip() for x in parts) if p]
 
 
-def _wrap_rule(rel: str, lines: list, k: int, end: int):
+def _wrap_rule(rel: str, lines: list, k: int, end: int, start: int = 0):
     """A sentence carried onto the next `///` line, which the editor should have soft-wrapped.
 
     A function rather than a loop body, because two callers need it: a member or class run,
@@ -333,6 +428,16 @@ def _wrap_rule(rel: str, lines: list, k: int, end: int):
     # A list item, a heading, a table row or a fence is structure rather than prose being
     # wrapped, so each is skipped rather than read as a continuation.
     if k + 1 >= end:
+        return []
+    # INSIDE a fenced block nothing is prose, so nothing is a wrapped sentence. Skipping the
+    # ``` lines alone was not enough: a fence's whole point is that the lines BETWEEN the
+    # delimiters are verbatim, and a wire table read as prose is flagged on every row. The
+    # same exemption the section cap already makes, and the one the standards state.
+    fenced = False
+    for j in range(start, k):
+        if re.sub(r"^\s*///\s*", "", lines[j]).strip().startswith("```"):
+            fenced = not fenced
+    if fenced:
         return []
     body = re.sub(r"^\s*///\s*", "", lines[k]).strip()
     nbody = re.sub(r"^\s*///\s*", "", lines[k + 1]).strip()
@@ -418,6 +523,16 @@ def _declared_name(decl: str, start: int) -> str:
 
 
 _CLASS_RE = re.compile(r"^(class|struct)\s+\w+")
+# A forward declaration names a type defined elsewhere, so it documents nothing and is not a lead.
+_FWD_DECL_RE = re.compile(r"^(class|struct)\s+\w+\s*;")
+# A quoted string's braces are text, not scope: `const char* s = "{";` must not raise the depth.
+_STRING_LIT_RE = re.compile(r'"(?:[^"\\]|\\.)*"' + r"|'(?:[^'\\]|\\.)*'")
+# A free constant or function at file scope: what a `@defgroup` exists to gather under one lead.
+# The trailing form accepts a signature that ENDS at the parameter list, because an Allman brace
+# sits on the next line: without that a header written in that style reads as having no free
+# functions at all, and the single-class rule below would flag its legitimate group.
+_TOP_DECL_RE = re.compile(r"^(inline|constexpr|extern|template|using|typedef)\b|"
+                          r"^[\w:<>,\s\*&]+\s+\w+\s*\([^)]*\)\s*(const)?\s*[;{]?\s*$")
 _FUNC_RE = re.compile(r"^[\w:<>,\s\*&]+\s+(\w+)\s*\([^)]*\)\s*(const)?\s*(override)?\s*[;{]")
 # A constructor and a destructor have no return type, and a pure virtual ends `= 0;`, so the
 # form above matches none of them: three public declarations the "needs a ///" rule never saw.
@@ -427,19 +542,270 @@ _SPECIAL_FUNC_RE = re.compile(
 _VAR_RE = re.compile(r"^[\w:<>,\s\*&]+\s+(\w+)\s*(=[^;]+)?;")
 
 
+def _file_comment_end(lines) -> int:
+    """Where the file comment stops, as a line index.
+
+    The file comment is the `//` block at the top, before anything is declared. Include lines,
+    pragmas and blank lines come before or between its parts and do not end it; the first line
+    that declares something does. A file with no leading comment answers 0, so nothing is exempt.
+    """
+    started = False
+    end = 0
+    for i, ln in enumerate(lines):
+        st = ln.strip()
+        if st.startswith("//") and not st.startswith("///"):
+            started = True
+            end = i + 1            # the block reaches at least this far
+            continue
+        if started:
+            break                  # once it has started, the next other line ends it
+        if not st or st.startswith(("#", "/*", "*")):
+            continue               # includes, pragmas and blanks still precede it
+        break                      # a declaration: there is no file comment
+    return end
+
+
+def _slugify_heading(text: str) -> str:
+    """A heading's MkDocs anchor: lowercased, punctuation dropped, spaces to hyphens."""
+    text = re.sub(r"[`*]", "", text).strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    return re.sub(r"[\s_]+", "-", text)
+
+
+def _xref_resolves_rule(rel: str, lines: list[str], out: list) -> None:
+    """Every `@xref{anchor}` names a heading that exists in this file.
+
+    The marker renders to a same-page `[label](#anchor)`. A renamed heading leaves the anchor
+    pointing at nothing, and the generator's final pass strips the dead link rather than failing,
+    so the cross-reference disappears with no warning. This is what makes that visible.
+
+    The name is matched LOOSELY and checked strictly, which is the whole point. The generator
+    resolves `[a-z0-9-]+`, so an underscore in a name is not a link at all: it survives Doxygen
+    untouched and the reader sees a raw `@xref{...}` mid-sentence. Matching the same narrow class
+    here made the rule silent on exactly the names that cannot work, and it reported a clean run
+    over 21 of them. So anything `@xref{...}`-shaped is a claim to check.
+    """
+    headings = {_slugify_heading(m.group(1))
+                for ln in lines
+                for m in [re.match(r"\s*///\s*#{1,6}\s+(.+)$", ln)] if m}
+    for i, ln in enumerate(lines):
+        for m in re.finditer(r"@xref\{([^}|]+)(?:\\?\|[^}]*)?\}", ln):
+            anchor = m.group(1).strip()
+            if not re.fullmatch(r"[a-z0-9-]+", anchor):
+                out.append((f"{rel}::line {i + 1}",
+                            f"@xref{{{anchor}}} is not a heading slug, so it renders as raw text"))
+            elif anchor not in headings:
+                out.append((f"{rel}::line {i + 1}",
+                            f"@xref{{{anchor}}} names no heading in this file"))
+
+
+def _file_lead_rule(rel: str, lines: list[str], out: list) -> None:
+    """A header opens with `///`, so its generated page says what the file is for.
+
+    Two shapes qualify, because two kinds of header exist. A header of free functions or constants
+    leads with `@defgroup`. A single-class header leads with the class comment, which IS the file's
+    documentation and already generates the page's summary. Anything else, including the `//` block
+    four platform headers used to open with, generates nothing: Doxygen reads `//` as a note to the
+    next reader of the source, not as documentation.
+    """
+    for i, ln in enumerate(lines):
+        st = ln.strip()
+        if not st or st.startswith(("#", "/*", "*")):
+            continue
+        # A provenance marker is not the file's documentation: an SPDX tag is machine-read, and
+        # an `Author:` line credits where the code came from. Both sit above the real lead, so
+        # they are skipped rather than counted as one, and the `///` below them generates the page.
+        if st.startswith(("// SPDX-", "// Author:")):
+            continue
+        # The first comment in the file, whatever it is.
+        if st.startswith("///"):
+            return                      # a `///` lead: @defgroup or a class comment, both fine
+        if st.startswith("//"):
+            # A `//` block at the top is the file comment, which generates no page. That matters
+            # in a HEADER, whose lead IS its page's opening; an implementation file generates
+            # nothing either way, so there `//` is a note to the next reader and reads correctly.
+            # The lead still has to EXIST in both: a file that opens on code says nothing about
+            # itself to anyone. So only the spelling is a header's business.
+            if _generates_a_page(rel):
+                out.append((f"{rel}::line {i + 1}",
+                            "file opens with // : a header leads with /// so it generates a page"))
+            return
+        # Code before any comment: no lead at all. `namespace`, `using` and a forward declaration
+        # are not a file's documentation, so keep looking until something documented turns up.
+        if st.startswith(("namespace", "using", "extern")) or _FWD_DECL_RE.match(st):
+            continue
+        out.append((f"{rel}::line {i + 1}",
+                    "file lead missing: a header opens with /// saying what the file is for"))
+        return
+
+
+def _group_scope_rule(rel: str, lines: list[str], out: list) -> None:
+    """A `@defgroup` opens a scope with `@{`, and an unclosed one swallows the rest of the file.
+
+    Doxygen's member-group scope runs from `@{` to `@}`. Left open, every declaration after the
+    lead is absorbed into the group, so the generated page is silently reshaped: three headers
+    shipped that way in one sweep because nothing counted the pair. The close sits INSIDE the
+    namespace, just before it ends, which is where the majority of the tree already puts it and
+    what keeps group membership the same in every file.
+    """
+    if not _generates_a_page(rel):
+        return
+    opens = [i for i, l in enumerate(lines) if l.strip() == "/// @{"]
+    closes = [i for i, l in enumerate(lines) if l.strip() == "/// @}"]
+    if len(opens) == len(closes):
+        return
+    line = (opens[len(closes)] if len(opens) > len(closes) else closes[len(opens)]) + 1
+    which = "@{ with no @}" if len(opens) > len(closes) else "@} with no @{"
+    out.append((f"{rel}::line {line}",
+                f"unbalanced group scope: {which}, so the group runs past what it documents"))
+
+
+def _group_appendix_publishes_rule(rel: str, lines: list[str], out: list) -> None:
+    """A `@defgroup` scope actually contains the declarations it documents.
+
+    A group is a label rather than an entity, so it has no location of its own and `gen_api`
+    infers one from where its MEMBERS sit. A group holding no member resolves to no header, and
+    the whole page is skipped: the lead, the appendix and every heading go nowhere, with nothing
+    reported, because the header still LOOKS documented and the check that would notice only
+    fires on a page that exists.
+
+    The shape that loses it is a `@}` closing before the first declaration, so the brackets wrap
+    only the comment and the group holds nothing at all. Two headers shipped that way. The fix is
+    to close the group AFTER what it documents, which is what every publishing group already does.
+
+    The symptom is an appendix a reader can never reach, which is why this is checked from the
+    source shape rather than from a page that was never written.
+    """
+    if not _generates_a_page(rel):
+        return
+    opens = [i for i, l in enumerate(lines) if l.strip() == "/// @{"]
+    closes = [i for i, l in enumerate(lines) if l.strip() == "/// @}"]
+    if not opens or not closes:
+        return                          # the scope rule above reports an unbalanced pair
+    first_decl = next((i for i, l in enumerate(lines)
+                       if not l.strip().startswith(("///", "//", "#", "*", "/*"))
+                       and (_CLASS_RE.match(l.strip()) or l.strip().startswith("enum class")
+                            or _TOP_DECL_RE.match(l.strip()))), None)
+    if first_decl is None:
+        return                          # nothing to document either way
+    if closes[-1] < first_decl:
+        out.append((f"{rel}::line {closes[-1] + 1}",
+                    "group closes before it documents anything, so the page is never generated"))
+
+
+
+def _redundant_defgroup_rule(rel: str, lines: list[str], out: list) -> None:
+    """A single-class header leads with the class comment, not with a `@defgroup`.
+
+    Two lead shapes generate a page, and which one is right follows from what the header holds.
+    A header of free functions, constants or several peer types needs a `@defgroup`, because no
+    one declaration speaks for the file. A header declaring ONE type has that type's comment as
+    its page already, so a group around it is a second lead saying the same thing in a second
+    place: the generated page then carries the group's summary and the class's, and an editor has
+    two homes to keep in step.
+
+    Counting what is top-level is the whole rule, and four shapes each defeated a naive count:
+
+    - `template <class T>` above a class is PART of that class, not a free declaration. Read as
+      one, every single-class template header was permanently exempt, which is the rule's own
+      headline case.
+    - A brace on its own line, Allman style, belongs to the declaration above it. Counted where
+      it sits, a class after `namespace mm` + `{` read as nested and vanished.
+    - A brace inside a string literal is text. `const char* s = "{";` raised the depth forever,
+      so every later declaration read as nested.
+    - `namespace a { namespace b {` is one line opening two scopes, so skipping the whole line
+      let its contents read as top-level.
+
+    Nested types do not count either, being implementation detail rather than anything the page
+    documents.
+    """
+    if not _generates_a_page(rel):
+        return                          # a .cpp generates no page, so it has no lead to shape
+    grp = next((i for i, l in enumerate(lines) if l.strip().startswith("/// @defgroup")), None)
+    if grp is None:
+        return
+    depth = 0
+    top_level_types = 0
+    others = 0
+    pending_template = False
+    ns_debt = 0                         # namespace braces still to arrive, Allman style
+    for ln in lines:
+        st = ln.strip()
+        if st.startswith(("//", "/*", "*", "#")):
+            continue
+        # A string literal's braces are text, so they are removed before any brace is counted.
+        bare = _STRING_LIT_RE.sub("", ln)
+        if depth == 0:
+            if _CLASS_RE.match(st):
+                top_level_types += 1
+                pending_template = False
+            elif st.startswith("template"):
+                # Whether it introduces a type or a free function is decided by the NEXT
+                # declaration, so it is held rather than counted here.
+                pending_template = True
+            elif st.startswith("enum class"):
+                others += 1
+            elif _TOP_DECL_RE.match(st):
+                others += 1             # a free function or constant, template or not
+                pending_template = False
+        # A namespace is not what nests a type, so its own braces do not count. A line may open
+        # two (`namespace a { namespace b {`), and one may open on the NEXT line, so the count
+        # is by keyword rather than by line: each `namespace` seen owes one brace to skip.
+        opens = bare.count("{")
+        closes = bare.count("}")
+        ns_open = len(re.findall(r"\bnamespace\b", bare))
+        if ns_open:
+            skipped = min(ns_open, opens)
+            opens -= skipped
+            ns_debt += ns_open - skipped
+        elif ns_debt and opens:
+            take = min(ns_debt, opens)   # an Allman namespace brace, landing a line later
+            opens -= take
+            ns_debt -= take
+        depth += opens - closes
+        depth = max(depth, 0)
+    if top_level_types == 1 and others == 0:
+        out.append((f"{rel}::line {grp + 1}",
+                    "@defgroup on a single-class header: the class comment is already the page's lead"))
+
+
+def _moreinfo_placement_rule(rel: str, lines: list[str], out: list) -> None:
+    """`@moreinfo` is an appendix, and only a lead carries one.
+
+    The file lead and each class or struct comment may have one; a member may not, because a member
+    gets a single line and the generated page shows that line as its summary. An `@moreinfo` on a
+    member is depth in the wrong place, and relaxing the member budget to allow it put a four-line
+    block on every function in a swept header.
+    """
+    for start, end, nxt in _doc_runs(lines):
+        if not any("@moreinfo" in lines[k] for k in range(start, end)):
+            continue
+        if any("@defgroup" in lines[k] for k in range(start, end)):
+            continue                    # the file lead
+        if _CLASS_RE.match(nxt):
+            continue                    # a class or struct comment
+        out.append((f"{rel}::{_declared_key(nxt, start)}",
+                    "@moreinfo on a member: the appendix belongs on the file or class lead"))
+
+
 def _header_rules(rel: str, text: str):
     """The comment budget, on one header.
 
-    Six rules, all counted rather than judged: a class comment of at most ten lines, an
-    `@moreinfo` appendix of at most twenty, ONE line for any other `///`, twenty words on
-    a comment line, ONE line for a `//` run, and a `///` on every public member. The first five cut;
-    the last adds, and they are meant to pull against each other: the result is a short line
-    on everything rather than an essay on a few things.
+    Counted rather than judged, so the constants at the top of this file ARE the rules and
+    this docstring names no number of its own. A class comment and each `@moreinfo` `## `
+    section have a line budget; any other `///` run has one line; a sentence has a word
+    budget; a `//` run has one line in a header and an essay's worth in a `.cpp`; and every
+    public member of a header carries a `///`. The budgets cut and the last one adds, pulling
+    against each other so the result is a short line on everything rather than an essay on a
+    few things.
 
-    `//` and `///` carry the same one-line budget, because without that the `///` cap moves
+    A file also opens with `///`, `@moreinfo` sits only on a lead, and every `@xref` resolves
+    to a heading in its own file.
+
+    `//` carries the same budget as `///` IN A HEADER, because without that the `///` cap moves
     text rather than removing it: a fifty-line member comment re-spelled as `//` satisfies
-    every other rule and leaves the file exactly as long. Past one line the reasoning belongs
-    after `@moreinfo` or on the module's page.
+    every other rule and leaves the file exactly as long. An implementation file generates no
+    page, so there the line count catches an essay rather than policing a page's shape.
     """
     out = []
     lines = text.split("\n")
@@ -465,12 +831,12 @@ def _header_rules(rel: str, text: str):
                                     f"doc sentence {len(sentence.split())} words > {MAX_DOC_WORDS}"))
                 # The no-wrap rule binds here too: the file lead is the longest block in the
                 # tree, so exempting it exempted the prose most likely to be wrapped.
-                out += _wrap_rule(rel, lines, k, end)
+                out += _wrap_rule(rel, lines, k, end, start)
             continue
         if _CLASS_RE.match(nxt):
             # The LEAD only: the run ends at @moreinfo, whose own lines are the appendix and
-            # are measured against MAX_MOREINFO below. Counting both here would put the
-            # documented budget (10 lead + 20 appendix) out of reach of any header.
+            # are measured per section below. Counting both here would put the documented
+            # budget (10 lead, then 10 per appendix section) out of reach of any header.
             head = next((k for k in range(start, end) if "@moreinfo" in lines[k]), end)
             n = head - start
             if n > MAX_CLASS_DOC:
@@ -492,24 +858,81 @@ def _header_rules(rel: str, text: str):
                 if words > MAX_DOC_WORDS:
                     out.append((f"{rel}::line {k + 1}",
                                 f"doc sentence {words} words > {MAX_DOC_WORDS}"))
-            out += _wrap_rule(rel, lines, k, end)
+            out += _wrap_rule(rel, lines, k, end, start)
 
+    # A file OPENS with `///`, so the generated page says what the file is for. The lead is a
+    # `@defgroup` block in a header of free functions, or the class comment in a single-class
+    # header, where the class IS the file. Without one the page is a bare member list: 222 headers
+    # were in that state, and four of the six platform headers opened with `//`, which Doxygen
+    # drops entirely.
+    _file_lead_rule(rel, lines, out)
+
+    # An unclosed `@{` reshapes the page silently, so the pair is counted.
+    _group_scope_rule(rel, lines, out)
+
+    # A group that resolves to no single header generates no page at all, appendix included.
+    _group_appendix_publishes_rule(rel, lines, out)
+
+    # Which lead shape is right follows from what the header holds: a `@defgroup` gathers free
+    # declarations or peer types, where a lone class already IS the page and needs no second lead.
+    _redundant_defgroup_rule(rel, lines, out)
+
+    # `@moreinfo` is an APPENDIX, and a page has one per documented entity: the file lead and each
+    # class or struct comment. A member gets one line (MAX_MEMBER_DOC), so an `@moreinfo` on one is
+    # depth in the wrong place: it belongs in the file lead's appendix or on the module's page.
+    _moreinfo_placement_rule(rel, lines, out)
+
+    # An `@xref{anchor}` names a heading on the SAME generated page. When the heading is renamed
+    # the link resolves to nothing, and `_strip_unresolved_anchor_links` drops it silently: the
+    # reader loses the cross-reference and no build says so. Checking it here is what makes the
+    # rename visible. The reverse (every section must be referenced) is NOT a rule: a `@moreinfo`
+    # section is an appendix a reader scrolls to, and 101 headers carry one that nothing links.
+    _xref_resolves_rule(rel, lines, out)
+
+    # PER SECTION, not per appendix. A whole-appendix cap punishes a file for having several
+    # distinct topics, and the cheapest way to satisfy it is to delete a section rather than
+    # tighten the prose. Capping each `## ` section instead asks every one of them to be
+    # disciplined and lets a file carry as many as it genuinely has: the platform implementations
+    # each hold a handful of separately-diagnosed findings (a clock-divisor window, a latch-versus-
+    # data fault, a ring's competing axes) that one shared budget could only force out of the tree.
     for i, ln in enumerate(lines):
-        if "@moreinfo" in ln:
-            n = 0
-            for m in lines[i + 1:]:
-                if not m.lstrip().startswith("///"):
-                    break
-                n += 1
-            if n > MAX_MOREINFO:
-                out.append((f"{rel}::@moreinfo", f"appendix {n} lines > {MAX_MOREINFO}"))
+        if "@moreinfo" not in ln:
+            continue
+        section, count, fenced = "(lead)", 0, False
+        for m in lines[i + 1:]:
+            if not m.lstrip().startswith("///"):
+                break
+            text = re.sub(r"^\s*///\s?", "", m).strip()
+            # A fenced block is structure rather than prose, the same exemption the no-wrap rule
+            # makes: a protocol listing or a table is as long as the thing it describes, and
+            # counting its lines asks the author to delete wire format to fit a prose budget.
+            if text.startswith("```"):
+                fenced = not fenced
+                continue
+            if fenced:
+                continue
+            if text.startswith("## "):
+                if count > MAX_MOREINFO_SECTION:
+                    out.append((f"{rel}::@moreinfo {section}",
+                                f"appendix section {count} lines > {MAX_MOREINFO_SECTION}"))
+                section, count = text[3:].strip(), 0
+            elif text:
+                count += 1
+        if count > MAX_MOREINFO_SECTION:
+            out.append((f"{rel}::@moreinfo {section}",
+                        f"appendix section {count} lines > {MAX_MOREINFO_SECTION}"))
 
-    # `//` carries the SAME one-line budget as `///`, or the `///` cap only MOVES text:
+    # `//` carries the same budget as `///` in a HEADER, or the `///` cap only MOVES text:
     # re-spelling a fifty-line member comment as `//` satisfies every other rule and leaves the
     # file the same length, which is what a first pass through these headers produced.
-    # File-level `//` (above the first class, explaining the compilation unit) is exempt: it is
-    # the non-Doxygen sibling of the class comment, and has no member to sit beside.
-    first_class = next((i for i, ln in enumerate(lines) if _CLASS_RE.match(ln.strip())), len(lines))
+    # An implementation file has no page to protect, so it gets the essay limit instead.
+    #
+    # The file comment is exempt: the non-Doxygen sibling of the class comment, with no member to
+    # sit beside. That is the ONE block at the top, before anything is declared, and it used to be
+    # spelled "above the first class". In a header of free functions the first class can be 250
+    # lines down (MoonLiveBuiltins_light.h) or absent, which exempted every comment in the file:
+    # 1002 runs across 149 files, each sitting on the declaration it documents.
+    file_comment_end = _file_comment_end(lines)
     i = 0
     while i < len(lines):
         st = lines[i].strip()
@@ -518,10 +941,11 @@ def _header_rules(rel: str, text: str):
             while j < len(lines) and lines[j].strip().startswith("//") \
                     and not lines[j].strip().startswith("///"):
                 j += 1
-            if j - i > MAX_CODE_COMMENT and i > first_class:
+            cap = MAX_CODE_COMMENT if _generates_a_page(rel) else MAX_CODE_COMMENT_CPP
+            if j - i > cap and i >= file_comment_end:
                 nxt = next((lines[k].strip() for k in range(j, len(lines)) if lines[k].strip()), "")
                 out.append((f"{rel}::{_declared_key(nxt, i) if nxt else f'line {i + 1}'}",
-                            f"code comment {j - i} lines > {MAX_CODE_COMMENT}"))
+                            f"code comment {j - i} lines > {cap}"))
             # The same word budget as a `///` line, and for the same reason: one line is a
             # sentence, not a paragraph that happens to lack line breaks.
             for k in range(i, j):
@@ -548,28 +972,50 @@ def _header_rules(rel: str, text: str):
     # class that contained it, and closing the struct then read as closing the class, so
     # every public member after one escaped this check entirely (a class with a nested
     # type reported nothing at all).
-    frames = []                                  # (body_depth, public) per open class/struct
+    # LOCAL types are exempt for the reason the private ones are: a struct declared inside a
+    # METHOD body is unnameable outside it and reaches no generated page, so asking it for a
+    # `///` documents a line no reader sees. The depth says which is which: a type declared in
+    # a class body opens one level below it, one declared in a method opens two or more,
+    # because the method's own `{` sits between them.
+    frames = []                                  # (body_depth, public, local) per open class/struct
     public = False
     depth = 0
     class_depth = None
+    in_local = False
+    # The depth a FREE function's body opens at, or None outside one. `frames` is empty there,
+    # so the depth test below has nothing to compare against and a struct inside `void f() { … }`
+    # read as a public member, though it is as unnameable as one inside a method.
+    fn_depth = None
     for i, ln in enumerate(lines):
         st = ln.strip()
         opens, closes = ln.count("{"), ln.count("}")
         before = depth
         depth += opens - closes
+        if fn_depth is not None and depth < fn_depth:
+            fn_depth = None                      # the function body closed
+        if (not frames and fn_depth is None and opens and not _CLASS_RE.match(st)
+                and not st.startswith(("namespace", "extern", "//", "/*", "*", "#"))
+                and "(" in st):
+            fn_depth = before + 1                # a free function's body opens here
         if _CLASS_RE.match(st) and opens:
             # A NESTED struct inherits the enclosing access: one declared after `private:` is
             # private however it is spelled, and demanding a `///` on its fields asked a file to
             # document what no reader of the generated page can see. Only a top-level struct
             # (nothing open above it) starts public.
             nested = bool(frames)
-            frames.append((before + 1, public))
+            # Below the enclosing class body rather than directly in it: a method's body
+            # intervenes, so this type is local to that method and reaches no reader.
+            local = (bool(frames) and (before + 1 > frames[-1][0] + 1 or frames[-1][2])) \
+                or (fn_depth is not None and before >= fn_depth)
+            frames.append((before + 1, public, local))
             class_depth = before + 1
             public = st.startswith("struct") and not (nested and not public)
+            in_local = local
             continue
         while frames and depth < frames[-1][0]:
-            _, public = frames.pop()             # this body closed; the enclosing one resumes
+            _, public, _ = frames.pop()          # this body closed; the enclosing one resumes
             class_depth = frames[-1][0] if frames else None
+            in_local = frames[-1][2] if frames else False
         if st.startswith("public:"):
             public = True
             continue
@@ -581,14 +1027,28 @@ def _header_rules(rel: str, text: str):
         # `before` is the depth the line STARTS at: a member sits exactly in the body.
         # `friend` grants access to another type; it declares no member and reaches no
         # generated page, so asking it for a `///` documents a line no reader sees.
-        if before != class_depth or st.startswith(("return", "if", "for", "while", "}", "friend ")):
+        if (before != class_depth or in_local
+                or st.startswith(("return", "if", "for", "while", "}", "friend "))):
             continue
-        prev = lines[i - 1].lstrip() if i else ""
+        # Past a `template <...>` line: doxygen attaches a comment to the declaration, and the
+        # template header sits between the two. Reading only the line above asked a templated
+        # member for a `///` it already had, and the answer was a second one wedged below the
+        # template header, which doxygen drops and a reader sees twice.
+        j = i - 1
+        while j >= 0 and lines[j].lstrip().startswith("template"):
+            j -= 1
+        prev = lines[j].lstrip() if j >= 0 else ""
         if prev.startswith("///") or "///" in ln:
             continue
-        if _FUNC_RE.match(st) or _SPECIAL_FUNC_RE.match(st):
+        if (_FUNC_RE.match(st) or _SPECIAL_FUNC_RE.match(st)) and _generates_a_page(rel):
+            # In a `.cpp` this matched the constructor or destructor of a file-local RAII struct:
+            # `~WinsockInit`, `Lock`, `ParkGuard`. None is public API, and each is already explained
+            # by the struct's own comment above it.
             out.append((f"{rel}::{_declared_key(st, i)}", "public function has no ///"))
-        elif "(" not in st and _VAR_RE.match(st):
+        elif "(" not in st and _VAR_RE.match(st) and _generates_a_page(rel):
+            # "Public" here is the declaration's SHAPE, which cannot see `namespace {` or a
+            # function body. In a `.cpp` that matched fields of file-local structs and plain
+            # locals, naming `got`, `ok` and `cur` and asking a local variable for a doc comment.
             out.append((f"{rel}::{_declared_name(st, i)}", "public variable has no ///"))
     return out
 
@@ -628,10 +1088,16 @@ def _card_rules(rel: str, c: dict):
     return out
 
 
+# The domains that carry a generated moxygen tree. IMPORTED rather than restated: hard-coding
+# ("core", "light") here once left every page of a third domain reporting as unreachable, and a
+# copy kept in step by hand is only correct until someone moves. One tuple owns the answer.
+from gen_api import DOMAINS as _DOC_DOMAINS  # noqa: E402
+
+
 def _orphan_pages():
     """Generated pages nothing links to: a technical page a reader cannot reach.
 
-    Every `.h` under src/{core,light} gets a page, so a header nobody references from a
+    Every `.h` under a domain directory gets a page, so a header nobody references from a
     catalog card, another page, or another header's `///` is documentation that exists and
     is unreachable. The link may come from anywhere: a card's Detail line, a prose page, or
     a sibling header naming the file (the hook retargets a `.h` mention at its page).
@@ -647,16 +1113,56 @@ def _orphan_pages():
             continue
         for m in re.finditer(r"(?:(\w+)/)?moxygen/(\w+)\.md", md.read_text(errors="ignore")):
             # A relative link inside a domain omits it, so fall back to the linking page's own.
-            domain = m.group(1) or (md.parts[-2] if md.parts[-2] in ("core", "light") else None)
-            for d in ((domain,) if domain else ("core", "light")):
+            domain = m.group(1) or (md.parts[-2] if md.parts[-2] in _DOC_DOMAINS else None)
+            for d in ((domain,) if domain else _DOC_DOMAINS):
                 linked.add((d, m.group(2)))
-    for d in ("core", "light"):
+    for d in _DOC_DOMAINS:
         for h in (ROOT / "src" / d).rglob("*.h"):
             for m in re.finditer(r"\b(\w+)\.h\b", h.read_text(errors="ignore")):
                 if m.group(1) != h.stem:
                     linked.add((d, m.group(1)))
     return [(f"moonmodules/{domain}::{name}", "generated page nothing links to: unreachable")
             for domain, name in sorted(pages - linked)]
+
+
+def _duplicate_group_ids():
+    """Each `@defgroup` id is claimed by one header.
+
+    Doxygen MERGES two groups sharing an id, so one header's page absorbs the other's and the
+    loser vanishes from the site. It fails silently in both directions: the surviving page looks
+    complete and the missing one is simply absent, so only a reader looking for the second page
+    ever notices. A core parser and a light-domain one both named their group `PinList` and took
+    `drivers_PinList.md` off the site that way; the strict docs build caught it by the dangling
+    link alone, which is luck rather than a guarantee.
+
+    Cross-file by nature, so it sits here rather than in the per-header rules. An implementation
+    file counts too, even though it generates no page of its own: Doxygen reads it all the same,
+    so a `.cpp` re-declaring its header's group id merges into that page and is a conflict like
+    any other. A header and its own `.cpp` sharing an id is the common shape, and it is reported
+    against the `.cpp`, since the header is the one that owns the page.
+    """
+    seen: dict[str, list[str]] = {}
+    for rel in _headers():
+        s = str(rel)
+        for ln in (ROOT / rel).read_text().splitlines():
+            st = ln.strip()
+            if st.startswith("/// @defgroup"):
+                parts = st.split(None, 2)
+                if len(parts) >= 3:
+                    seen.setdefault(parts[2].split()[0], []).append(s)
+    out = []
+    for gid, files in sorted(seen.items()):
+        if len(files) < 2:
+            continue
+        # The header owns the page, so it is the one kept and the others are reported.
+        owner = min(files, key=lambda f: (not _generates_a_page(f), f))
+        for f in sorted(files):
+            if f == owner:
+                continue
+            out.append((f"{f}::@defgroup {gid}",
+                        f"@defgroup id `{gid}` is also claimed by {owner}, and Doxygen "
+                        "merges them, so one page absorbs the other"))
+    return out
 
 
 def _violations():
@@ -674,11 +1180,61 @@ def _violations():
 
     for rel in _headers():
         out.extend(_header_rules(str(rel), (ROOT / rel).read_text()))
+    out.extend(_duplicate_group_ids())
     out.extend(_orphan_pages())
     return out
 
 
 REPORT = ROOT / "docs" / "reference" / "metrics" / "docgen.md"
+
+
+# Which summary page owns a source folder, mirroring the zoom diagram in
+# documentation-standards.md. A sweep runs page by page, so the report groups by the same unit:
+# the question "how far is the sweep" is answered per area, not per file.
+#
+# Longest prefix wins, so `light/moonlive` beats `light`. A path matching nothing is "unassigned",
+# which is itself the finding: a header no summary page owns reaches no reader.
+DOC_AREAS = (
+    ("src/core/system",           "core/system.md"),
+    ("src/core/services",         "core/services.md"),
+    ("src/core/module",           "core/system.md"),
+    ("src/core/util",             "core/supporting.md"),
+    # The numeric vocabulary is the LIGHT domain's, whatever directory it sits in: effects and
+    # scripts write against it and the control surface never touches it. A directory prefix put
+    # five headers and 240 findings on the control page, where the sweep would have documented
+    # them under a heading no reader of that page is looking for. Longest prefix wins, so these
+    # file-level entries override the `src/core/util` line above.
+    ("src/core/util/math16.h",      "light/power-functions.md"),
+    ("src/core/util/math8.h",       "light/power-functions.md"),
+    ("src/core/util/noise.h",       "light/power-functions.md"),
+    ("src/core/util/oscillators.h", "light/power-functions.md"),
+    ("src/core/util/color.h",       "light/power-functions.md"),
+    ("src/core/moonlive",         "light/moonlive.md"),
+    ("src/light/moonlive",        "light/moonlive.md"),
+    ("src/light/effects",         "light/effects.md"),
+    ("src/light/layouts",         "light/layouts.md"),
+    ("src/light/modifiers",       "light/modifiers.md"),
+    ("src/light/drivers",         "light/drivers.md"),
+    ("src/light/powerfunctions",  "light/power-functions.md"),
+    ("src/light/layers",          "light/supporting.md"),
+    ("src/light/util",            "light/supporting.md"),
+    ("src/ui",                    "core/ui.md"),
+    ("src/platform",              "platform/index.md"),
+)
+
+
+def _doc_area(path: str) -> str:
+    """The summary page that owns `path`, or a bucket for what no page covers."""
+    best = ""
+    area = ""
+    for prefix, page in DOC_AREAS:
+        if path.startswith(prefix) and len(prefix) > len(best):
+            best, area = prefix, page
+    if area:
+        return area
+    if path.startswith("test/"):
+        return "(tests, no card)"
+    return "(unassigned)"
 
 
 def _write_report(found) -> None:
@@ -693,7 +1249,11 @@ def _write_report(found) -> None:
     for key, why in found:
         page, _, title = key.partition("::")
         by_page[page].append((title, why))
+    errs = [f for f in found if _blocks(f[0])]
+    warns = [f for f in found if not _blocks(f[0])]
     rules = Counter(_rule_name(why) for _, why in found)
+    rules_e = Counter(_rule_name(why) for _, why in errs)
+    rules_w = Counter(_rule_name(why) for _, why in warns)
 
     out = ["# Docgen", "",
            "Generated by [`moondeck/check/check_docgen.py`](../../../moondeck/check/check_docgen.py) "
@@ -701,24 +1261,93 @@ def _write_report(found) -> None:
            "Every place the generated documentation breaks the shape [the standards]"
            "(../../contributing/documentation-standards.md#the-card) define. Current state only: "
            "the trend is this file's git history. The list only shrinks.", "",
-           f"**{len(found)} finding(s)** across {len(by_page)} page(s).", "",
-           "## By rule", "", "| Rule | Count |", "|---|---:|"]
-    for rule, n in rules.most_common():
-        out.append(f"| {rule} | {n} |")
+           f"**{len(errs)} error(s)** and **{len(warns)} warning(s)** "
+           f"across {len(by_page)} page(s).", "",
+           "An error is in a file that generates a documentation page, a header or a catalog page, "
+           "so the finding is a defect in what gets published and it fails the gate. A warning is "
+           "in an implementation file, which publishes nothing: its comments are a note to the "
+           "next reader, worth fixing without being worth stopping a commit for. Both are counted "
+           "here, because a warning nobody sees is a warning nobody fixes.", "",
+           "The split is temporary. It stages the sweep rather than ranking the two kinds of "
+           "comment, so when the warning column reaches zero it goes and every finding blocks.", "",
+           "## By rule", "", "| Rule | Errors | Warnings |", "|---|---:|---:|"]
+    # Errors first, since that is the number a gate turns on: a rule with more warnings than
+    # errors would otherwise outrank the one actually blocking the commit.
+    for rule in sorted(rules, key=lambda r: (-rules_e.get(r, 0), -rules_w.get(r, 0), r)):
+        out.append(f"| {_rule_label(rule)} | {rules_e.get(rule, 0)} | {rules_w.get(rule, 0)} |")
+    # By the unit a sweep actually runs in: one summary page and the headers it owns.
+    areas = defaultdict(int)
+    areas_e = defaultdict(int)
+    areas_w = defaultdict(int)
+    for page, items in by_page.items():
+        if page.endswith(".md"):
+            continue
+        area = _doc_area(page)
+        areas[area] += len(items)
+        blocks = _generates_a_page(page)
+        (areas_e if blocks else areas_w)[area] += len(items)
+    if areas:
+        out += ["", "## By documentation area", "",
+                "The unit a sweep runs in: one summary page and the headers it owns, as the "
+                "[hierarchy zoom](../../contributing/documentation-standards.md"
+                "#zooming-in-on-the-green-boxes) lays them out. A page is swept when its errors "
+                "reach zero; its warnings say how much implementation-file cleanup is left "
+                "behind that.", "",
+                "| Summary page | Errors | Warnings |", "|---|---:|---:|"]
+        for area in sorted(areas, key=lambda a: (-areas_e[a], -areas[a], a)):
+            out.append(f"| `{area}` | {areas_e[area]} | {areas_w[area]} |")
     cards = {k: v for k, v in by_page.items() if k.endswith(".md")}
     headers = {k: v for k, v in by_page.items() if not k.endswith(".md")}
-    for title, group in (("Catalog pages", cards), ("Headers", headers)):
-        if not group:
-            continue
-        out += ["", f"## {title}", "", "| File | Findings |", "|---|---:|"]
-        for page in sorted(group, key=lambda k: (-len(group[k]), k)):
-            out.append(f"| `{page}` | {len(group[page])} |")
-    out += ["", "## Every finding", ""]
-    for page in sorted(by_page):
-        out += [f"### {page}", ""]
-        for title, why in sorted(by_page[page]):
-            out.append(f"- **{title}**: {why}")
-        out.append("")
+    if cards:
+        out += ["", "## Catalog pages", "", "| File | Findings |", "|---|---:|"]
+        for page in sorted(cards, key=lambda k: (-len(cards[k]), k)):
+            out.append(f"| `{page}` | {len(cards[page])} |")
+
+    # PER AREA, because the area is the unit a sweep runs in and the question a reader has is
+    # "what would I open first". A flat list of 300 files answered that only by being read whole,
+    # and the per-finding dump under it was 90% of a 4,200-line page: a log rather than a report.
+    # Each area gets its own files ranked, a tail line for the long thin end, and its rule mix.
+    # What a single finding says is what the check PRINTS; this page is where the work is planned.
+    out += ["", "## Where the work is", "",
+            "Per area, since that is the unit a sweep runs in: the files ranked, then the rule mix. "
+            "A file's own findings are in the check's output, which names every one.", ""]
+    per_area = defaultdict(dict)
+    for page, items in headers.items():
+        per_area[_doc_area(page)][page] = items
+    for area in sorted(per_area, key=lambda a: (-sum(len(v) for v in per_area[a].values()), a)):
+        files = per_area[area]
+        total = sum(len(v) for v in files.values())
+        # Ranked WITHIN each kind, and each kind gets its own head, so the biggest warning file
+        # cannot be buried in the tail behind ten smaller errors. An 88-finding implementation
+        # file is worth seeing even though it does not block.
+        errs_a = sum(len(v) for k, v in files.items() if _generates_a_page(k))
+        out += [f"### {area}", "",
+                f"**{errs_a} error(s)** and **{total - errs_a} warning(s)** "
+                f"across {len(files)} file(s).", "",
+                "| Findings | File | |", "|---:|---|---|"]
+        HEAD = 10
+        for kind, blocking in (("error", True), ("warning", False)):
+            group = sorted((k for k in files if _generates_a_page(k) == blocking),
+                           key=lambda k: (-len(files[k]), k))
+            for page in group[:HEAD]:
+                out.append(f"| {len(files[page])} | `{page}` | {kind} |")
+            tail = group[HEAD:]
+            if tail:
+                n = sum(len(files[p]) for p in tail)
+                lo, hi = min(len(files[p]) for p in tail), max(len(files[p]) for p in tail)
+                span = f"{lo}" if lo == hi else f"{lo}-{hi}"
+                out.append(f"| {span} each | *{len(tail)} more {kind} files, {n} findings* | |")
+        mix = Counter(_rule_name(why) for k, v in files.items()
+                      if _generates_a_page(k) for _, why in v)
+        mix_w = Counter(_rule_name(why) for k, v in files.items()
+                        if not _generates_a_page(k) for _, why in v)
+        out += [""]
+        if mix:
+            out += ["By rule, errors: "
+                    + ", ".join(f"{n} {_rule_label(r)}" for r, n in mix.most_common()) + ".", ""]
+        if mix_w:
+            out += ["By rule, warnings: "
+                    + ", ".join(f"{n} {_rule_label(r)}" for r, n in mix_w.most_common()) + ".", ""]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text("\n".join(out) + "\n")
     print(f"Docgen report: {len(found)} finding(s) written to {REPORT.relative_to(ROOT)}")
@@ -755,6 +1384,9 @@ def main() -> int:
         _write_report(found)
         return 0
 
+    errors = [f for f in found if _blocks(f[0])]
+    warnings = [f for f in found if not _blocks(f[0])]
+
     if not found:
         print(f"Docgen check: clean. Limits: description {MAX_DESC} "
               f"({MAX_DESC_VISUAL} visual), one control {MAX_CONTROL} "
@@ -762,13 +1394,19 @@ def main() -> int:
               f"{MAX_DOC_WORDS} words.")
         return 0
 
-    print(f"Docgen check: {len(found)} finding(s).\n")
-    _report(found, "Every finding. There is no tolerated list: these are the limits.")
+    print(f"Docgen check: {len(errors)} error(s), {len(warnings)} warning(s).\n")
+    if errors:
+        _report(errors, "ERRORS, in files that generate a page. These fail the gate.")
+    if warnings:
+        if errors:
+            print()
+        _report(warnings, "WARNINGS, in files that generate no page. Worth fixing, "
+                          "not worth blocking a commit.")
     print("\nMove the overflow, do not trim it: module behavior into the header's ///"
           "\n(the technical page the card links), cross-module rationale into a"
           "\n`## <Name>, details` section on the same page."
           "\nRules: docs/contributing/documentation-standards.md § The card.")
-    return 1
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

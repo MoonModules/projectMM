@@ -1,15 +1,15 @@
-// I2C bus diagnostics — the platform::i2cScan seam (declared in platform.h).
-// Domain-neutral: probes any I2C bus and reports which addresses ACK, the
-// standard `i2cdetect` operation. The I2cScanModule (src/core/I2cScanModule.h)
-// surfaces it; any I2C bring-up (a codec, a sensor) uses it to confirm wiring.
-//
-// Self-contained: opens a temporary master bus on the given pins, probes every
-// 7-bit address, tears the bus down. It does not hold a bus another driver owns
-// (the ES8311 codec owns its own bus in platform_esp32_es8311.cpp) — the scan
-// is a momentary diagnostic, so it allocates and frees its bus per call.
-//
-// Gated on SOC_I2C_SUPPORTED with an inert stub otherwise, so any I2C-less
-// target links (the module then reports "no I2C on this target").
+/// @defgroup platform_esp32_i2c I2C bus diagnostics
+/// The scan seam: probe any bus and report which addresses answer, the standard i2cdetect operation.
+///
+/// Domain-neutral, so any bring-up of a codec or a sensor uses it to confirm wiring.
+///
+/// @moreinfo
+///
+/// ## Self-contained, and momentary
+///
+/// It opens a temporary master bus on the given pins, probes every address and tears the bus down.
+/// So it never holds a bus another driver owns, and it allocates and frees per call.
+/// An inert stub elsewhere, so a target without the peripheral still links and reports as much.
 
 #include "platform/platform.h"
 

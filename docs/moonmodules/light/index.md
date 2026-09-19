@@ -10,8 +10,7 @@ Each page is a catalog: one block per module, with its preview, what it does, an
 | [Layouts](layouts.md) | Where the lights are: a grid, a ring, a spiral, a shape you wired yourself |
 | [Modifiers](modifiers.md) | Reshaping the result: mirror, rotate, swap axes |
 | [Drivers](drivers.md) | Getting it out: LED strips, Art-Net, DMX, a panel card, the browser preview |
-| [MoonLive](MoonLiveEffect.md) | Writing any of the above as a script on a running device, no reflash |
-| [Writing scripts](writing-scripts.md) | The script language itself, and the library that ships with it |
+| [MoonLive](moonlive.md) | The script language, and the library that ships with it |
 | [Power functions](power-functions.md) | The shared drawing, field and motion routines every effect composes from |
 | [Supporting](supporting.md) | The pieces the four above are built on |
 

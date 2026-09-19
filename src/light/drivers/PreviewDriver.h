@@ -367,6 +367,7 @@ public:
         return broadcaster_->sendBufferedFrame(header, sizeof(header), staging_, aim.at);
     }
 
+    /// Stream one color frame, gathered into staging in the coord table's order.
     bool sendFrame() {
         if (!broadcaster_ || !sourceBuffer_ || !sourceBuffer_->data() || coordCount_ == 0) return false;
         const uint8_t* src = sourceBuffer_->data();

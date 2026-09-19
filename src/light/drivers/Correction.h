@@ -9,10 +9,16 @@
 
 namespace mm {
 
-// A light's wire format is a ChannelRole array, resolved from the preset library into this
-// Correction at rebuild time. The curated orders are seeded rows there, not an enum here.
+/// @defgroup Correction The per-light output transform
+/// @{
+/// Brightness, channel reorder and white derivation, resolved once and applied per channel.
+///
+/// @moreinfo
+///
+/// A light's wire format is a `ChannelRole` array, resolved from the preset library into a `Correction` at rebuild time.
+/// The curated orders are seeded rows in that library rather than an enum here.
 
-// More than one algorithm is accepted, so white derivation is a mode rather than a formula.
+/// More than one algorithm is accepted, so white derivation is a mode rather than a formula.
 enum class WhiteMode : uint8_t { None, Min, Accurate };
 
 inline constexpr const char* kWhiteModeOptions[] = {"None", "Min", "Accurate"};
@@ -20,8 +26,7 @@ inline constexpr uint8_t kWhiteModeCount =
     sizeof(kWhiteModeOptions) / sizeof(kWhiteModeOptions[0]);
 
 
-// The per-light output transform: brightness, channel reorder and white derivation. The offsets
-// are derived cold from the role array, so the hot path stays an indexed store per channel.
+/// The transform itself, its offsets derived cold from the role array so the hot path stays an indexed store per channel.
 struct Correction {
     /// Marks a role this light does not carry.
     static constexpr uint8_t kAbsent = 255;   // color role not carried by this light
@@ -173,4 +178,5 @@ struct Correction {
     }
 };
 
+/// @}
 } // namespace mm

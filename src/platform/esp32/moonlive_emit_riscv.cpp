@@ -3,15 +3,11 @@
 
 #include <cstring>
 
-// MoonLive RISC-V emit (ESP32-P4 / S31, RV32): the fill routines as native machine code for this ISA. The engine copies the bytes
-// into IRAM (platform::writeExec) and calls them through FillFn / AnimFn, which is the path the
-// bench run validates: native code we generated, executing in the render tick, writing the buffer.
-//
-//   void fill(uint8_t* buf, uint32_t nLights, uint8_t cpl[, uint32_t t])
-//   for (i=0; i<nLights; i++) { buf[i*cpl+0]=r; buf[i*cpl+1]=g; buf[i*cpl+2]=b; }
-//
-// One ISA per file, self-guarding, matching the assembler beside it: the file is always compiled
-// and its body disappears on a target this is not.
+/// @defgroup moonlive_emit_riscv MoonLive RISC-V fill routines
+/// The fill routines as native machine code for the P4 and S31.
+///
+/// The engine copies the bytes into instruction RAM and calls them through a function pointer, which is the path a bench run validates.
+/// One instruction set per file, self-guarding: the file is always compiled and its body disappears elsewhere.
 //
 // Every byte array below is the VERBATIM assembler output (objcopy'd from .text), never
 // hand-transcribed from a disassembly: a hand-grouped Xtensa byte once caused a StoreProhibited
@@ -21,12 +17,9 @@ namespace mm::moonlive {
 
 #if defined(__riscv)
 
-// --- RISC-V (RV32IMC: ESP32-P4) ------------------------------------------------------
-// Little-endian, fixed 4-byte instructions (assembled with .option norvc so there are no
-// 2-byte compressed forms — uniform words, simple patching). Standard RV calling convention:
-// a0=buf, a1=nLights, a2=cpl, a3=t; `ret` (jalr x0, ra, 0) returns. The color `li`s sit at
-// fixed WORD indices; a li's 12-bit immediate is bits [31:20], so patch is base | (imm<<20)
-// with a zero-immediate base. Verbatim from riscv32-esp-elf-as (objcopy of .text).
+// Little-endian with fixed-width instructions, assembled without the compressed forms so every word is uniform and patching is simple.
+// The standard calling convention, and the color loads sit at fixed word indices whose immediate occupies the top bits, so a patch is the base combined with the shifted value.
+// Taken verbatim from the assembler's own output.
 
 // Disassembly (word index : instruction):
 //   0: beqz a1,.done   1: li t0,0(off)  2: li t1,0(i)  3: li t2,R  4: li t3,G  5: li t4,B

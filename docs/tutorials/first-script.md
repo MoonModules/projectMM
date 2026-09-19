@@ -2,7 +2,7 @@
 
 An effect you write yourself, typed into the browser, running as native machine code on the device seconds later. No toolchain, no rebuild, no reflash, and no reboot.
 
-This is [MoonLive](../moonmodules/light/MoonLiveEffect.md). The reference for the language is [Writing scripts](../moonmodules/light/writing-scripts.md); what follows is the shortest path to seeing your own code drive real lights.
+This is MoonLive. The reference for the language is [MoonLive](../moonmodules/light/moonlive.md), and what follows is the shortest path to seeing your own code drive real lights.
 
 You need a device with lights or the 3D preview, and [a light show already running](first-light-show.md) so there is something to replace.
 
@@ -107,6 +107,5 @@ A working effect, written in a browser, running compiled on the device. It survi
 
 Where to go next:
 
-- **[Writing scripts](../moonmodules/light/writing-scripts.md)** is the language: every function, the types, and the shipped library to read.
-- **[MoonLive](../moonmodules/light/MoonLiveEffect.md)** covers the same engine writing layouts and modifiers, not only effects.
+- **[MoonLive](../moonmodules/light/moonlive.md)** is the language: every function, the types, and the shipped library to read. The same engine writes layouts and modifiers, not only effects.
 - **[Making beautiful effects](generative-effects.md)** is the ideas half: what to write once you can write anything.

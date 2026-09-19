@@ -98,15 +98,20 @@ def main() -> int:
             return 1
 
     parts = [
-        "// Auto-generated from moonlive/ by catalog_scripts.cmake. Do not edit; rebuild to update.\n",
-        "//\n",
-        "// The CATALOG, not the library: names only. A device carries this list and the UI fetches a\n",
-        "// script's text from GitHub the first time someone picks it, so flash scales with how many\n",
-        "// scripts exist rather than how large they are, and the filesystem holds only what is used.\n",
-        "//\n",
-        "// One array per role: the folder a script lives in is implied by its role and the role by its\n",
-        "// extension, so neither is stored per entry.\n",
-        "#pragma once\n",
+        "#pragma once\n\n",
+        "/// @defgroup script_catalog The factory script catalog\n",
+        "/// @{\n",
+        "/// The names of every script a device knows about.\n",
+        "///\n",
+        "/// Generated from `moonlive/` by `catalog_scripts.cmake`: do not edit, rebuild to update.\n",
+        "///\n",
+        "/// @moreinfo\n",
+        "///\n",
+        "/// This is the catalog rather than the library: names only.\n",
+        "/// A device carries the list, and the UI fetches a script's text from GitHub the first time someone picks it.\n",
+        "/// Flash therefore scales with how many scripts exist rather than how large they are, and the filesystem holds only what is used.\n",
+        "///\n",
+        "/// There is one array per role, because the folder a script lives in is implied by its role and the role by its extension, so neither is stored per entry.\n",
         "#include <cstddef>\n\n",
         "namespace mm::moonlive {\n\n",
     ]
@@ -114,8 +119,7 @@ def main() -> int:
     for role, names in by_role.items():
         lower = role.lower()
         folder = FOLDER_BY_ROLE[role]
-        parts.append(f"/// Every factory {lower}, by file name. They live in `moonlive/{folder}/`\n")
-        parts.append("/// upstream and in the factory script directory on the device.\n")
+        parts.append(f"/// Every factory {lower} by file name, from `moonlive/{folder}/` upstream.\n")
         parts.append(f"constexpr const char* k{role}Catalog[] = {{\n")
         parts.append("".join(f'    "{n}",\n' for n in names))
         parts.append("};\n")
@@ -123,8 +127,7 @@ def main() -> int:
         # Parallel arrays rather than a struct: the name array is what every existing caller walks,
         # and a struct would rewrite each of them to reach a field they do not use.
         decls = decl_by_role[role]
-        parts.append(f"/// What each {lower} above declares about itself, in the same order.\n")
-        parts.append("/// A dimension of 0 means the script says nothing, so the DEVICE decides the default.\n")
+        parts.append(f"/// What each {lower} above declares about itself, in the same order, 0 meaning it says nothing and the device decides.\n")
         parts.append(f"constexpr unsigned char k{role}CatalogDim[] = {{\n")
         parts.append("".join(f"    {d},\n" for d, _ in decls))
         parts.append("};\n")
@@ -136,6 +139,7 @@ def main() -> int:
 
     total = sum(len(v) for v in by_role.values())
     parts.append(f"constexpr size_t kCatalogCount = {total};   ///< every factory script, all roles\n\n")
+    parts.append("/// @}\n")
     parts.append("} // namespace mm::moonlive\n")
 
     # UTF-8 EXPLICITLY, on every read and write in this file: a script's tags() is emoji, and

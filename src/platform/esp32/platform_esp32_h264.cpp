@@ -1,15 +1,36 @@
-// HLS on the ESP32-P4: the platform half of the encoder seam (platform.h § HLS).
-//
-// Where desktop spawns an ffmpeg and hands it the whole job, the P4 does all three parts itself:
-// the chip's hardware H.264 encoder (Espressif's esp_h264 component), our own MPEG-TS muxer
-// (MpegTs.h), and a segment ring in PSRAM that the HTTP server serves straight out of RAM. There
-// is no filesystem in the path: at one segment per second, writing them to flash would wear it
-// out for no gain, since a live HLS segment is stale within seconds.
-//
-// **Why a worker task.** encoderWrite() is called from the render tick and must never block on an
-// encode. It copies the frame into a slot ring (the desktop writer-thread shape) and returns; the
-// mmH264 task does the color conversion, the encode and the muxing. A full ring drops the newest
-// frame, exactly as the desktop pipe does when ffmpeg falls behind.
+/// @defgroup platform_esp32_h264 Live streaming on the P4
+/// The platform half of the encoder seam.
+///
+/// Where a desktop hands the whole job to an external encoder, this chip does all three parts itself.
+/// The hardware encoder, our own muxer, and a segment ring served straight out of memory.
+///
+/// @moreinfo
+///
+/// ## No filesystem in the path
+///
+/// At one segment a second, writing them to flash would wear it out for no gain, a live segment being stale within seconds.
+///
+/// ## Why a worker task
+///
+/// The write is called from the render tick and must never block on an encode.
+/// It copies the frame into a slot ring and returns, and the worker does the conversion, the encode and the muxing.
+/// A full ring drops the newest frame, exactly as the desktop path does when its encoder falls behind.
+///
+/// ## An orphaned worker must not become a second producer
+///
+/// Stopping a worker detaches one that overruns its join deadline rather than freeing it, so an orphan can still be parked when the next start runs.
+/// A running flag alone cannot gate that, since the new start sets it true again.
+/// The orphan would then resume as a second producer on the one encoder handle and scratch buffer.
+/// So each worker captures the generation it was spawned for and exits as soon as it is no longer current.
+///
+/// For the same reason the buffers are freed only once the worker has actually returned: a detached one is mid-encode holding raw pointers to them and to the encoder handle.
+/// Freeing there would be a use-after-free plus a call into a deleted session, so leaking a few megabytes until the next start is the better trade.
+///
+/// ## The playlist advertises from the oldest plus a margin
+///
+/// Never the oldest itself, since that slot is the next one rotation overwrites and a player fetching it races the encoder and gets nothing.
+/// The margin is what a player has left to fetch what it was promised, and the rest of the ring is its buffering budget.
+/// On the bench, listing the true oldest failed immediately and listing only the newest few failed within about five seconds, and both spin forever.
 
 #include "platform/platform.h"
 #include "sdkconfig.h"
@@ -90,12 +111,7 @@ std::atomic<bool> dead_{false};   // the encoder failed: writes are refused unti
 // gone; freeing the buffers on that path would pull them out from under a live encode.
 std::atomic<bool> workerExited_{false};
 
-// Which worker generation is the live one. stopPinnedTask DETACHES a worker that overruns its
-// join deadline rather than freeing it (platform_esp32_worker.cpp), so an orphan can still be
-// parked in waitNotify when the next encoderStart runs. `running_` alone cannot gate it: that
-// start sets running_ back to true, and the orphan would resume as a SECOND producer on the one
-// encoder handle and scratch buffer. Each worker captures the generation it was spawned for and
-// exits as soon as it is no longer current.
+// Which worker generation is the live one: @xref{an-orphaned-worker-must-not-become-a-second-producer|why a running flag alone cannot gate it}.
 std::atomic<uint32_t> generation_{0};
 
 // Set when a segment was closed early (a frame that did not fit), so the fresh one is still
@@ -119,9 +135,7 @@ struct Lock {
     ~Lock() { if (mutex_) xSemaphoreGive(mutex_); }
 };
 
-/// RGB888 -> the encoder's O_UYY_E_VYY layout: YUV420 packed as alternating chroma-prefixed
-/// lines (odd lines carry U, even lines V, each followed by two luma samples). BT.601 integer
-/// coefficients, which is what the H.264 default color matrix expects.
+/// Convert to the encoder's own layout: chroma-prefixed alternating lines, with the integer coefficients the default color matrix expects.
 void rgbToEncoderFormat(const uint8_t* rgb, uint8_t* out, uint16_t w, uint16_t h) {
     const size_t lineBytes = static_cast<size_t>(w) * 3 / 2;
     for (uint16_t y = 0; y < h; y++) {
@@ -149,9 +163,7 @@ void rgbToEncoderFormat(const uint8_t* rgb, uint8_t* out, uint16_t w, uint16_t h
     }
 }
 
-/// Close the current segment and open the next, overwriting the oldest. Called with the lock held.
-/// Skips a slot still being served: dropping one segment is invisible to a player (it re-fetches
-/// the playlist every second), where overwriting one mid-send corrupts what that viewer sees.
+/// Close the current segment and open the next, overwriting the oldest and skipping one still being served, called with the lock held.
 void rotateSegment() {
     segments_[segWrite_].seq = nextSeq_++;
     const uint32_t busy = serving_.load();
@@ -327,12 +339,10 @@ bool encoderStart(const EncoderConfig& cfg) {
     // reaches it, and a stop landing in that window would read the previous stop's `true` and
     // free the buffers the worker is about to encode from.
     workerExited_ = false;
-    // Core 1: core 0 runs the network stack, and starving it stalls the HTTP server that serves
-    // these very segments (the LC16 lesson).
-    // 16 KB, not the 8 KB this started with: the hardware-encoder call chain plus our muxer
-    // overflowed that and jumped into libm with a corrupted pointer (an "Illegal instruction"
-    // panic loop on the bench). Espressif's own esp_h264 example runs its encode from a 10 KB
-    // task, and the muxer's frame loop sits on top of that.
+    // The second core, since the first runs the network stack and starving it stalls the very server that serves these segments.
+    // The stack is twice what this started with: the encoder call chain plus our muxer overflowed the smaller one.
+    // It jumped into the maths library with a corrupted pointer, panicking in a loop.
+    // The vendor's own example runs its encode from a comparable stack, and the muxer's frame loop sits on top of that.
     if (!spawnPinnedTask(task_, "mmH264", workerFn,
                          reinterpret_cast<void*>(static_cast<uintptr_t>(myGen)),
                          16 * 1024, 5, 1)) {
@@ -367,11 +377,7 @@ void encoderStop() {
         stopPinnedTask(task_);
     }
     Lock lk;
-    // Free ONLY once the worker has actually returned. stopPinnedTask detaches on a timeout and
-    // returns while the worker runs on, and that worker is mid-encode holding raw pointers to
-    // these buffers and to the encoder handle: freeing here would be a use-after-free in PSRAM
-    // plus a call into a deleted esp_h264 session. Leaking a few MB of PSRAM until the next
-    // start is the better trade, and the same one the worker layer makes for its own state.
+    // Free only once the worker has actually returned: @xref{an-orphaned-worker-must-not-become-a-second-producer|why a detached one still holds these pointers}.
     if (workerExited_) {
         freeAll();
         head_ = count_ = 0;
@@ -392,11 +398,7 @@ bool hlsSegment(const char* name, const uint8_t** data, size_t* len) {
             if (s.seq && (oldest == 0 || s.seq < oldest)) oldest = s.seq;
         if (!oldest) return false;                       // nothing complete yet
 
-        // Advertise from the oldest segment PLUS A MARGIN, never the oldest itself: that slot is
-        // the next one rotation overwrites, so a player fetching it races the encoder and gets a
-        // 404. The margin is what a player has left to fetch what it was promised; the rest of
-        // the ring is its buffering budget. (Bench: listing the true oldest 404'd immediately,
-        // and listing only the newest few 404'd within about five seconds. Both spin forever.)
+        // Advertise from the oldest plus a margin, never the oldest itself: @xref{the-playlist-advertises-from-the-oldest-plus-a-margin|what each end failed at on the bench}.
         uint32_t first = oldest + kReserved;
         if (first >= nextSeq_) first = oldest;   // ring not yet full: nothing to reserve
         int n = std::snprintf(playlist, sizeof(playlist),

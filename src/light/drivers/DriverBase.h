@@ -1,8 +1,5 @@
 #pragma once
 
-// Include this one file to write a driver: it brings DriverBase plus the buffer, correction and
-// platform pieces every driver needs. A peripheral seam or a packet header stays per-driver.
-
 #include "core/module/MoonModule.h"
 #include "core/util/ScratchBuffer.h"
 #include "light/layers/Buffer.h"
@@ -22,6 +19,13 @@ namespace mm {
 /// Base class for one driver: a consumer that reads the shared source buffer and emits it. The destination is a physical LED output, a network sink, or the preview.
 ///
 /// A driver optionally reads dimensions from an active Layer and applies the shared output correction. It can also restrict its output to a contiguous window of the source buffer. It plays the same zero-state role for drivers that EffectBase does for effects.
+///
+/// @moreinfo
+///
+/// ## One include writes a driver
+///
+/// This file brings `DriverBase` plus the buffer, correction and platform pieces every driver needs.
+/// A peripheral seam or a packet header stays per-driver.
 class DriverBase : public MoonModule {
 public:
     // The OWNER must release before destroying: a base destructor cannot prevent the vptr race.

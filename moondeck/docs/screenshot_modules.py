@@ -98,6 +98,10 @@ def asset_dir_for(type_name: str) -> Path:
 MODULES = [
     # Layouts
     ("GridLayout",          "Layouts",  {}, False),
+    # The scripted layout, whose preview is the shape a script places rather than a control
+    # panel: it runs `rose.mll`, a rhodonea curve whose petals no compiled layout defines,
+    # so the capture shows what a script buys that a C++ class does not.
+    ("MoonLiveLayout",      "Layouts",  {"script": "rose.mll"}, True),
     # Effects
     ("RainbowEffect",       "Layer",    {}, True),
     ("NoiseEffect",         "Layer",    {}, True),
@@ -311,8 +315,8 @@ def add_module(host: str, id_: str, type_: str, parent_id: str | None,
     body: dict = {"id": id_, "type": type_}
     if parent_id:
         body["parent_id"] = parent_id
-    if props:
-        body["props"] = props
+    # `props` is deliberately NOT sent: the create endpoint ignores it (no handler reads it), so a
+    # caller that needs a control set gets it through /api/control after the module exists.
     r = _post(f"http://{host}/api/modules", json=body, timeout=5)
     if not r.ok:
         return None
@@ -344,6 +348,37 @@ def set_control(host: str, module: str, control: str, value) -> bool:
     """Set a control value via the same /api/control path the UI uses."""
     r = _post(f"http://{host}/api/control",
               json={"module": module, "control": control, "value": value}, timeout=5)
+    return r.ok
+
+
+# Where a script control's picker looks: kScriptDir in MoonLiveScriptFile.h. The USER
+# directory, not the factory one, because that is the directory the picker lists and the
+# name a `script` control resolves against.
+SCRIPT_DIR = "/moonlive"
+
+# Where each script extension lives in the repo, imported rather than restated: catalog_scripts.py
+# is the one home for the extension-to-role-to-folder mapping, and a second copy here would drift
+# the moment a role is added.
+sys.path.insert(0, str(ROOT / "src" / "light" / "moonlive"))
+from catalog_scripts import ROLE_BY_EXT, FOLDER_BY_ROLE   # noqa: E402
+SCRIPT_SRC = {ext: FOLDER_BY_ROLE[role] for ext, role in ROLE_BY_EXT.items()}
+
+
+def push_script(host: str, name: str) -> bool:
+    """Copy one script from the repo onto the device, so a capture needs no hand-copied file.
+
+    A scripted module captures an empty card reading "script not found" unless the script it
+    names is on the device, and the desktop build's filesystem is a build directory nothing
+    in the repo seeds. Pushing here keeps the run self-contained: check out, build, capture.
+
+    Byte-exact through /api/file, the same request the File Manager's upload makes.
+    """
+    src = ROOT / "moonlive" / SCRIPT_SRC.get(Path(name).suffix, "") / name
+    if not src.is_file():
+        return False
+    r = _post(f"http://{host}/api/file?path={SCRIPT_DIR}/{name}",
+              headers={"Content-Type": "application/octet-stream"},
+              data=src.read_bytes(), timeout=10)
     return r.ok
 
 
@@ -643,6 +678,9 @@ def capture_preview_gif(page: Page, host: str, module_id: str,
 
     _load_page(page, host)
     _click_nav(page, nav_root)
+    # The CHILD tab too, as the screenshot path does: the nav root alone leaves whichever child
+    # was last open selected, so the wait below can find a card the preview is not rendering.
+    _click_child_tab(page, module_id)
 
     # Wait for the card to be visible (confirms module is rendering).
     card_sel = f'.card[data-module="{module_id}"]'
@@ -954,6 +992,32 @@ def main() -> int:
                     continue
 
                 added_ids.append(actual_name)
+
+                # Through /api/control, the path the UI uses: the create endpoint ignores a
+                # `props` body, so a module needing a control set (a scripted one needs its
+                # script, or it captures an empty card reading "no script") gets it here. The
+                # settle is the compile, which a scripted module does on the control change.
+                pushed = True
+                if extra_props:
+                    for ctrl, value in extra_props.items():
+                        # A script control names a file that has to BE there: push it first, or
+                        # the control is set to a name the device cannot resolve and the capture
+                        # records an empty card. A failed push abandons this module rather than
+                        # photographing that, so the asset on disk is never a lie.
+                        if ctrl == "script" and isinstance(value, str) \
+                                and not push_script(args.host, value):
+                            print(f"push-{value}-failed")
+                            failed.append((type_name, f"script upload failed: {value}"))
+                            delete_module(args.host, actual_name)
+                            added_ids.remove(actual_name)
+                            pushed = False
+                            break
+                        if not set_control(args.host, actual_name, ctrl, value):
+                            print(f"control-{ctrl}-failed ", end="", flush=True)
+                    if not pushed:
+                        time.sleep(0.15)
+                        continue
+                    time.sleep(1.0)
 
                 if need_png:
                     ok = screenshot_module(page, args.host, actual_name,

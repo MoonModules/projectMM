@@ -17,9 +17,15 @@ SPECS = ROOT / "docs" / "moonmodules"
 # src/{core,light} — gen_api discovers them). A summary/overview may link its
 # `moxygen/<stem>.md` in place of a `## Source` section; this set validates that link
 # points at a real generated page. Import by path so this check needs no PYTHONPATH tweak.
+#
+# `_page_stem` rather than the bare filename, because the generator prefixes a COLLIDING
+# stem with its parent directory (`desktop/platform_config.h` becomes
+# `desktop_platform_config`). Deriving the set here with `Path(h).stem` instead duplicated
+# the naming rule and then disagreed with it: the page existed and was reachable, and this
+# check called the link dead. One function owns how a page is named.
 sys.path.insert(0, str(ROOT / "moondeck" / "docs"))
-from gen_api import _discover_headers  # noqa: E402
-_API_STEMS = {Path(h).stem for h in _discover_headers()}
+from gen_api import _discover_headers, _page_stem  # noqa: E402
+_API_STEMS = {_page_stem(h) for h in _discover_headers()}
 
 # Map source directories to spec directories
 SOURCE_DIRS = {

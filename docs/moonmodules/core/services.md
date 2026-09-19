@@ -34,7 +34,7 @@ A user-added Service: the audio source the audio-reactive effects consume. `mode
 - `syncPort` — (network build) the UDP port, 11988 by default; `sync status` reports the state.
 - read-only — `level` (RMS), `peakHz` (the audio driving effects, from any source).
 
-Detail: [technical](moxygen/AudioService.md)
+Detail: [technical](moxygen/AudioService.md) · [the sync packet](../light/moxygen/WLEDAudioSyncPacket.md) · [the lock-free ring](moxygen/SpscRing.md)
 
 [Tests](../../reference/tests/unit-tests.md#audioservice)
 
@@ -284,7 +284,7 @@ Editing the layout needs `read-only` off in the launcher.
 Driving the device from that session, beside the Control card it mirrors.
 
 It binds only to `/mm/switch/N`, `/mm/encoder/N` and `/mm/fader/N`, N being 1 to 8, on purpose. A surface should
-address the SURFACE, and [Control](control.md) decides what each one drives, so one layout keeps
+address the SURFACE, and [Control](system.md#control) decides what each one drives, so one layout keeps
 working as assignments change and a hardware desk lands on the same bindings. Reaching past it to
 `/mm/control/<Module>/<control>` also works and is the right answer for a one-off, but it hard-codes
 into the layout a mapping that belongs on the device. Two have targets today, `switch1`

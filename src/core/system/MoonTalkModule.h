@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-/// @defgroup MoonTalk A public message board between projectMM devices
-/// @{
-///
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+
+#include "core/system/MoonCloudModule.h"
+#include "core/module/Scheduler.h"
+#include "core/util/JsonSink.h"
+#include "core/module/MoonModule.h"
+#include "platform/platform.h"
+
+namespace mm {
+
 /// A MoonCloud child with its own consent, sharing a chip model implying nothing more.
 /// Everything sent is public and permanent: no private message, and no delete.
 /// The module never posts on its own, so a message exists because somebody typed it.
@@ -17,19 +26,6 @@
 /// Reading sends no identifier, and happens only while consent is on.
 /// There is no authentication, so a sender id can be fabricated by hand.
 /// That is acceptable where nothing is gated on identity, and is stated in the policy.
-
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-
-#include "core/system/MoonCloudModule.h"
-#include "core/module/Scheduler.h"
-#include "core/util/JsonSink.h"
-#include "core/module/MoonModule.h"
-#include "platform/platform.h"
-
-namespace mm {
-
 class MoonTalkModule : public MoonModule {
 public:
     /// Declare the two consents, the message box, and the button that publishes.
@@ -134,6 +130,5 @@ private:
     char message_[281] = {};
 };
 
-/// @}
-
 }  // namespace mm
+

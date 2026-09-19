@@ -10,7 +10,7 @@ namespace mm {
 
 namespace pacart {
 
-// The sprites index these and the effect fills them, so a ghost is one drawing in four colors.
+/// The sprites index these and the effect fills them, so a ghost is one drawing in four colors.
 enum : uint8_t { kClear = 0, kBody = 1, kEye = 2, kPupil = 3, kDark = 4 };
 inline constexpr uint8_t kPaletteCount = 5;
 
