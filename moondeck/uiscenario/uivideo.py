@@ -10,7 +10,7 @@ caller adds a camera. Playwright's own Screencast API draws the cursor, highligh
 what each action touches and renders the captions as overlays, so there is no second
 pass burning text into frames and no hand-drawn pointer to keep in sync.
 
-    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/07-add-a-layer.json
 
 Prerequisites:
     1. A running projectMM:   uv run moondeck/run/run_desktop.py
@@ -153,9 +153,21 @@ def main() -> int:
     with sync_playwright() as p:
         # The test id contract, same as the UI tests use.
         p.selectors.set_test_id_attribute(uirun.TEST_ID_ATTRS)
-        browser = p.chromium.launch()
-        context = browser.new_context(viewport=VIEWPORT)
-        page = context.new_page()
+        # A run that drives real hardware needs a granted Web Serial port, and a grant lives
+        # in a browser PROFILE rather than in a flag: the API hands out port objects and never
+        # device paths, so there is nothing a command line could name. `.playwright-profile`
+        # holds one granted once by a human, which every later take reuses with nothing to
+        # click. Runs that touch no hardware are unaffected by using it.
+        profile = ROOT / ".playwright-profile"
+        if profile.is_dir():
+            context = p.chromium.launch_persistent_context(
+                str(profile), headless=True, channel="chrome", viewport=VIEWPORT)
+            browser = context.browser
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch()
+            context = browser.new_context(viewport=VIEWPORT)
+            page = context.new_page()
         driver = uirun.Driver(page, host, screencast=page.screencast)
         # `requires` resolves to a real DEVICE, which renders cards like any other; only
         # `host` means another app (the installer), which has none. Folding the two

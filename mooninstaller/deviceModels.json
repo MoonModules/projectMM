@@ -645,16 +645,6 @@
         "parent_id": "Layers"
       },
       {
-        "type": "AudioSpectrumEffect",
-        "id": "AudioSpectrum",
-        "parent_id": "Layer"
-      },
-      {
-        "type": "RandomMapModifier",
-        "id": "RandomMap",
-        "parent_id": "Layer"
-      },
-      {
         "type": "NetworkSendDriver",
         "id": "NetworkSend",
         "parent_id": "Drivers"
@@ -764,11 +754,6 @@
         "parent_id": "Layers"
       },
       {
-        "type": "AudioSpectrumEffect",
-        "id": "AudioSpectrum",
-        "parent_id": "Layer"
-      },
-      {
         "type": "NetworkModule",
         "id": "Network",
         "controls": {
@@ -831,11 +816,6 @@
         "type": "Layer",
         "id": "Layer",
         "parent_id": "Layers"
-      },
-      {
-        "type": "LissajousEffect",
-        "id": "Lissajous",
-        "parent_id": "Layer"
       }
     ],
     "flashBaud": 460800
@@ -1182,11 +1162,6 @@
         "type": "Layer",
         "id": "Layer",
         "parent_id": "Layers"
-      },
-      {
-        "type": "RainbowEffect",
-        "id": "Rainbow",
-        "parent_id": "Layer"
       },
       {
         "type": "Drivers",

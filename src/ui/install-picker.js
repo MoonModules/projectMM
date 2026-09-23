@@ -52,6 +52,18 @@ const PREF_RELEASE_KEY  = "projectMM.picker.releaseTag";
 const PREF_FIRMWARE_KEY = "projectMM.picker.firmware";
 const PREF_BOARD_KEY    = "projectMM.picker.board";
 
+// A link may name what to preselect: `?release=v5.0.0&firmware=esp32s3-n16r8&board=...`.
+// It outranks the saved preference, since a link is the sender's intent and the preference
+// is the visitor's habit, and a support link that lands on the wrong board helps nobody.
+// An unknown value falls through to the saved preference rather than selecting nothing.
+function urlParam(name) {
+    try {
+        return new URLSearchParams(window.location.search).get(name);
+    } catch {
+        return null;   // a document with no location, such as a test harness
+    }
+}
+
 // Firmware variants published but NEVER RUN ON HARDWARE — flagged in the dropdown so a
 // user knows before flashing. The P4 rev3 images are built for the current v3.x silicon,
 // which no bench board has (both are v1.3 "engineering samples"), so they are published
@@ -464,9 +476,9 @@ function render(state) {
         // Restore the user's last picked board if it's still in the catalog
         // (the catalog may have changed since their last visit; falling
         // through to "(any board)" if their pick is gone is the safe shape).
-        const savedBoard = safeLocalGet(PREF_BOARD_KEY);
-        if (savedBoard && state.boards.find(b => b.name === savedBoard)) {
-            state.selectedBoard = savedBoard;
+        const wantedBoard = urlParam("board") || safeLocalGet(PREF_BOARD_KEY);
+        if (wantedBoard && state.boards.find(b => b.name === wantedBoard)) {
+            state.selectedBoard = wantedBoard;
         }
         boardEl.value = state.selectedBoard || "";
     }
@@ -496,8 +508,8 @@ function render(state) {
     //   1. Last release tag the user picked, if it's still in the list.
     //   2. Newest stable.
     //   3. Newest prerelease (falls through when no stable exists yet).
-    const savedTag = safeLocalGet(PREF_RELEASE_KEY);
-    const savedIdx = savedTag ? sorted.findIndex(r => r.tag_name === savedTag) : -1;
+    const wantedTag = urlParam("release") || safeLocalGet(PREF_RELEASE_KEY);
+    const savedIdx = wantedTag ? sorted.findIndex(r => r.tag_name === wantedTag) : -1;
     const firstStable = sorted.findIndex(r => !r.prerelease);
     state.releaseIdx = savedIdx >= 0 ? savedIdx
                      : firstStable >= 0 ? firstStable
@@ -636,8 +648,14 @@ function render(state) {
         //   4. First option in the narrowed list — last-resort fallback.
         const savedFirmware = safeLocalGet(PREF_FIRMWARE_KEY);
         const savedHere = savedFirmware && compatible.find(f => f.firmware === savedFirmware);
+        // A link naming a firmware outranks every default below it, including the running
+        // one: the sender knows which image they mean.
+        const linkFirmware = urlParam("firmware");
+        const linkHere = linkFirmware && compatible.find(f => f.firmware === linkFirmware);
         let preferred = null;
-        if (state.ownFirmwareKey && compatible.find(f => f.firmware === state.ownFirmwareKey)) {
+        if (linkHere) {
+            preferred = linkFirmware;
+        } else if (state.ownFirmwareKey && compatible.find(f => f.firmware === state.ownFirmwareKey)) {
             preferred = state.ownFirmwareKey;
         } else if (savedHere) {
             preferred = savedFirmware;

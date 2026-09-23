@@ -35,7 +35,7 @@ namespace mm {
 constexpr const char* kReleaseRepo = "MoonModules/MoonLight";
 
 /// Where they live today, tried where the address above does not answer.
-constexpr const char* kFallbackRepo = "MoonModules/projectMM";
+constexpr const char* kFallbackRepo = "MoonModules/projectMM";   // rename-keep: one repository in both constants leaves a device nowhere to look
 
 /// The release-asset URL a device updates itself from: repository, version, firmware variant, version.
 constexpr const char* kReleaseAssetUrlFormat =

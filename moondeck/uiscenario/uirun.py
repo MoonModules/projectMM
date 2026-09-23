@@ -285,6 +285,10 @@ class Driver:
         self.paced = screencast is not None
         self.bindings: dict[str, str] = {}
         self.failures: list[str] = []
+        # Every text a watched element has shown, so a wait arriving after a brief state
+        # is still satisfied by it: @xref{wait_for}.
+        self._seen_text: dict[str, set[str]] = {}
+        self._watched: set[str] = set()
 
     VIEWPORT = {"width": 1280, "height": 720}
 
@@ -374,9 +378,25 @@ class Driver:
     # -- primitives ---------------------------------------------------------
 
     def _settle(self, seconds: float) -> None:
-        """Dwell, so the eye can follow. Skipped when nothing is recording."""
-        if seconds > 0 and self.paced:
+        """Dwell, so the eye can follow. Skipped when nothing is recording.
+
+        A watched progress element is sampled throughout the dwell whether or not the run is
+        paced, since a state that comes and goes between two steps is lost otherwise: @xref{wait_for}.
+        """
+        for sel in tuple(self._watched):
+            self._note_text(sel)          # correctness, so it happens whether or not anyone is watching
+        if seconds <= 0 or not self.paced:
+            return
+        if not self._watched:
             self.page.wait_for_timeout(int(seconds * 1000))
+            return
+        # Sliced, so a watched element is read several times across a long dwell rather than
+        # once at each end, which is where a short-lived state hides.
+        end = time.time() + seconds
+        while time.time() < end:
+            self.page.wait_for_timeout(120)
+            for sel in tuple(self._watched):
+                self._note_text(sel)
 
     def _ready(self, locator, timeout: int = 4000) -> bool:
         """Wait for ATTACHMENT, then scroll into view.
@@ -862,10 +882,20 @@ class Driver:
         return self.tap(self.page.locator(selector))
 
     def type_into(self, selector: str, text: str, delay: int = 180) -> bool:
-        """Type into any field, slowly enough to watch a list narrow as it filters."""
+        """Type into any field, slowly enough to watch a list narrow as it filters.
+
+        The field is emptied first, so what it holds afterwards is what the run asked for.
+        A field can arrive already filled: the installer prefills the SSID from the last
+        install, and typing on top of that provisioned a device for "MoonModulesMoonModules",
+        which joins nothing. Selecting what is there means the first keystroke replaces it,
+        the way typing into a focused field does for a person.
+        """
         el = self.page.locator(selector)
         if not self.tap(el):
             return False
+        # Select-all rather than fill(): the keystrokes still happen, so a field that filters
+        # a list as it is typed still shows that, which is the point of typing slowly here.
+        self.page.keyboard.press("ControlOrMeta+a")
         self.page.keyboard.type(text, delay=delay if self.paced else 0)
         self.page.wait_for_timeout(420)
         return True
@@ -1070,6 +1100,8 @@ class Driver:
         "chapter":        lambda a: (a.get("title", ""), a.get("description"),
                                      float(a.get("seconds", 2.0))),
         "wait":           lambda a: (float(a.get("seconds", 1.0)),),
+        "wait_for":       lambda a: (a["selector"], a.get("text"),
+                                     float(a.get("timeout", 120.0))),
         "open_card":      lambda a: (a["module"],),
         "add_module":     lambda a: (a["parent"], a["type"]),
         "replace_module": lambda a: (a["module"], a["type"]),
@@ -1102,6 +1134,62 @@ class Driver:
         # but a caption cannot. _settle already no-ops when nothing is recording.
         self._settle(seconds)
         return True
+
+    def wait_for(self, selector: str, text: str | None = None, timeout: float = 120.0) -> bool:
+        """Hold until the page says so, rather than for a guessed number of seconds.
+
+        A step whose length the device decides (a flash, a reboot, a network join) has no
+        honest fixed duration: too short cuts the shot, too long pads every take. This waits
+        on the page's own evidence, so the same run file works on a fast link and a slow one.
+
+        A state already passed counts as seen. A progress element reports a sequence, and a
+        step polling it starts after the step before it finished, so a state shorter than that
+        gap is over before anyone looks: the erase on an S3 lasts about twelve seconds and the
+        step waiting for it begins later than that. Every text this element shows is therefore
+        remembered as it goes by, and the wait is satisfied by the history as well as by the
+        present. Otherwise a run file would have to name a timeout per state that is really a
+        guess about the hardware, which is the guesswork this action exists to remove.
+        """
+        self._watch(selector)
+        end = time.time() + timeout
+        while time.time() < end:
+            seen = self._note_text(selector)
+            if text is None:
+                # Non-empty, because the installer blanks this element before it fills it in:
+                # an attached-but-empty element is the state before the thing being waited for.
+                if seen:
+                    return True
+            elif any(text.lower() in s for s in self._seen_text.get(selector, ())):
+                return True
+            self._settle(0.5)   # paced, so the wait is visible in a recording
+        raise TimeoutError(f"wait_for: {selector!r} never showed {text!r} within {timeout}s"
+                           + (f" (it showed: {sorted(self._seen_text.get(selector, ()))})"
+                              if self._seen_text.get(selector) else ""))
+
+    def _watch(self, selector: str) -> None:
+        """Sample a progress element from now on, including between steps.
+
+        A state is missed in the gap between one step finishing and the next starting, which no
+        amount of remembering inside a wait can recover. So a watched selector is sampled by
+        every paced dwell in the run, which is what makes the record continuous.
+        """
+        self._watched.add(selector)
+        self._note_text(selector)
+
+    def _note_text(self, selector: str) -> str | None:
+        """Read an element and remember what it said, for a wait that arrives late."""
+        try:
+            el = self.page.query_selector(selector)
+        except Exception:
+            return None         # an element mid-render, or a page mid-navigation
+        if el is None:
+            return None
+        try:
+            txt = (el.text_content() or "").strip()
+        except Exception:
+            return None
+        self._seen_text.setdefault(selector, set()).add(txt.lower())
+        return txt
 
     def _act(self, a: str, args: dict) -> tuple[bool, str | None]:
         """Perform one action. Returns (completed, name-of-anything-created)."""
@@ -1210,6 +1298,7 @@ class Driver:
 ACTIONS: dict[str, str] = {
     "chapter":        "_do_chapter",
     "wait":           "_do_wait",
+    "wait_for":       "wait_for",
     "open_card":      "open_card",
     "add_module":     "add_module",
     "replace_module": "replace_module",

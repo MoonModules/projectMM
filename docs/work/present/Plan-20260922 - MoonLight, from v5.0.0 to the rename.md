@@ -25,9 +25,9 @@ Verified against the tree on 2026-09-22 rather than read from the plans, because
 
 ## What the rename touches
 
-393 occurrences of `projectMM` across `src/`, `moondeck/` and `mooninstaller/`; the sweep script measures 542 across 113 tracked files tree-wide. The categories matter more than the count.
+The sweep script measures **1405 occurrences across 242 tracked files** (dry run, 2026-09-22), against the 542 across 113 recorded when it was written: the documentation sweep and the effect library both grew the prose that names the product. The categories still matter more than the count, and the growth is spread across the tree rather than concentrated, so it is real rather than an exclude-list gap.
 
-[rename_to_moonlight.py](../../../moondeck/rename/rename_to_moonlight.py) handles almost all of it and runs dry by default. It replaces two tokens, `ProjectMM` then `projectMM`, which is correct for every form because `projectMM` is never a substring of another token. Its file list comes from `git ls-files`, so build output is excluded without a blocklist. `MoonLive`, the predecessor's own name, and `namespace mm` are provably never touched.
+[rename_to_moonlight.py](../../../moondeck/repo_rename/rename_to_moonlight.py) handles almost all of it and runs dry by default. It replaces two tokens, `ProjectMM` then `projectMM`, which is correct for every form because `projectMM` is never a substring of another token. Its file list comes from `git ls-files`, so build output is excluded without a blocklist. `MoonLive`, the predecessor's own name, and `namespace mm` are provably never touched.
 
 ### The device builds its own OTA URL, and that turns out to be safe
 
@@ -48,36 +48,104 @@ Two things the sweep changes that a user feels, neither needing code:
 - **Peer discovery** compares a literal `"projectMM"` at [DevicesModule.h:109](../../../src/core/system/DevicesModule.h), and [E131Packet.h:55](../../../src/light/util/E131Packet.h) writes a fixed nine-byte source name. A projectMM device and a MoonLight device will not see each other, so a mixed network is a transitional state to move through rather than live in. Accepted rather than bridged: carrying both tokens forever is the debt this project exists to avoid.
 - **The `MM-` device prefix** in [SystemModule.h:57](../../../src/core/system/SystemModule.h) is every device's mDNS name and Home Assistant entity id. Changing it to `ML-` renames all of that, and unlike the configuration it is not something Restore carries back. Keeping `MM-` costs an odd prefix forever; changing it costs every user their bookmarks and automations once. Product owner's call, in the same sweep commit either way.
 
-## v5.0.0, the last projectMM release
-
-1. **An in-place upgrade from any earlier version.** Whatever a tester has configured keeps working across the upgrade, with [MIGRATING](../../reference/MIGRATING.md) as the only exception list. v5.0.0 is where the installed base gathers before the switch, so it cannot be the release that asks them to start over.
-2. **The two open fidelity questions**, both bench work rather than code: the audio `volume` scale (0..1 float against our 0..255 `level`), and a cross-check of effects whose predecessor source was incomplete.
-3. **Windows day's findings**, since the Sept 29 pass is the first time that platform has ever been tested and anything it turns up is cheaper to fix under the old name.
-
-The release is therefore small by design. Its value is being a known-good, widely-installed baseline that the rename can be measured against, rather than a feature drop.
-
-Everything else is optional polish under the old name.
-
-## v6.0.0, the rename itself
-
-One repository transfer, one sweep commit, one release. The installer manifest, the release asset names and the in-firmware URL builder are a lockstep set, so a half-applied rename leaves devices unable to update.
-
-1. **Dry-run the sweep on a throwaway branch** and run the full gate set on it: every ESP32 variant, the tests, the scenarios, `check_devices`, `check_specs`. Fix what the sweep gets wrong, including the fixed-length wire-protocol fields and their golden-vector tests. Throw the branch away; the point is to harden the script.
-2. **Transfer the repository**, which redirects the old URLs.
-3. **Run the sweep with `--apply`** on a branch off the renamed repo, as one auditable commit, and read the diff in full.
-4. **Flip the identity set together** in that same commit: binary name, asset names, the manifest `name` and `home_assistant_domain`, the docs domain, and the device prefix if it changes.
-5. **Cut v6.0.0**, verify OTA from a v5 device on the bench, and document the upgrade as Backup on v5 then Restore on v6.
-6. **Hand-edit `moondeck/moondeck.json`**, which is gitignored and so outside the sweep.
-
-`namespace mm::` stays. It is not the product name, and renaming it would touch every file for nothing.
-
 ## The cutover
 
 Dates are the product owner's. The two fixed points are Windows day and release day, and the rest hangs off them.
 
-### Before: v5.0.0 ships (date to set)
+### Sept 22: v5.0.0 shipped
 
-v5.0.0 has to exist before anything downstream matters, because it is the release the installed base updates *from* and the only one that can carry them across the move. Its three items are listed above. **Cut it far enough ahead that a tester can run it for a few days**, since a defect found after the rename is a defect in two releases at once.
+The release an in-field device updates *from*, and the only one that carries the installed base across the move. Nine firmware variants, four desktop packages, the container image and the installer manifest, all built from `21319a09`. An S3 on that commit reports `5.0.0-dev`, boots clean and renders at 373 fps.
+
+Small by design: its value is a known-good, widely-installed baseline for the rename to be measured against. Two questions stay open under the old name, both bench work rather than code: the audio `volume` scale (0..1 float against our 0..255 `level`), and a cross-check of effects whose predecessor source was incomplete.
+
+The eight days that follow are what the gap exists for.
+
+### Sept 22: the sweep rehearsed
+
+The script ran with `--apply` on a throwaway branch and the gate set ran over the result. Four things it got wrong, each silent rather than a build error, which is why rehearsing was worth a session:
+
+1. **`kFallbackRepo` was rewritten to the successor**, leaving both OTA constants naming one repository and the fallback dead. A device that cannot reach the new name would have had nowhere left to look. **Marked `rename-keep`.**
+2. **`projectMM-moonbase` was renamed in the image check**, so new firmware would reject the recovery image already in a v5 device's flash, leaving it with no recovery path. **Protected by content**, and it changes only when a MoonBase built under the new name ships.
+3. **A historical MIGRATING entry became false.** The v5.0.0 heading reads "the last release under the projectMM name", and the sweep rewrote it into a claim that was never true. **Marked `rename-keep`.** Every entry describing what already shipped has the same hazard.
+4. **`TextEffect`'s golden frame failed.** The default text is the product name, so renaming it changes rendered pixels. This one SHOULD rename, and its golden moves in the same commit, which is what [golden_frame.h](../../../test/unit/light/golden_frame.h) already asks for.
+
+The script now honors a `rename-keep` marker on a line, so an exception lives beside the thing it protects rather than in a list that drifts. The desktop build, 1998 of 1999 tests and the docs build all passed on the swept tree, so nothing else structural is hiding.
+
+Also measured: the sweep is **1405 hits across 242 files**, of which about 789 are documentation prose and code comments. Doing those early was considered and rejected: it leaves switch day's dangerous 616 unchanged, and finding 3 shows that even prose is not uniformly safe.
+
+### Sept 23: a default worth a first impression, and the install path end to end
+
+Thursday's work happened on Wednesday, and it changed what the first minute of the film shows.
+
+**The boot default is now [Pulse](../../moonmodules/light/effects.md#pulse).** A device came up on Noise, which is dense: it proves the lights work and hides everything else. A first boot has to answer three questions at once, and the third one is new, since a board with a microphone that shows no reaction to sound reads as a board without one. Pulse is expanding shells from a drifting origin, sparse enough that a single beat is unmistakable, moving on an idle clock when the room is silent, and the same code on a strip, a panel and a volume because a shell is a distance and every layout has distances. It costs 250 to 280 us at 16x16 on an S3.
+
+**The device models no longer pin an effect.** Four of them added their own under the Layer, so the firmware default was invisible on exactly the boards the film uses. All five entries are gone, and every model now boots on whatever the firmware chose. That is also one rule instead of four, in the spirit of the catalog describing hardware rather than taste.
+
+**Two recorder defects, each a silently wrong take rather than an error.** `wait_for` read only the present, so a state shorter than the gap between two steps was missed: the S3's erase lasts about twelve seconds and the step waiting for it starts later than that, which failed a run that had in fact gone perfectly. It now records what a watched element showed and counts a state that already passed. And `type_into` typed on top of a field rather than into it, so the installer's prefilled SSID provisioned a device for `MoonModulesMoonModules`, which joins nothing. Both are pinned by tests, and the second is a defect for anyone re-installing rather than only for the camera.
+
+**The clips are numbered in the order the work happens**, `01-install-firmware` through `10-react-to-sound`, so the directory reads as the path a newcomer takes. `02-first-look` is new: it tours a device that was flashed minutes earlier, and it is embedded where Chapter 2 of [getting started](../../gettingstarted.md) begins.
+
+Both clips were recorded against a real erase-and-flash of the S3, ending on a provisioned device at `192.168.1.158` with its microphone tracking music in the room.
+
+**What this does to the week.** Thursday's run-file work is largely done, so Thursday absorbs what the script asks for rather than starting from nothing. The two recorder fixes make Friday's filming cheaper, since a take no longer fails on a state that went by too quickly. One thing moved the other way: the clips were recorded before the script is final, so they are rehearsal footage by the plan's own rule, and Saturday re-records whatever the script changes. That was always the shape; it just started a day early.
+
+### The week, day by day
+
+**The script is the deliverable.** It says what MoonLight is, in the order a newcomer needs it, and everything else is a rendering of it: the run files perform it, `uivideo.py` films it, the tutorials follow the same sequence in prose. Written once, so a change lands in all three. [The scenario](#the-introduction-a-draft-scenario) below is the draft to work from.
+
+**Every shot is a script, so filming is repeatable.** A run file names the steps and their captions, and `uivideo.py` performs them against a live device. Re-shooting is re-running, which is what makes the schedule below possible: the takes are cheap and the thinking is not. Footage is ready by Sept 30.
+
+Two rules hold all week. **Anything found before Tuesday is fixed under the old name**, since a defect discovered after the rename is a defect in two releases. And **the published cut is filmed after the switch**: the UI carries the product name in its page title and header, so an earlier take says projectMM in the pixels. Earlier takes still earn their place as rehearsal, because re-running is cheap.
+
+**Sept 22 and 23: the script.** Thinking, and it decides everything after it.
+
+- Write what MoonLight is, in the order a newcomer meets it.
+- Name each beat, what it shows, and what it says.
+- Check each beat against what exists today, so the script is shootable now.
+- Done when the scenario below is revised into the one you want.
+
+**Thu 24: the run files that perform it.** Hands on, and lighter than planned since Sept 23 did the install and first-look half.
+
+- Revise the ten in `test/uiscenarios/clips/` to match the script's beats.
+- Write the ones the script needs and the repo lacks.
+- Re-record `01-install-firmware` and `02-first-look` if the script moves their beats.
+- Done when every beat has a run file and `test_host --ui` passes over all of them.
+
+**Fri 25: the first cut, filmed.** Hands on, and the rehearsal that finds what reads badly.
+
+- Record every run file with `uivideo.py` against a v5.0.0 device.
+- Cut it with `uicompose.py`: music, order, beats.
+- Watch it. A beat that drags or confuses is a script problem, so fix the script.
+- Done when a watchable cut exists, old name and all.
+
+**Sat 26: what the first cut taught.** Hands on.
+
+- Revise the script and the run files against what Friday showed.
+- Re-record what changed, which is a re-run rather than a re-shoot.
+- Done when the cut says what the script meant.
+
+**Sun 27: the tutorials.** Thinking, which suits a short day.
+
+- Follow the same sequence in prose, since the script already settled the order.
+- Decide which beats are a page and which are a paragraph.
+- Done when the documentation and the film tell one story.
+
+**Mon 28: slack.** Whatever the week turned up.
+
+- Fix what testing found, and re-run anything a fix touched.
+- Done when the tree is releasable under the old name.
+
+**Tue 29: [Windows day](#sept-29-windows-day).** A full day, the first time anything has been tested there.
+
+**Wed 30: [the switch](#sept-30-moonlight-v600), then the final take.** The rename lands, and the footage is re-recorded against it the same day.
+
+- Re-run every run file with `uivideo.py` against a v6.0.0 device.
+- Re-cut with `uicompose.py`, which consumes the same project file.
+- Done when the published cut says MoonLight in every frame.
+
+**Thu 1 Oct: publish.** The announcement, the video, and the tutorials together.
+
+**Testing rides along.** Every run file is a UI test, so Thursday and Friday exercise the newcomer's path harder than a test pass would, and the boards get theirs on Monday's slack. What that covers is in [the two threads](#the-two-threads-behind-the-week).
 
 ### Sept 29: Windows day
 
@@ -109,13 +177,16 @@ Smaller checks to make while the above runs: the browser opens on first launch, 
 
 ### Sept 30: MoonLight v6.0.0
 
+One repository transfer, one sweep commit, one release. The installer manifest, the release asset names and the in-firmware URL builder are a lockstep set, so a half-applied rename leaves devices unable to update. `namespace mm::` stays throughout: it is not the product name, and renaming it would touch every file for nothing.
+
 One day, in order, with a stop at each gate:
 
-1. **Dry-run the sweep on a throwaway branch** and run the full gate set: every ESP32 variant, the tests, the scenarios, `check_devices`, `check_specs`. Fix what it gets wrong, particularly the fixed-length wire-protocol fields and their golden vectors. Discard the branch.
+1. **`uv run moondeck/repo_rename/check_rename_ready.py`**, which dry-runs the sweep and asserts what the rehearsal established: the reach is near 1376, every `rename-keep` line survives, and the OTA still names two different repositories. Exit 0 means proceed. The rehearsal already ran the gate set over a swept tree, so this is a check rather than an investigation, and it is worth running any day before the switch to see the drift early.
 2. **Back up a configured v5.0.0 device** and keep the bundle. This is the evidence for the migration claim, and it has to be taken before anything moves.
 3. **Transfer the repository**, which leaves the old URLs redirecting.
-4. **Run the sweep with `--apply`** on a branch off the renamed repo, read the diff in full, commit it as one change.
+4. **Run `uv run moondeck/repo_rename/rename_to_moonlight.py --apply`** on a branch off the renamed repo, read the diff in full, commit it as one change. Then check the four the rehearsal found: `kFallbackRepo` still names the old repository, the MoonBase image check still reads `projectMM-moonbase`, MIGRATING's v5.0.0 heading still says projectMM, and `TextEffect`'s golden moves with its new default text rather than failing.
 5. **Flip the identity set in that same commit**: binary name, release asset names, the manifest `name` and `home_assistant_domain`, the docs domain, and the `MM-` prefix if it changes.
+   - The documentation path follows the repository name on its own: GitHub Pages serves a project site under `/<repo>/` even on the custom domain, so `moonmodules.org/projectMM/…` becomes `moonmodules.org/MoonLight/…` at the transfer, and the sweep updates `site_url`, `repo_url` and `site_name` to match. Check the web installer at `/MoonLight/install/` first, since it is the link a newcomer follows and the one every board's QR code carries.
 6. **Run the full gate set again** on the swept tree, then tag and release v6.0.0.
 7. **Verify the two claims**: a v5.0.0 device finds and installs v6.0.0 over OTA, and the backup from step 2 restores onto it with layouts, effects and scripts intact.
 8. **Hand-edit `moondeck/moondeck.json`**, which is gitignored and outside the sweep.
@@ -126,11 +197,109 @@ If step 7 fails, the release stays and the fix is a v6.0.1: the repository has a
 
 Watch for what only real users hit: OTA from versions older than v5.0.0, the documentation redirect, and a mixed network where someone has not updated both devices.
 
+## The introduction: a draft scenario
+
+A first draft to argue with. Nine beats, each naming an existing run file where one fits, and each carrying the one sentence it says. The shape is a promise, then proof, then an invitation: show what it does before explaining how, and leave the viewer able to start.
+
+**Length:** about three minutes. Long enough to earn the last beat, short enough to watch twice.
+
+### 1. The wall, alone
+
+`01-show-the-preview` · 8 seconds · no words yet
+
+Lights moving, filling the frame. No UI, no cursor, nothing to read. The viewer decides in this shot whether to keep watching.
+
+> One ESP32. Thousands of lights, and every change on the next frame.
+
+### 2. What you are looking at
+
+`04-change-layout` · 15 seconds
+
+The grid resizes and the preview reshapes with it. The point is that a layout is a description of where lights are, rather than a mode the effect had to be written for.
+
+> Tell it where your lights are. Everything after that is the same, whether it is a strip, a panel or a cube.
+
+### 3. An effect, and its controls
+
+`05-add-an-effect` · 25 seconds
+
+Add one, then drive its controls and watch the wall answer. Every control applies on the next frame, which is the thing to see rather than say.
+
+> Sixty-one effects. Every control live, with nothing to recompile and nothing to reboot.
+
+### 4. Layers and modifiers
+
+`07-add-a-layer`, `06-add-a-modifier` · 35 seconds
+
+A second layer blending over the first, then a modifier folding the result. Where the product stops being a list of effects and starts being a pipeline.
+
+> Stack them. Mirror them. The pipeline is yours, and the lights follow it live.
+
+### 5. It hears the room
+
+`10-react-to-sound` · 20 seconds
+
+A microphone on the board, an effect following the music. Audio is the feature people arrive wanting.
+
+> A microphone, or your desktop's own audio. The show follows the music.
+
+### 6. Write your own
+
+`09-write-an-effect` · 30 seconds
+
+Type an effect in the browser, save, and the lights change. MoonLive compiled on the device, which is the part nobody expects.
+
+> Write an effect in the browser. It compiles on the device and runs at native speed.
+
+### 7. Out of the device
+
+**New run file.** 20 seconds
+
+The wall leaving as video: NDI into OBS, or a player opening the RTSP stream. The beat that says this belongs in a real production.
+
+> Send the wall out as video, into OBS, Resolume, or any player.
+
+### 8. Real hardware
+
+**New run file**, or footage of a panel · 20 seconds
+
+A HUB75 panel lit from the board's own pins, or the installer flashing a board. Proof that this drives things rather than simulating them.
+
+> Strips, panels, moving heads, DMX. Driven from the board itself.
+
+### 9. Start in two minutes
+
+`02-install-firmware` · 20 seconds
+
+The web installer: pick a port, a release, a board, flash. Ending on the action the viewer can take.
+
+> Open the installer, flash your board, and you are running.
+
+### What the draft leaves out, deliberately
+
+MoonBase, backup and restore, MoonCloud, control surfaces, the driver catalog, and the architecture. Each is real and none is a first impression: a newcomer wants to know what it does and whether they can start. The tutorials carry the rest, in the same order.
+
+### What needs deciding
+
+- **Does beat 6 come before beat 5?** Scripting is the more surprising claim; audio is the more expected one. Whichever goes second gets the weaker attention.
+- **Beats 7 and 8 need run files that do not exist**, and beat 8 may want real footage of a panel rather than a screen capture. That is the one shot the tooling cannot produce.
+- **Three minutes assumes the captions carry it.** A voice track changes the pacing of every beat.
+
+## The two threads behind the week
+
+### Testing covers MoonLight as a product
+
+A newcomer arriving after the rename meets everything at once, and every part of it is equally new to them. So the week covers the path they take: install, provision, add a layout and an effect, drive it, save a preset, write a script, stream it somewhere. A defect in a three-release-old path costs a first impression exactly as much as one in the video drivers.
+
+The ten run files in `test/uiscenarios/clips/` describe precisely that path, numbered in the order a newcomer meets them, which is why they lead the week. `test_host --ui` performs every step and checks its `expect` blocks. They run on request rather than as a gate, by design, which leaves them the largest untested surface in the tree that a laptop can reach.
+
+### The introduction is written this week and filmed after the switch
+
+[uivideo.py](../../../moondeck/uiscenario/uivideo.py) records a run file with Playwright, captions and a cursor; [uicompose.py](../../../moondeck/uiscenario/uicompose.py) cuts published clips into one video on the beat with a music track. The ten clips and the `getting-started` project are the raw material, so the writing, the rehearsing and the edit all happen before the switch, and the recording follows it.
+
 ## After v6.0.0
 
-**Wired DMX-512, in and out.** Absent from `src/light/drivers/` entirely, and the largest remaining capability gap. It needs a transceiver board, so it carries the longest lead time of anything here, and it gates nothing about the rename: a driver added under the new name costs exactly what it would have cost under the old one. Deferring it is what keeps v5.0.0 small enough to cut.
-
-Also here: Ants, Spiral Fire, LightsControl, the IMU, and the per-band onset and BPM work. None of it blocks the rename, and none is easier before it.
+Wired DMX-512, Ants, Spiral Fire, LightsControl, the IMU, and the per-band onset and BPM work. None of it blocks the rename, and none is easier before it.
 
 ## Decisions already on record
 

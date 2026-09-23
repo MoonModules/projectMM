@@ -2012,7 +2012,7 @@ function createCard(mod, depth) {
         if (statsConsent === false) {
             const nudge = document.createElement("div");
             nudge.className = "mooncloud-nudge";
-            nudge.textContent = "Turn on MoonCloud stats to share and see what everyone else is running. ";
+            nudge.textContent = "Turn on MoonCloud stats: see what everyone else is running for ideas, so we know what to build next. ";
             // The reasons live in one place, and it is a page rather than a paragraph here: a nudge
             // long enough to make the case stops being a nudge.
             const why = document.createElement("a");
@@ -5738,8 +5738,8 @@ function updateStatusBar() {
     const nameSpan = document.getElementById("device-name");
     if (nameCtrl && nameSpan && nameCtrl.value) {
         setText(nameSpan, String(nameCtrl.value ?? ""));
-        if (document.title !== "projectMM: " + nameCtrl.value) {
-            document.title = "projectMM: " + nameCtrl.value;
+        if (document.title !== "MoonLight: " + nameCtrl.value) {
+            document.title = "MoonLight: " + nameCtrl.value;
         }
     }
 

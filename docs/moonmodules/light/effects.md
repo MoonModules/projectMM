@@ -1224,6 +1224,26 @@ Origin: projectMM original, the two-buffer water simulation (Gomez 2000) driven 
 
 Detail: [technical](moxygen/BeatRipplesEffect.md)
 
+<a id="pulse"></a>
+
+### Pulse 💫🎶 · 3D
+
+<img src="../../assets/light/effects/PulseEffect.gif" width="300" alt="Pulse effect preview">
+
+Shells expanding from a drifting origin, one per beat: a pair of fronts on a strip, a ring on a panel, a sphere in a volume. Sound fires one and its pitch colors it, and an idle clock keeps them arriving in a silent room. The effect a device boots with.
+
+- `bpm`: pulses a minute while nothing is heard, where 0 waits for sound alone.
+- `speed`: how fast a shell crosses the layout, at any layout size.
+- `thickness`: the shell's width, as a share of the layout rather than in lights.
+- `audioGain`: how strongly sound fires a pulse, where 0 ignores it.
+- `drift`: how far the origin wanders from the center, where 0 pins it there.
+
+Compare with [BeatRipples](#beatripples), which simulates water on a plane. This one draws a moving front, which carries it into 1D and 3D.
+
+Origin: projectMM original
+
+Detail: [technical](moxygen/PulseEffect.md)
+
 <a id="vumeters"></a>
 
 ### VuMeters 💫🎶🖌️ · 3D

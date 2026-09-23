@@ -18,7 +18,7 @@ A user-added Service: the audio source the audio-reactive effects consume. `mode
 
 <img src="../../assets/core/AudioService.png" width="300" alt="Audio module controls">
 
-<video src="../../assets/uiscenarios/react-to-sound.webm" autoplay loop muted playsinline width="720" title="An audio-reactive effect following the room through the board's own microphone"></video>
+<video src="../../assets/uiscenarios/10-react-to-sound.webm" autoplay loop muted playsinline width="720" title="An audio-reactive effect following the room through the board's own microphone"></video>
 
 - `mode` — Local audio, Receive network or Simulate, each showing only its own controls below.
 - `micMode`: (Local, I²S targets) `I2S` for a three-wire part, `PDM` for a two-wire one.

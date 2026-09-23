@@ -61,6 +61,7 @@ Only `action` and that action's own arguments are required.
 | `click_control` | `module`, `control` | a button control |
 | `chapter` | `title`, `description`, `seconds` | a title card, changing nothing |
 | `wait` | `seconds` | dwell, for a caption to be read |
+| `wait_for` | `selector`, `text`, `timeout` | holds until the page shows it, counting a state that already went by |
 | `hero` | `seconds` | hides the chrome and fills the frame with the 3D preview |
 | `pick_file` | `module`, `control`, `value` | a filepath control's picker |
 | `type_script` | `text`, `delay` | types into the MoonLive editor and saves |
@@ -99,11 +100,11 @@ One structural fact drives the rest: **only one root's subtree is in the DOM at 
 
 ## Clips and compositions
 
-A **clip** is one topic, standing alone: it opens the card it needs, creates what it uses, and deletes it again. `add-a-layer.json` is a clip. Standing alone is what lets it be a test, a doc page's video, and one section of a longer cut without change.
+A **clip** is one topic, standing alone: it opens the card it needs, creates what it uses, and deletes it again. `07-add-a-layer.json` is a clip. Standing alone is what lets it be a test, a doc page's video, and one section of a longer cut without change.
 
 A **composition** stitches clips into a longer video (a get-started, a feature tour) and is where music alignment belongs, since a bar grid only means something across a whole cut. `bpm` and `first_beat` live on the composition, not the clip.
 
-    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/07-add-a-layer.json
 
 Sources live under `test/uiscenarios/`, outputs under `media/`:
 
@@ -130,7 +131,7 @@ A **project** (`test/uiscenarios/projects/<name>.json`) is the edit: which clips
   "audio": "media/audio/Norse Constellations (Original Mix).mp3",
   "bpm": 112.35, "first_beat": 8.78, "audio_gain": 0.5, "width": 1280,
   "clips": [
-    {"clip": "add-a-layer", "title": "Stack and blend", "bars": 8},
+    {"clip": "07-add-a-layer", "title": "Stack and blend", "bars": 8},
     {"source": "media/footage/wall.mp4",
      "title": "Twelve thousand lights", "subtitle": "On one board", "bars": 12}
   ]

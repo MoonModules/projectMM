@@ -1,5 +1,5 @@
 {
-  "name": "react-to-sound",
+  "name": "10-react-to-sound",
   "description": "A microphone on the board, an effect following the room: the spectrum reacting to sound as it happens.",
   "requires": "audio",
   "speed": 1.0,

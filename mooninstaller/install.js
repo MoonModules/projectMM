@@ -655,6 +655,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // always have the user re-pick this session than to chase a confusing
     // mid-flash error. installer.start() falls back to its own requestPort()
     // prompt if the user clicks Install without pre-picking.
+    //
+    // `?autoport=1` opts into the pre-select anyway, for a caller that knows the
+    // grant is fresh: a recorded walkthrough, or a rig flashing the same board
+    // repeatedly. It can only ever select a port this browser already granted, and
+    // the stale-handle risk above is the opt-in's to carry: a failed open surfaces
+    // as the same mid-flash error, with the same Try-again path out of it.
     let pickedPort = null;
     // Desktop mode: the user is not flashing a board over USB, they are downloading the build
     // for the computer viewing this page. Same picker, same release list; only the target
@@ -737,6 +743,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // Reflect the port state in the picker's Install gate after every rebuild
     // (init, post-pick, and any cancel that leaves pickedPort null). Wrapped so
     // both rebuildPortSelect() exits and all call sites stay covered by one hook.
+    // Take a port this browser already granted, where the URL asked for it. Runs once,
+    // after the first rebuild, so a failure leaves the picker in its normal no-port state.
+    async function autoSelectGrantedPort() {
+      try {
+        if (new URLSearchParams(window.location.search).get("autoport") !== "1") return;
+        if (pickedPort || !navigator.serial) return;
+        const ports = await navigator.serial.getPorts();
+        // Re-checked after the await: the guard above ran before it, so a port the user
+        // picked while this was resolving would otherwise be overwritten with ports[0].
+        if (!ports.length || pickedPort) return;
+        pickedPort = ports[0];
+        desktopMode = false;
+        syncPortState();
+      } catch {
+        // No grant, no port, or no permission: the picker stays as it was.
+      }
+    }
+
     function syncPortState() {
       rebuildPortSelect();
       installPicker.setDesktopMode(desktopMode);
@@ -756,6 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     syncPortState();
+    autoSelectGrantedPort();   // no-op without ?autoport=1, and never blocks the initial render
 
     let portPromptOpen = false;   // one OS prompt at a time (see the click handler below)
     async function openPortPicker() {
@@ -994,7 +1019,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const localUrl = toLocalUrl(manifestUrl);
         const board = installPicker.getSelectedBoard();
         const txPower = installPicker.getSelectedBoardTxPower();
-        openModal(board ? `Installing projectMM on ${board}` : `Installing ${firmware}`);
+        openModal(board ? `Installing MoonLight on ${board}` : `Installing ${firmware}`);
         showSection("connecting");
         document.getElementById("connecting-detail").textContent = "";
         const eraseBefore = document.getElementById("erase-before-flash").checked;

@@ -26,6 +26,7 @@
 #include "light/effects/MovingHeadEffect.h"
 #include "light/effects/PacmanEffect.h"
 #include "light/effects/PlasmaEffect.h"
+#include "light/effects/PulseEffect.h"
 #include "light/effects/MetaballsEffect.h"
 #include "light/effects/FireEffect.h"
 #include "light/effects/ParticlesEffect.h"
@@ -220,6 +221,7 @@ static void registerModuleTypes() {
     mm::ModuleFactory::registerType<mm::ParticlesEffect>("ParticlesEffect", "light/effects.md#particles");
     mm::ModuleFactory::registerType<mm::PlasmaEffect>("PlasmaEffect", "light/effects.md#plasma");
     mm::ModuleFactory::registerType<mm::PraxisEffect>("PraxisEffect", "light/effects.md#praxis");
+    mm::ModuleFactory::registerType<mm::PulseEffect>("PulseEffect", "light/effects.md#pulse");
     mm::ModuleFactory::registerType<mm::RainbowEffect>("RainbowEffect", "light/effects.md#rainbow");
     mm::ModuleFactory::registerType<mm::RandomEffect>("RandomEffect", "light/effects.md#random");
     mm::ModuleFactory::registerType<mm::RingsEffect>("RingsEffect", "light/effects.md#rings");
@@ -454,8 +456,10 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // One default effect so a bare device (no catalog inject) still shows lights out of the box, but NO default modifier.
     // The boot Layer is just an effect on a 16x16 grid.
     // A device-model catalog entry can REPLACE this (replaceChildren) with its own effects/modifiers, e.g. the testbench swaps in AudioSpectrum + RandomMap.
-    auto* noise = mm::ModuleFactory::create("NoiseEffect");
-    layer->addChild(noise);
+    // Pulse is the one because a first boot has to answer three questions at once: the lights work, the device runs, and it hears the room.
+    // A sparse shell answers all three, where a dense field answers only the first since every light is already lit.
+    auto* pulse = mm::ModuleFactory::create("PulseEffect");
+    layer->addChild(pulse);
 
     // Bound to the effects container rather than to a single layer. A layer rebuilt through the API self-heals without re-running this wiring, and one driver can read across several layer buffers from one place.
     auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));

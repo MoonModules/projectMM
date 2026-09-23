@@ -908,7 +908,7 @@ For a full description of each scenario, see the [scenario inventory](/api/docs/
 Record one UI clip: perform a run file against the interface while Playwright records, then publish a compressed clip for the docs.
 
 ```bash
-uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/add-a-layer.json
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/07-add-a-layer.json
 ```
 
 The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [RUNS.md](uiscenario/RUNS.md).

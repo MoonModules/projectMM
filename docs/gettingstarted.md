@@ -22,7 +22,7 @@ Open the **[web installer](https://moonmodules.org/projectMM/install/)** in Chro
 
 ![The web installer](assets/gettingstarted/01-01-installer-start.png)
 
-<video src="assets/uiscenarios/install-firmware.webm" autoplay loop muted playsinline width="720" title="The installer: picking a release, a firmware, and a board from the gallery"></video>
+<video src="assets/uiscenarios/01-install-firmware.webm" autoplay loop muted playsinline width="720" title="The installer: picking a release, a firmware, and a board from the gallery"></video>
 
 ### 2. Pick the USB port
 
@@ -102,6 +102,10 @@ That's it, projectMM is installed and on your network. The link opens the device
 ## Chapter 2: Your projectMM interface
 
 Everything below runs **in your browser, live from the device**. There's no app, no account, no cloud, the ESP32 itself serves this page, and every change you make takes effect on the lights immediately. Open the link from step 6 and follow along; you can't break anything by exploring.
+
+Here is the whole tour in half a minute, on a board that was flashed a moment earlier:
+
+<video src="assets/uiscenarios/02-first-look.webm" autoplay loop muted playsinline width="720" title="Opening each part of a freshly installed device: layouts, effects, drivers, services with its microphone, and the system itself"></video>
 
 ### The layout: list, preview, controls
 
