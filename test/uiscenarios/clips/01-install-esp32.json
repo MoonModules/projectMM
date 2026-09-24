@@ -1,6 +1,6 @@
 {
-  "name": "01-install-firmware",
-  "description": "The web installer end to end: erase, flash, join WiFi, and open the device that comes back.",
+  "name": "01-install-esp32",
+  "description": "The web installer onto a board: erase, flash, join WiFi, and open the device that comes back.",
   "speed": 1.6,
   "host": "localhost:8421",
   "steps": [
@@ -57,9 +57,10 @@
     },
     {
       "action": "wait_for",
-      "selector": "#wifi-ssid",
+      "selector": "#wifi-connect",
       "timeout": 300,
-      "caption": "Flash done. Now it asks for your WiFi, over the same cable."
+      "caption": "Flash done. Now it asks for your WiFi, over the same cable.",
+      "text": "Connect"
     },
     {
       "action": "type_into",

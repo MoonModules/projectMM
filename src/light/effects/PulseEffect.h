@@ -52,7 +52,7 @@ public:
 
     /// Pulses per minute while nothing is heard, where 0 waits for sound alone.
     uint8_t bpm = 40;
-    /// How fast a shell crosses the layout, whatever its size, where 100 is about a second.
+    /// How fast a shell crosses the layout, whatever its size, where 255 crosses it in a second.
     uint8_t speed = 60;
     /// The shell's width as a share of the layout, so it stays a shell at any size.
     uint8_t thickness = 40;
@@ -90,6 +90,7 @@ public:
             const uint16_t lift = (static_cast<uint16_t>(f->onset) * audioGain) / 255;
             // What color: the dominant frequency, so a bass note and a cymbal differ on sight.
             emit(now, static_cast<uint8_t>(155 + (lift > 100 ? 100 : lift)), hueFromPitch(f->peakHz));
+            lastIdle_ = now;   // a beat is a pulse, so the quiet clock waits a full interval after it
         } else if (bpm > 0 && now - lastIdle_ >= 60000u / bpm) {
             lastIdle_ = now;
             emit(now, 150, static_cast<uint8_t>(now / 64));   // a slow walk through the palette

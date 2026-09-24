@@ -2021,7 +2021,7 @@ function createCard(mod, depth) {
             why.rel = "noopener";
             why.textContent = "Why you might like this";
             nudge.appendChild(why);
-            host.appendChild(nudge);
+            controlsHost.appendChild(nudge);
         }
 
         // TWO IMAGES, ONE PANEL. A device installs the app it runs and MoonBase the recovery

@@ -1,5 +1,5 @@
 {
-  "name": "09-write-an-effect",
+  "name": "97-write-an-effect",
   "description": "Type an effect in the browser, save it, and the lights change: compiled to native code on the device.",
   "speed": 1.4,
   "steps": [

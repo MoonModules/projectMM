@@ -24,7 +24,13 @@ projectMM ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased
 
-Nothing yet. Entries land here as breaking changes are made, and the heading takes the version at its release.
+### Audio arrives on every device, and its modes are reordered
+
+**Action: *re-set a control*, on a device whose Audio you had configured.** Restore maps the value for you, so this asks something only of a device upgraded in place.
+
+Audio is now wired at boot rather than added by hand, because the default effect reacts to sound. A device without the module showed none of that: the lights moved without answering whether anything was heard. It defaults to **simulate**, a synthesized signal, so a device demonstrates the behavior before a microphone is wired to it. A board that has a microphone selects `local audio` in its catalog entry, the way it already names its pins.
+
+The mode options are reordered to run simple to advanced: **simulate, receive network, local audio**, where the order was local, receive, simulate. The default is now the first entry rather than an index that depended on whether the platform had a network. The selection is persisted as that index, so every saved value moves: what read 0 for local audio now reads 2, and what read 2 for simulate now reads 0. [Restore](../how-to/backup-and-restore.md) carries both. A device with no network has two options rather than three, and its old `1` is ambiguous, so re-pick that one by hand.
 
 ## v5.0.0
 
@@ -144,7 +150,7 @@ Nothing is deleted if you skip this: the old directories stay where they are, an
 
 The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.
 
-Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout is unchanged** and still uses `build/.config`, so a development tree and every gate script behave exactly as before.
+Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout stays in the tree**, under `build/fs` since the entry above moved it there, so its settings are at `build/fs/.config` and every gate script behaves as before.
 
 **Action: *nothing*, unless your settings persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
 

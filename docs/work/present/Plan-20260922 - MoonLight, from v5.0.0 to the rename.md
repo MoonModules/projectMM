@@ -83,7 +83,7 @@ Thursday's work happened on Wednesday, and it changed what the first minute of t
 
 **Two recorder defects, each a silently wrong take rather than an error.** `wait_for` read only the present, so a state shorter than the gap between two steps was missed: the S3's erase lasts about twelve seconds and the step waiting for it starts later than that, which failed a run that had in fact gone perfectly. It now records what a watched element showed and counts a state that already passed. And `type_into` typed on top of a field rather than into it, so the installer's prefilled SSID provisioned a device for `MoonModulesMoonModules`, which joins nothing. Both are pinned by tests, and the second is a defect for anyone re-installing rather than only for the camera.
 
-**The clips are numbered in the order the work happens**, `01-install-firmware` through `10-react-to-sound`, so the directory reads as the path a newcomer takes. `02-first-look` is new: it tours a device that was flashed minutes earlier, and it is embedded where Chapter 2 of [getting started](../../gettingstarted.md) begins.
+**The clips are numbered in the order the work happens**, `01-install` through `10-react-to-sound`, so the directory reads as the path a newcomer takes. Both the install and the tour exist twice, once per platform, and each pair shares its number because it is one beat on two machines. Installing splits because the routes share no step, one flashing a chip and the other downloading an app. The tour splits because the trees differ: a board drives LED pins and hears a real microphone, where a computer previews and sends over the network. Each tour opens every module and every tab inside it. `02-first-look-desktop` is embedded where Chapter 2 of [getting started](../../gettingstarted.md) begins.
 
 Both clips were recorded against a real erase-and-flash of the S3, ending on a provisioned device at `192.168.1.158` with its microphone tracking music in the room.
 
@@ -108,7 +108,7 @@ Two rules hold all week. **Anything found before Tuesday is fixed under the old 
 
 - Revise the ten in `test/uiscenarios/clips/` to match the script's beats.
 - Write the ones the script needs and the repo lacks.
-- Re-record `01-install-firmware` and `02-first-look` if the script moves their beats.
+- Re-record the install and first-look pairs if the script moves their beats.
 - Done when every beat has a run file and `test_host --ui` passes over all of them.
 
 **Fri 25: the first cut, filmed.** Hands on, and the rehearsal that finds what reads badly.
@@ -279,11 +279,11 @@ The web installer: pick a port, a release, a board, flash. Ending on the action 
 
 MoonBase, backup and restore, MoonCloud, control surfaces, the driver catalog, and the architecture. Each is real and none is a first impression: a newcomer wants to know what it does and whether they can start. The tutorials carry the rest, in the same order.
 
-### What needs deciding
+### Decided
 
-- **Does beat 6 come before beat 5?** Scripting is the more surprising claim; audio is the more expected one. Whichever goes second gets the weaker attention.
-- **Beats 7 and 8 need run files that do not exist**, and beat 8 may want real footage of a panel rather than a screen capture. That is the one shot the tooling cannot produce.
-- **Three minutes assumes the captions carry it.** A voice track changes the pacing of every beat.
+- **The beats keep their order**, audio at 5 and scripting at 6. Scripting is the more surprising claim, so it closes the build section where the stronger position is.
+- **Every shot is a screen capture.** Beat 8 keeps its place without footage of a physical panel, so the whole film is reproducible from run files and a re-shoot stays a re-run. Beats 7 and 8 still need run files the repo lacks.
+- **Captions carry it, with no voice track.** That is the three-minute pacing the draft assumes, and it keeps a re-shoot cheap. It is also what the tooling does: [uicompose.py](../../../moondeck/uiscenario/uicompose.py) mixes one music bed cut to the beat, so narration would need a second track and ducking beneath it, which is a change to the tool rather than to the script.
 
 ## The two threads behind the week
 

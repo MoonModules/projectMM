@@ -1,5 +1,5 @@
 {
-  "name": "08-swap-an-effect",
+  "name": "96-swap-an-effect",
   "description": "Replace an effect in place; the slot keeps its position.",
   "steps": [
     {

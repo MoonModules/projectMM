@@ -468,7 +468,7 @@ UI scenarios drive the web interface itself: a run file lists what a person does
 
 ```bash
 uv run moondeck/test/test_host.py --ui                     # the whole lane
-uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/07-add-a-layer.json
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
 ```
 
 The runs live in `test/uiscenarios/clips/`, the engine in `moondeck/uiscenario/`. Data under `test/`, runner under `moondeck/`: the same split the pipeline scenarios use. Tests are parameterized over the directory, so a new run file is a new test with nothing to wire up. Format and actions: [RUNS.md](../../moondeck/uiscenario/RUNS.md).

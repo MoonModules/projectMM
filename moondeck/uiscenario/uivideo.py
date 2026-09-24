@@ -10,7 +10,7 @@ caller adds a camera. Playwright's own Screencast API draws the cursor, highligh
 what each action touches and renders the captions as overlays, so there is no second
 pass burning text into frames and no hand-drawn pointer to keep in sync.
 
-    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/07-add-a-layer.json
+    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
 
 Prerequisites:
     1. A running projectMM:   uv run moondeck/run/run_desktop.py

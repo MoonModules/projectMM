@@ -218,6 +218,7 @@
         "id": "Audio",
         "parent_id": "Services",
         "controls": {
+          "mode": 2,
           "micMode": 1,
           "wsPin": 8,
           "sdPin": 7
@@ -598,6 +599,7 @@
         "id": "Audio",
         "parent_id": "Services",
         "controls": {
+          "mode": 2,
           "sckPin": 47,
           "wsPin": 48,
           "sdPin": 21
@@ -714,6 +716,7 @@
         "id": "Audio",
         "parent_id": "Services",
         "controls": {
+          "mode": 2,
           "sckPin": 32,
           "wsPin": 26,
           "sdPin": 33,
@@ -1034,6 +1037,7 @@
         "id": "Audio",
         "parent_id": "Services",
         "controls": {
+          "mode": 2,
           "sckPin": 32,
           "wsPin": 26,
           "sdPin": 33,
@@ -1111,6 +1115,7 @@
         "id": "Audio",
         "parent_id": "Services",
         "controls": {
+          "mode": 2,
           "sckPin": 53,
           "wsPin": 55,
           "sdPin": 54

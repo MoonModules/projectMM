@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import urljoin
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -288,6 +289,9 @@ class Driver:
         # Every text a watched element has shown, so a wait arriving after a brief state
         # is still satisfied by it: @xref{wait_for}.
         self._seen_text: dict[str, set[str]] = {}
+        # The page may own the clock (a test's does), so a timing rule is testable without a
+        # real sleep and without patching `time` for everything else in the process.
+        self._now = getattr(page, "now", time.time)
         self._watched: set[str] = set()
 
     VIEWPORT = {"width": 1280, "height": 720}
@@ -392,8 +396,8 @@ class Driver:
             return
         # Sliced, so a watched element is read several times across a long dwell rather than
         # once at each end, which is where a short-lived state hides.
-        end = time.time() + seconds
-        while time.time() < end:
+        end = self._now() + seconds
+        while self._now() < end:
             self.page.wait_for_timeout(120)
             for sel in tuple(self._watched):
                 self._note_text(sel)
@@ -881,6 +885,56 @@ class Driver:
         """Click any element, by CSS selector."""
         return self.tap(self.page.locator(selector))
 
+    def follow_link(self, selector: str, seconds: float = 2.5) -> bool:
+        """Point at a link, open where it leads in this page, dwell, then come back.
+
+        A link that opens a new tab cannot be filmed: the recorder captures one page, so the
+        destination a viewer is being told about never appears. Following it in place shows the
+        real page at the real URL, which is the whole point of demonstrating the button, and the
+        viewer sees the same content either way. The pointer still travels to the link first, so
+        the cause of the navigation is visible rather than a page that simply changes.
+        """
+        # The match that actually carries a link. `data-module` sits on the nav entry as well as
+        # the card, so a card-scoped selector can still resolve to a nav button with no href.
+        all_matches = self.page.locator(selector)
+        el = next((m for m in (all_matches.nth(i) for i in range(all_matches.count()))
+                   if m.get_attribute("href")), None)
+        if el is None or not self._ready(el):
+            return False
+        box = el.bounding_box()
+        if box:                      # point at it, so the navigation has a visible cause
+            self.page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            self._settle(0.5)
+        # Resolved against the page: the `{ }` link is relative, so it follows whatever host the
+        # UI is served from, and `goto` needs the absolute form.
+        href = urljoin(self.page.url, el.get_attribute("href"))
+        back = self.page.url
+        try:
+            # `commit` rather than `domcontentloaded`: a JSON response has no DOM to wait on, and
+            # the `{ }` button leads to exactly that. The dwell below is what the viewer sees.
+            self.page.goto(href, wait_until="commit", timeout=20000)
+            self._settle(seconds)
+            reached = True
+        except Exception:
+            reached = False          # an offline docs host is a bad take, not a crash
+        finally:
+            # Unconditional: a step that leaves the driver on another page makes every step after
+            # it fail against the wrong document, which reads as a broken UI rather than a bad link.
+            try:
+                self.page.goto(back, wait_until="domcontentloaded", timeout=20000)
+                self.open_app_wait()
+            except Exception:
+                reached = False
+        return reached
+
+    def open_app_wait(self) -> None:
+        """Wait for the device UI to be driveable again after a navigation."""
+        try:
+            self.page.wait_for_selector(".card", state="attached", timeout=20000)
+        except Exception:
+            pass
+        self.page.wait_for_timeout(700)
+
     def type_into(self, selector: str, text: str, delay: int = 180) -> bool:
         """Type into any field, slowly enough to watch a list narrow as it filters.
 
@@ -1114,6 +1168,7 @@ class Driver:
         "choose":         lambda a: (a["module"], a["control"], a["value"]),
         "click_control":  lambda a: (a["module"], a["control"]),
         "click":          lambda a: (a["selector"],),
+        "follow_link":    lambda a: (a["selector"], float(a.get("seconds", 2.5))),
         "type_into":      lambda a: (a["selector"], a["text"],
                                      int(a.get("delay", 180))),
         "choose_option":  lambda a: (a["selector"], a["value"]),
@@ -1151,8 +1206,8 @@ class Driver:
         guess about the hardware, which is the guesswork this action exists to remove.
         """
         self._watch(selector)
-        end = time.time() + timeout
-        while time.time() < end:
+        end = self._now() + timeout
+        while self._now() < end:
             seen = self._note_text(selector)
             if text is None:
                 # Non-empty, because the installer blanks this element before it fills it in:
@@ -1161,7 +1216,13 @@ class Driver:
                     return True
             elif any(text.lower() in s for s in self._seen_text.get(selector, ())):
                 return True
-            self._settle(0.5)   # paced, so the wait is visible in a recording
+            # Paced, the dwell IS the poll and the wait is visible in the recording. Unpaced,
+            # _settle returns at once, so the sleep has to come from here or this spins a core.
+            if self.paced:
+                self._settle(0.5)
+            else:
+                self.page.wait_for_timeout(100)
+                self._note_text(selector)
         raise TimeoutError(f"wait_for: {selector!r} never showed {text!r} within {timeout}s"
                            + (f" (it showed: {sorted(self._seen_text.get(selector, ()))})"
                               if self._seen_text.get(selector) else ""))
@@ -1311,6 +1372,7 @@ ACTIONS: dict[str, str] = {
     "click_control":  "click_control",
     # Selector actions: another projectMM surface, with no module contract of its own.
     "click":          "click",
+    "follow_link":    "follow_link",
     "type_into":      "type_into",
     "choose_option":  "choose_option",
     "goto":           "goto",

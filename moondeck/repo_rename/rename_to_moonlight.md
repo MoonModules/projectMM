@@ -6,7 +6,7 @@ Everywhere the product name still appears as the CURRENT name, which is what the
 
 Committed so the reach is reviewable before the day. A file appearing here that should keep the old name needs a `rename-keep` marker, and the readiness check asserts the ones already found.
 
-**1372 hits across 240 files.**
+**1368 hits across 240 files.**
 
 ## By area
 
@@ -19,20 +19,20 @@ Committed so the reach is reviewable before the day. A file appearing here that 
 | 67 | `src/core/system` |
 | 66 | `.` |
 | 58 | `test/unit/core` |
-| 52 | `docs/moonmodules/light` |
-| 42 | `src/ui` |
+| 53 | `docs/moonmodules/light` |
+| 38 | `src/ui` |
 | 37 | `docs/friend-repos` |
 | 37 | `docs/moonmodules/core` |
 | 35 | `moondeck` |
 | 34 | `moondeck/run` |
-| 31 | `mooninstaller` |
 | 28 | `moondeck/docs` |
+| 28 | `mooninstaller` |
 | 26 | `docs` |
 | 24 | `docs/work/past` |
-| 21 | `src/light/effects` |
+| 22 | `src/light/effects` |
 | 20 | `moondeck/check` |
+| 19 | `docs/work/present` |
 | 18 | `.github/workflows` |
-| 18 | `docs/work/present` |
 | 18 | `moondeck/build` |
 | 16 | `docs/reference` |
 | 16 | `src/light/layouts` |
@@ -77,13 +77,13 @@ Committed so the reach is reviewable before the day. A file appearing here that 
 | 43 | `docs/work/future/livescripts-analysis-top-down.md` |
 | 42 | `docs/work/past/plans/rename-to-moonlight (superseded).md` |
 | 41 | `docs/how-to/installing-to-desktop.md` |
-| 37 | `docs/moonmodules/light/effects.md` |
+| 38 | `docs/moonmodules/light/effects.md` |
 | 31 | `docs/how-to/panel-cards.md` |
 | 30 | `docs/work/future/livescripts-analysis-bottom-up.md` |
-| 27 | `src/ui/app.js` |
 | 26 | `moondeck/MoonDeck.md` |
 | 25 | `docs/moonmodules/core/system.md` |
 | 25 | `docs/work/future/backlog-core.md` |
+| 25 | `src/ui/app.js` |
 | 23 | `docs/work/future/leddriver-analysis-bottom-up.md` |
 | 23 | `docs/work/future/nrf-zephyr-target-analysis.md` |
 | 21 | `.vale.ini` |

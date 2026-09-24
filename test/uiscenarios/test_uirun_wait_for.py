@@ -9,7 +9,6 @@ No browser and no device: the driver is pointed at a page object that marches th
 states on a clock, which is what lets a timing rule be tested at all.
 """
 
-import time
 
 import pytest
 from uirun import Driver
@@ -26,17 +25,25 @@ class _Element:
 
 
 class _Page:
-    """A page whose one element marches through states on a clock."""
+    """A page whose one element marches through states on a clock the test owns.
+
+    The clock advances only when the page is asked to wait, so a run takes no real time and
+    lands on the same states every time. Wall-clock sleeps make a timing test slow and flaky
+    at once, which is the pair of properties a test of timing can least afford.
+    """
 
     def __init__(self, timeline):
         self._timeline = timeline
-        self._t0 = time.time()
+        self._now = 0.0
+
+    def now(self):
+        return self._now
 
     @property
     def text_now(self):
         current = self._timeline[0][1]
         for at, text in self._timeline:
-            if time.time() - self._t0 >= at:
+            if self._now >= at:
                 current = text
         return current
 
@@ -44,7 +51,7 @@ class _Page:
         return _Element(self)
 
     def wait_for_timeout(self, ms):
-        time.sleep(ms / 1000.0)
+        self._now += ms / 1000.0
 
 
 def _driver(timeline, paced=True):
@@ -93,9 +100,9 @@ def test_an_unpaced_run_does_not_dwell_once_something_is_watched():
     """
     driver = _driver([(0.0, "Detected chip")], paced=False)
     assert driver.wait_for(SELECTOR, "Detected", timeout=5)
-    started = time.time()
+    before = driver.page.now()
     driver._settle(2.0)                       # a hold a paced run would honour
-    assert time.time() - started < 0.5
+    assert driver.page.now() == before        # the clock only moves when the page is asked to wait
 
 
 def test_an_empty_element_does_not_satisfy_a_wait_that_names_no_text():

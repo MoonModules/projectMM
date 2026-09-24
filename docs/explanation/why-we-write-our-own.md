@@ -26,11 +26,11 @@ What changed is the effort of writing code, and what changed it is AI agents. Th
 
 ## Why agents at all
 
-Using agents to build open-source software is contested, and a page that credits them with making this project possible cannot reasonably skip past that. So, briefly and once: where we stand.
+Using agents to build open-source software is contested, and a page that credits them with making this project possible cannot reasonably skip past that.
 
-We use AI agents because the technology is not going away, and the only way to learn what a tool does, where it is strong and where it quietly fails, is to run a real project on it.
+AI agents are a new way of working, and a genuinely different one rather than a faster version of what came before. We have worries about AI as it stands, and it is also not going away. Having followed it since the eighties, we would rather understand it than pretend it is absent.
 
-The two objections we hear most are that agents take developers' jobs, and that the energy they burn is not worth it. On both we have a position rather than an argument: we think AI changes jobs rather than takes them, the way computers changed office work from the 1990s onward, and we think the energy cost is defensible. We are not going to argue either here, and neither is a claim that everyone should work this way.
+So the position is neither enthusiasm nor resignation. A tool this consequential is better understood by using it seriously than by arguing about it from outside. Learning what one does, where it is strong and where it quietly fails, means running a real project on it. It also means holding that project to a standard that would expose the failures. What follows is that standard, and what it costs.
 
 ## The limits of this argument
 

@@ -63,7 +63,9 @@ def run_sweep_dry() -> tuple[int, str]:
 def per_area(report: str) -> list[tuple[str, int]]:
     """Where the sweep's hits sit, by directory, so growth has a location rather than a number."""
     areas: dict[str, int] = {}
-    for m in re.finditer(r"^  (\S+): (\d+) hit", report, re.M):
+    # Non-greedy to the count rather than \S+, since a tracked path may contain a space
+    # (docs/assets carries several) and stopping at the first one drops the file from its area.
+    for m in re.finditer(r"^  (.+?): (\d+) hit", report, re.M):
         area = str(Path(m.group(1)).parent)
         areas[area] = areas.get(area, 0) + int(m.group(2))
     return sorted(areas.items(), key=lambda kv: -kv[1])
