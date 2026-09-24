@@ -1,6 +1,6 @@
 # Plan: MoonLight, from v5.0.0 to the rename
 
-projectMM becomes MoonLight. **v5.0.0 is the last release under the old name and v6.0.0 is the first under the new one.** This file is the whole record: what ships before the switch, what happens at it, what follows, and the decisions already taken along the way. It replaces the five files that held pieces of it.
+MoonLight becomes MoonLight. **v5.0.0 is the last release under the old name and v6.0.0 is the first under the new one.** This file is the whole record: what ships before the switch, what happens at it, what follows, and the decisions already taken along the way. It replaces the five files that held pieces of it.
 
 ## The three decisions that shape everything
 
@@ -8,11 +8,11 @@ projectMM becomes MoonLight. **v5.0.0 is the last release under the old name and
 
 **A user's configuration survives both releases.** v5.0.0 upgrades in place, subject only to the breaks [MIGRATING](../../reference/MIGRATING.md) already records. v6.0.0 carries configuration across too, by Backup on v5 and Restore on v6, because **nothing persisted carries the product name**: config files are named after module types (`Effects.json`, `Drivers.json`) and the sweep leaves every type and `namespace mm::` untouched. The migration engine in [migrate.js](../../../src/ui/migrate.js) therefore has no rename to apply for the rename itself, which is the easiest case it can be handed.
 
-**No compatibility code ships with MoonLight**, which is [the standing rule](../../../CLAUDE.md#principles) applied to the rename: nothing translates a projectMM identity into a MoonLight one, no alias for a renamed key, no shim reading a predecessor's file, no branch asking which name a device was flashed under.
+**No compatibility code ships with MoonLight**, which is [the standing rule](../../../CLAUDE.md#principles) applied to the rename: nothing translates a MoonLight identity into a MoonLight one, no alias for a renamed key, no shim reading a predecessor's file, no branch asking which name a device was flashed under.
 
 **Backup on v5, Restore on v6 is the one supported path**, and every upgrade question is answered with it. Where something does not carry, the answer is to erase the flash and install clean. A Home Assistant entity re-appearing under a new identity is the same trade: the alternative is a permanent pin to the old name, and a new product does not inherit one.
 
-**Live interoperation survives**, which the rehearsal got wrong: a peer is classified by the numeric marker `0x014d4d00` rather than by any name, so a projectMM device and a MoonLight device still see each other. What goes stale is a saved device list, whose rows re-type themselves on the next discovery sweep.
+**Live interoperation survives**, which the rehearsal got wrong: a peer is classified by the numeric marker `0x014d4d00` rather than by any name, so a MoonLight device and a MoonLight device still see each other. What goes stale is a saved device list, whose rows re-type themselves on the next discovery sweep.
 
 ## Where we stand
 
@@ -99,7 +99,7 @@ Cutover day went from 1376 lines to 1206, in two passes. The first moved 99, the
 
 More useful than the count is what moving them taught, because every one of these was a thing the rehearsal had reported as safe.
 
-**A hand-counted length survives a rename by luck.** MQTT sized its topic buffer as `9 + 1 + 6 + 1`, counted from `projectMM`. MoonLight is nine characters too, so the sweep would have passed and any other name would have truncated every topic silently. The length now derives from the string with `sizeof`, which is the general form: a literal's length belongs to the literal, never to a comment that counts it.
+**A hand-counted length survives a rename by luck.** MQTT sized its topic buffer as `9 + 1 + 6 + 1`, counted from `MoonLight`. MoonLight is nine characters too, so the sweep would have passed and any other name would have truncated every topic silently. The length now derives from the string with `sizeof`, which is the general form: a literal's length belongs to the literal, never to a comment that counts it.
 
 **A round trip has as many ends as it has, and the tests know.** The device-type label looked like a pair, one plugin writing it and one comparison reading it. It was three: `devTypeStr` emits the string that gets persisted. Renaming two of the three broke four tests, which is the guardrail working exactly as intended. Assume a third end exists until the suite says otherwise.
 
@@ -113,7 +113,7 @@ More useful than the count is what moving them taught, because every one of thes
 
 **The sweep blinded the prose checker.** `.vale.ini` names its style and vocabulary by directory, so renaming the references while the directories kept the old name left Vale reading no rules at all and reporting zero findings for every header. The directories moved with the config, and the proof is Vale reporting `.cpp` findings again, which is the control the file's own comment asks for.
 
-**A blanket replace edits quotations.** The product owner's own words inside a block quote were rewritten, turning "projectMM V1, V2 and V3" into a sentence they never wrote. A quote is evidence rather than prose, so the sweep has no business inside one.
+**A blanket replace edits quotations.** The product owner's own words inside a block quote were rewritten, turning "MoonLight V1, V2 and V3" into a sentence they never wrote. A quote is evidence rather than prose, so the sweep has no business inside one.
 
 **What genuinely cannot move early**, checked rather than assumed: the OTA project guard, where `moonbase/CMakeLists.txt` stamps the image and `FirmwareImage.h` checks that exact string, so moving either early makes every v5 device refuse the new MoonBase image. And the repository URLs, which resolve only once the repo itself is renamed.
 
@@ -228,8 +228,8 @@ One day, in order, with a stop at each gate:
 3. **Transfer the repository**, which leaves the old URLs redirecting.
 4. **Run `uv run moondeck/repo_rename/rename_to_moonlight.py --apply`** on a branch off the renamed repo, read the diff in full, commit it as one change. Then check the four the rehearsal found: `kFallbackRepo` still names the old repository, the MoonBase image check still reads `projectMM-moonbase`, MIGRATING's v5.0.0 heading still says projectMM, and `TextEffect`'s golden moves with its new default text rather than failing.
 5. **Flip the identity set in that same commit**: binary name, release asset names, the manifest `name` and `home_assistant_domain`, the docs domain, and the `MM-` prefix if it changes.
-   - The documentation path follows the repository name on its own: GitHub Pages serves a project site under `/<repo>/` even on the custom domain, so `moonmodules.org/projectMM/…` becomes `moonmodules.org/MoonLight/…` at the transfer, and the sweep updates `site_url`, `repo_url` and `site_name` to match. Check the web installer at `/MoonLight/install/` first, since it is the link a newcomer follows.
-   - **Check the OLD installer path too, and do not assume it redirects.** GitHub's permanent redirect for a transferred repository covers `github.com` URLs, which is what the OTA client follows; a Pages path on a custom domain is a different mechanism and is not covered by that promise. Every board already shipped carries `/projectMM/install/` on its QR code and in its documentation, so a 404 there strands the people most likely to be upgrading. Open it right after the transfer: if it does not land on the installer, publish a redirect from the old path before announcing anything.
+   - The documentation path follows the repository name on its own: GitHub Pages serves a project site under `/<repo>/` even on the custom domain, so `moonmodules.org/projectMM/…` becomes `moonmodules.org/projectMM/…` at the transfer, and the sweep updates `site_url`, `repo_url` and `site_name` to match. Check the web installer at `/MoonLight/install/` first, since it is the link a newcomer follows.
+   - **Check the OLD installer path too, and do not assume it redirects.** GitHub's permanent redirect for a transferred repository covers `github.com` URLs, which is what the OTA client follows; a Pages path on a custom domain is a different mechanism and is not covered by that promise. Every board already shipped carries `/MoonLight/install/` on its QR code and in its documentation, so a 404 there strands the people most likely to be upgrading. Open it right after the transfer: if it does not land on the installer, publish a redirect from the old path before announcing anything.
 6. **Run the full gate set again** on the swept tree, then tag and release v6.0.0.
 7. **Verify the two claims**: a v5.0.0 device finds and installs v6.0.0 over OTA, and the backup from step 2 restores onto it with layouts, effects and scripts intact.
 8. **Hand-edit `moondeck/moondeck.json`**, which is gitignored and outside the sweep.
@@ -260,7 +260,7 @@ What is said to camera before the clips run, in the product owner's own words an
 > So why did I do this? The old MoonLight was not perfect but it worked and was highly tuned. So why give up on all of this?
 > The reason is simple: because AI agents offer a revolutionary new paradigm and although I have a lot of worries about AI in its current context, it is not going away, so as an IT guy talking about AI already back in the 80s, I cannot pretend it is not there or that it will blow over.
 >
-> I did give up on MoonLight code, but I did not give up on the MoonLight principles! They are a few years old, formulated when I was working on WLED and WLED-MM, first tried in StarLight, then MoonLight, then projectMM V1, V2 and V3 and now the new MoonLight, and the principles were extended over time:
+> I did give up on MoonLight code, but I did not give up on the MoonLight principles! They are a few years old, formulated when I was working on WLED and WLED-MM, first tried in StarLight, then MoonLight, then MoonLight V1, V2 and V3 and now the new MoonLight, and the principles were extended over time:
 > - 3D from the ground up
 > - Everything is a module, this was inspired by WLED usermods, now a MoonModule
 > - UI is derived from the MoonModule, not written for each

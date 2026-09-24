@@ -4,7 +4,7 @@ title: Why we write our own code
 
 # Why we write our own code
 
-projectMM pulls in no third-party libraries: no FastLED, no ESPAsyncWebServer, no ArduinoJson. A library that is genuinely needed lives behind the platform boundary in `src/platform/`, never in core or the light domain. The *what*, with the replacement for each, is [below](#third-party-libraries). The *why* comes first.
+MoonLight pulls in no third-party libraries: no FastLED, no ESPAsyncWebServer, no ArduinoJson. A library that is genuinely needed lives behind the platform boundary in `src/platform/`, never in core or the light domain. The *what*, with the replacement for each, is [below](#third-party-libraries). The *why* comes first.
 
 ## A dependency is a hole in the test coverage
 
@@ -48,7 +48,7 @@ Writing your own implementation of a known idea can land in either column, and w
 
 **Study, not skim.** This is the row that AI agents genuinely threaten, and it is worth naming rather than glossing. An agent can reproduce a working pattern without anyone involved understanding why it works, which is skimming with better output. The countermeasure is structural: each feature is spec'd from the primary source, the datasheet, the standard, the textbook algorithm, before it is written, and every line and every spec is reviewed. If the reasoning behind a piece of code cannot be stated, it does not go in. That standard is more work, not less.
 
-**Ideas, not code.** We are not trying to acquire anyone's implementation. What travels is the idea: an approach to a problem, a technique someone proved works on real hardware, a mistake worth not repeating. Most of what projectMM implements is publicly defined. Art-Net, E1.31/sACN, DDP, WS2812 timing, the peripheral datasheets, textbook DSP: those are industry standards, not anyone's property, and we implement them from the primary source. Textbook algorithm, textbook name, our implementation.
+**Ideas, not code.** We are not trying to acquire anyone's implementation. What travels is the idea: an approach to a problem, a technique someone proved works on real hardware, a mistake worth not repeating. Most of what MoonLight implements is publicly defined. Art-Net, E1.31/sACN, DDP, WS2812 timing, the peripheral datasheets, textbook DSP: those are industry standards, not anyone's property, and we implement them from the primary source. Textbook algorithm, textbook name, our implementation.
 
 **Steal from many, not one.** A rewrite that is one library with the names changed is a rip-off, whoever or whatever typed it. What is here comes from several sources, from the standards themselves, from what this hardware forces on you, and from years of our own prior work.
 

@@ -151,9 +151,9 @@ def collect_desktop():
     # Located by build_desktop.desktop_binary(), which repo_health.py also calls: the two had
     # separate copies of the candidate list in OPPOSITE order, so one run of this script could
     # take binary_kb from one file and flash.desktop from another.
-    projectMM = desktop_binary(BUILD_DIR)
-    if projectMM:
-        kpi["binary_kb"] = projectMM.stat().st_size // 1024
+    MoonLight = desktop_binary(BUILD_DIR)
+    if MoonLight:
+        kpi["binary_kb"] = MoonLight.stat().st_size // 1024
 
     test_exe = _pick_first_existing(
         BUILD_DIR / "test" / "mm_tests",
@@ -534,7 +534,7 @@ def main():
     else:
         # Full interactive report
         print("=" * 50)
-        print("  projectMM KPI Report")
+        print("  MoonLight KPI Report")
         print("=" * 50)
         print()
         print(format_oneliner(desktop, esp32, code))

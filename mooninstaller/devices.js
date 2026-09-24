@@ -1,4 +1,4 @@
-// "Your devices" — a localStorage-backed list of projectMM devices the user
+// "Your devices" — a localStorage-backed list of MoonLight devices the user
 // has provisioned from this install page. Surface so a returning user can
 // jump to their device UI without re-typing the IP / re-running Improv.
 //
@@ -13,7 +13,7 @@
 // app.js) does the same job from the right side of the security boundary.
 //
 // State shape: `[{ name, url, lastSeen, deviceModel? }]` keyed under
-// `projectMM.devices.v1` in localStorage. `deviceModel` is a bookmark label only —
+// `MoonLight.devices.v1` in localStorage. `deviceModel` is a bookmark label only —
 // the model's defaults are applied to the device during the install over serial
 // ("Improv = REST over serial"), not from this list. It's optional; the render path
 // treats an absent value as no model line. Entries saved before the board→deviceModel

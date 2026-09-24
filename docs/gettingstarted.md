@@ -1,20 +1,20 @@
 # Getting started
 
-New to ESP32 or flashing firmware? You don't need to be. projectMM installs straight from your web browser: no software to download, no command line. In a few minutes you'll have lights running and the device on your network, and the device's own web interface open in your browser ready to play with.
+New to ESP32 or flashing firmware? You don't need to be. MoonLight installs straight from your web browser: no software to download, no command line. In a few minutes you'll have lights running and the device on your network, and the device's own web interface open in your browser ready to play with.
 
-This guide has two chapters. **Chapter 1** gets projectMM onto your device.
+This guide has two chapters. **Chapter 1** gets MoonLight onto your device.
 **Chapter 2** is a tour of the interface you land in afterwards, so you know what
 every part does and where to start building your own light show.
 
 **You need:** an ESP32 board, a USB cable that carries data (not charge-only),
 and a **Chromium-based browser** on a computer (Google Chrome, Microsoft Edge, or Opera (the installer uses the Web Serial API, which Safari and Firefox don't support).
 
-> Want the bigger picture of what projectMM is first? See the
+> Want the bigger picture of what MoonLight is first? See the
 > [project overview](../README.md).
 
 ---
 
-## Chapter 1: install projectMM
+## Chapter 1: install MoonLight
 
 ### 1. Open the installer and plug in
 
@@ -95,11 +95,11 @@ You'll see this same "Device is online!" box however your device connected, over
 ![Online over Ethernet](assets/gettingstarted/01-11-online-ethernet.png)
 ![Online on an address it already had](assets/gettingstarted/01-12-online-existing-ip.png)
 
-That's it, projectMM is installed and on your network. The link opens the device's own web interface, served straight from the ESP32. Let's look around.
+That's it, MoonLight is installed and on your network. The link opens the device's own web interface, served straight from the ESP32. Let's look around.
 
 ---
 
-## Chapter 2: Your projectMM interface
+## Chapter 2: Your MoonLight interface
 
 Everything below runs **in your browser, live from the device**. There's no app, no account, no cloud, the ESP32 itself serves this page, and every change you make takes effect on the lights immediately. Open the link from step 6 and follow along; you can't break anything by exploring.
 
@@ -109,7 +109,7 @@ Here is the whole tour in half a minute, on a board that was flashed a moment ea
 
 ### The layout: list, preview, controls
 
-![The full projectMM interface](assets/gettingstarted/02-01-UI-large.png)
+![The full MoonLight interface](assets/gettingstarted/02-01-UI-large.png)
 
 Three regions, left to right:
 
@@ -174,7 +174,7 @@ USB cable needed once it's on your network.
 > [FirmwareUpdateModule](moonmodules/core/system.md#firmware-update)
 
 **Network**, your connection: WiFi or Ethernet, signal strength, and the
-address others reach it at. The **Devices** section underneath finds other projectMM devices on the same network, so a roomful of them can discover each other.
+address others reach it at. The **Devices** section underneath finds other MoonLight devices on the same network, so a roomful of them can discover each other.
 
 ![The Network module](assets/gettingstarted/02-07-UI-Network.png)
 
@@ -186,28 +186,28 @@ address others reach it at. The **Devices** section underneath finds other proje
 > about LEDs. The light show below is one *domain* built on top of it; you could build
 > a different one and reuse all the same machinery. [FastLED-MM](https://github.com/MoonModules/FastLED-MM)
 > is an example, driving its LEDs with [FastLED](https://github.com/FastLED/FastLED) (on
-> hold until projectMM ships as a reusable library).
+> hold until MoonLight ships as a reusable library).
 
 ### Control it from your phone with WLED Native
 
-The device's own web UI works on a phone, but for quick on/off and brightness from your pocket there's a nicer option: **WLED Native**, the open-source mobile app for the WLED ecosystem. projectMM speaks the WLED JSON API and announces itself over the network the same way a WLED device does, so the app finds your projectMM controllers automatically, no setup, no pairing. Each one shows up as a card with a power toggle and a brightness slider, so a roomful of controllers is a scroll and a tap away.
+The device's own web UI works on a phone, but for quick on/off and brightness from your pocket there's a nicer option: **WLED Native**, the open-source mobile app for the WLED ecosystem. MoonLight speaks the WLED JSON API and announces itself over the network the same way a WLED device does, so the app finds your MoonLight controllers automatically, no setup, no pairing. Each one shows up as a card with a power toggle and a brightness slider, so a roomful of controllers is a scroll and a tap away.
 
-![projectMM devices discovered in WLED Native](assets/core/WLED%20Native%20discovers%20projectMM.jpeg){ width="300" }
+![MoonLight devices discovered in WLED Native](assets/core/WLED%20Native%20discovers%20MoonLight.jpeg){ width="300" }
 
 Get it free for your phone:
 
 - **iPhone / iPad:** [WLED Native on the App Store](https://apps.apple.com/us/app/wled-native/id6446207239)
 - **Android:** [WLED Native on Google Play](https://play.google.com/store/apps/details?id=ca.cgagnier.wlednativeandroid)
 
-WLED Native is by **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))**, who wrote both the [Android](https://github.com/Moustachauve/WLED-Android) and [iOS](https://github.com/Moustachauve/WLED-iOS) apps. Their open source is what let us work out exactly what those apps read, so a projectMM device appears in them without either side needing to know about the other.
+WLED Native is by **Christophe Gagnier ([@Moustachauve](https://github.com/Moustachauve))**, who wrote both the [Android](https://github.com/Moustachauve/WLED-Android) and [iOS](https://github.com/Moustachauve/WLED-iOS) apps. Their open source is what let us work out exactly what those apps read, so a MoonLight device appears in them without either side needing to know about the other.
 
 For the full picture and controls, the device's web interface is always there at `http://<devicename>.local`, WLED Native is the fast everyday remote alongside it.
 
 ### Bring it into your smart home with Home Assistant
 
-Want your lights in the same dashboard as the rest of your house, and in automations, voice assistants, and Apple Home? projectMM adopts into **Home Assistant** like any other light: point the device at your HA setup and it appears as a light entity with on/off and brightness, alongside a floor of other devices.
+Want your lights in the same dashboard as the rest of your house, and in automations, voice assistants, and Apple Home? MoonLight adopts into **Home Assistant** like any other light: point the device at your HA setup and it appears as a light entity with on/off and brightness, alongside a floor of other devices.
 
-![projectMM devices as lights in a Home Assistant dashboard](assets/core/ha-integration.png){ width="600" }
+![MoonLight devices as lights in a Home Assistant dashboard](assets/core/ha-integration.png){ width="600" }
 
 There are two ways in, zeroconf (HA finds the device on its own) or MQTT auto-discovery (for a broker-only or cross-subnet setup), and from there you can bridge the entity into Apple Home too. The step-by-step, including installing HA and the MQTT broker if you don't have them, is in the [home automation guide](how-to/home-automation.md).
 

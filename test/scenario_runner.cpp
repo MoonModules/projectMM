@@ -987,6 +987,9 @@ static int runScenario(const char* path) {
         }
     }
 
+    // What the scenario's own steps asserted, since the buffer checks below run for any scenario with a Layer and would let steps that assert nothing satisfy the floor.
+    const int stepChecks = result.checks;
+
     // The legacy end-of-scenario buffer check runs when a Layer is present, since existing scenarios depend on it.
     ensureStarted();
     auto* layer = static_cast<mm::Layer*>(
@@ -1017,8 +1020,8 @@ static int runScenario(const char* path) {
 
     ctx.scheduler.release();
 
-    // A scenario that ran to the end and asserted nothing is a failure, since it is indistinguishable from one whose steps all silently did nothing.
-    if (result.checks == 0) {
+    // A scenario whose own steps asserted nothing is a failure, since it is indistinguishable from one whose steps all silently did nothing.
+    if (stepChecks == 0) {
         std::printf("---\nFAILED (ran %u step(s) and asserted nothing)\n",
                     static_cast<unsigned>(allSteps.size()));
         return 1;

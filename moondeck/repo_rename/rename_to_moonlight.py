@@ -14,9 +14,9 @@ name, mDNS prefix, repo URL, library.json name) must flip *at* the switch, lined
 up with the first release under the new repo (see the plan's Phase 2/3).
 
 ORDERING: the sweep also rewrites the repo URL (MoonModules/projectMM ->
-MoonModules/MoonLight) and the docs host (moonmodules.org/projectMM). Per the
+MoonModules/projectMM) and the docs host (moonmodules.org/projectMM). Per the
 plan that is correct ONLY when run *after* the repo rename (Phase 3.2): the URL
-becomes MoonModules/MoonLight, which only resolves once this repo holds that
+becomes MoonModules/projectMM, which only resolves once this repo holds that
 name. So --apply belongs in Phase 3.3, after 3.2 — not before.
 
   uv run moondeck/repo_rename/rename_to_moonlight.py            # dry-run: list every hit, change nothing
@@ -47,11 +47,13 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 # per-form rules are needed. `ProjectMM` had its own entry for the DevType enum,
 # which was renamed ahead of the sweep, so the capitalised form no longer occurs.
 REPLACEMENTS = [
-    # The predecessor moves to ewowi/MoonLight so this project can take the MoonModules/MoonLight name, so its citations point there.
-    # Ordered first: it consumes MoonModules/MoonLight before the product rename can create new ones.
-    ("MoonModules/MoonLight", "ewowi/MoonLight"),
     ("projectMM", "MoonLight"),   # the product name in every form
 ]
+
+# Repointing the predecessor's citations to ewowi/MoonLight is NOT a rule here, though it belongs to
+# the same rename. It is a one-time migration, already applied, where this sweep is repeatable: a
+# rule for it would rewrite the MoonModules/projectMM this sweep itself produces from
+# MoonModules/projectMM, so a second run would silently aim our own URLs at the predecessor.
 
 # The file list comes from `git ls-files` (tracked files only), so build output
 # (build/, esp32/build/ — both gitignored) and other artifacts never enter the
@@ -68,7 +70,7 @@ REPORT = ROOT / "moondeck" / "repo_rename" / "rename_to_moonlight.md"
 
 EXCLUDE_FILES = [
     # This plan describes BOTH names and the move between them; rewriting it would
-    # corrupt its meaning ("the predecessor at MoonModules/MoonLight vacates…").
+    # corrupt its meaning ("the predecessor at MoonModules/projectMM vacates…").
     "docs/work/future/rename-to-moonlight.md",
     # The rename script itself (it names the tokens it replaces).
     "moondeck/repo_rename/rename_to_moonlight.py",
@@ -133,6 +135,8 @@ KEEP_SUBSTRINGS = [
     "projectMM-moonbase",
     # The predecessor repository, which keeps its own name.
     "ewowi/MoonLight",
+    # The backup bookmarklet targets OLD firmware, whose Restore accepts only this value, and it sits inside a template literal where a trailing marker cannot go.
+    "projectMM-config-backup",
 ]
 
 # Where an existing installation's own data is addressed by a path or key carrying the product name, so a rewrite reads an empty location rather than failing: @see the rename plan's migration section.

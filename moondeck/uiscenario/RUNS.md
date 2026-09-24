@@ -19,7 +19,7 @@ The split is the point: a step's truth is written once, and whether it is being 
 }
 ```
 
-A run also carries its own settings. `speed` and `width` shape the published clip, and are tunable afterwards without re-recording, since publishing is a separate pass over the raw take. `host` names another projectMM surface. `requires` names hardware a run needs, resolved against the bench registry rather than written in as an address.
+A run also carries its own settings. `speed` and `width` shape the published clip, and are tunable afterwards without re-recording, since publishing is a separate pass over the raw take. `host` names another MoonLight surface. `requires` names hardware a run needs, resolved against the bench registry rather than written in as an address.
 
 ## A step
 
@@ -69,7 +69,7 @@ Only `action` and that action's own arguments are required.
 | `pick_file` | `module`, `control`, `value` | a filepath control's picker |
 | `type_script` | `text`, `delay` | types into the MoonLive editor and saves |
 
-Another projectMM surface has no module tree, so a run there names elements directly. These are the exception, not the default. A new surface earns a contract (data- attributes) the way the device UI has one, rather than growing this list.
+Another MoonLight surface has no module tree, so a run there names elements directly. These are the exception, not the default. A new surface earns a contract (data- attributes) the way the device UI has one, rather than growing this list.
 
 | Action | Arguments | The interaction |
 |---|---|---|

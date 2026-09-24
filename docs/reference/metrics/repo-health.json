@@ -1,9 +1,9 @@
 {
-  "commit": "9a3d839b",
+  "commit": "e22d56ba",
   "flash": {
     "esp32s3-n16r8": 2142976,
     "desktop": 1992392,
-    "esp32": 2085360,
+    "esp32": 2091120,
     "esp32p4rev1-eth": 2045840,
     "esp32p4rev1-eth-wifi": 2331904,
     "esp32s3-n8r8": 2087168,
@@ -19,10 +19,10 @@
   "measured": {
     "esp32p4rev1-eth": "2026-09-22",
     "esp32s31": "2026-09-22",
-    "esp32": "2026-09-22",
+    "esp32": "2026-09-25",
     "esp32-pico": "2026-09-09",
-    "esp32s3-n16r8": "2026-09-24",
-    "desktop": "2026-09-24",
+    "esp32s3-n16r8": "2026-09-25",
+    "desktop": "2026-09-25",
     "esp32s3-n8r8": "2026-09-08",
     "esp32s3-zero": "2026-09-08",
     "esp32-16mb": "2026-09-09",
@@ -58,8 +58,8 @@
       "Effects_pipeline_builds_and_renders": {
         "desktop-macos": {
           "p50": 8,
-          "p95": 17,
-          "n": 20,
+          "p95": 19,
+          "n": 24,
           "last": "2026-09-24"
         }
       },
@@ -86,8 +86,8 @@
     "light": 30956,
     "platform": 16776,
     "ui": 11360,
-    "test": 57349,
-    "moondeck": 27945
+    "test": 57352,
+    "moondeck": 27949
   },
   "comments": {
     "core": {
@@ -107,11 +107,11 @@
       "ratio": 0.316
     },
     "test": {
-      "lines": 6674,
+      "lines": 6675,
       "ratio": 0.135
     },
     "moondeck": {
-      "lines": 4667,
+      "lines": 4670,
       "ratio": 0.19
     }
   },

@@ -13,7 +13,7 @@ pass burning text into frames and no hand-drawn pointer to keep in sync.
     uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
 
 Prerequisites:
-    1. A running projectMM:   uv run moondeck/run/run_desktop.py
+    1. A running MoonLight:   uv run moondeck/run/run_desktop.py
     2. Playwright's chromium: uv run --with playwright playwright install chromium
 """
 
@@ -76,7 +76,7 @@ def main() -> int:
     ap.add_argument("--run", required=True,
                     help="the run file to perform (test/uiscenarios/clips/<name>.json)")
     ap.add_argument("--host", default="localhost:8080",
-                    help="projectMM to drive (default: localhost:8080)")
+                    help="MoonLight to drive (default: localhost:8080)")
     ap.add_argument("--out", default=None,
                     help="where the clip lands (default: media/video/)")
     ap.add_argument("--speed", type=float, default=None,
@@ -95,7 +95,7 @@ def main() -> int:
     try:
         requests.get(f"http://{host}/api/state", timeout=3)
     except requests.RequestException:
-        print(f"No projectMM answering on {host}.\n"
+        print(f"No MoonLight answering on {host}.\n"
               f"Start one with: uv run moondeck/run/run_desktop.py", file=sys.stderr)
         return 1
 
@@ -139,7 +139,7 @@ def main() -> int:
     def module_names() -> set:
         return uirun.all_names(uirun.state(host).get("modules", []))
 
-    # The leftover report only means something against a projectMM DEVICE. A run may
+    # The leftover report only means something against a MoonLight DEVICE. A run may
     # drive another surface entirely (the web installer), which has no module tree and
     # answers /api/state with HTML, so the probe decides rather than the caller. Only
     # THIS probe is forgiving: it runs before the recording, where an unreachable device

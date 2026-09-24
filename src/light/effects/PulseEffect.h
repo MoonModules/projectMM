@@ -45,7 +45,7 @@ namespace mm {
 /// A sensor added later fills the same three, which is why `emit` takes exactly those arguments.
 class PulseEffect : public EffectBase {
 public:
-    /// Catalog tags: a projectMM original that reacts to sound.
+    /// Catalog tags: a MoonLight original that reacts to sound.
     const char* tags() const override { return "💫🎶"; }
     /// A shell is a distance, which every layout has, so all three axes are used.
     Dim dimensions() const override { return Dim::D3; }

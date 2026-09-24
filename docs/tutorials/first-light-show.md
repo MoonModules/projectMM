@@ -4,7 +4,7 @@ You have lights running and you know [what the cards are](how-projectmm-works.md
 
 Everything here happens in the device's own web interface, live. Nothing is compiled, nothing is saved and applied, nothing reboots. You change a number and the lights change while you are still holding the mouse.
 
-You need a device with projectMM on it and some lights attached, real or previewed. A bare board with no strip works the whole way through: the 3D preview is what you will be watching anyway.
+You need a device with MoonLight on it and some lights attached, real or previewed. A bare board with no strip works the whole way through: the 3D preview is what you will be watching anyway.
 
 ## 1. Say where the lights are
 

@@ -1,4 +1,4 @@
-// projectMM web installer logic. Extracted from index.html's inline module script.
+// MoonLight web installer logic. Extracted from index.html's inline module script.
 // A static GitHub Pages page, so an external module is free.
 
 // Shared install-picker (release → board → firmware). Same file as the
@@ -292,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // than the active install.
           passEl.value = "";
           try {
-            const saved = localStorage.getItem("projectMM.installer.lastSsid");
+            const saved = localStorage.getItem("MoonLight.installer.lastSsid");
             if (saved) ssidEl.value = saved;
           } catch (_) { /* hostile storage */ }
           requestAnimationFrame(() => (ssidEl.value ? passEl : ssidEl).focus());
@@ -391,7 +391,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // are network-visible anyway (any scanning device sees them);
           // passwords are not.
           try {
-            if (ssid) localStorage.setItem("projectMM.installer.lastSsid", ssid);
+            if (ssid) localStorage.setItem("MoonLight.installer.lastSsid", ssid);
           } catch (_) { /* hostile storage */ }
           resolve({ ssid, password: passEl.value });
         };
@@ -593,7 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
       myDevices.addProvisionedDevice(url, defaultsApplied ? board : "");
     }
 
-    // Every chip projectMM ships is browser-flashable as of esptool-js 0.7.0, which added the
+    // Every chip MoonLight ships is browser-flashable as of esptool-js 0.7.0, which added the
     // ESP32-S31 target and chip-id detection (GET_SECURITY_INFO) so the S31's magic collision with
     // the classic ESP32 can no longer mis-identify it. The set stays because a NEW chip lands here
     // before esptool-js knows it, and an empty set is the honest way to say "none, today".

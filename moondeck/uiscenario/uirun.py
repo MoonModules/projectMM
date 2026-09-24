@@ -1,4 +1,4 @@
-"""Drive the projectMM UI from a run file: one engine, for tests and for video.
+"""Drive the MoonLight UI from a run file: one engine, for tests and for video.
 
 Every step goes through the INTERFACE. A step that POSTs its way to the outcome
 proves nothing about the UI and, on camera, shows an effect with no visible cause:
@@ -75,7 +75,7 @@ class Run:
     width: int = 960
     # Which app this run drives, and what it needs from the device it drives.
     #
-    # `host` is for another projectMM SURFACE on a known port (the web installer's
+    # `host` is for another MoonLight SURFACE on a known port (the web installer's
     # preview), not for a device: an IP written into a tracked run file is a second
     # bench registry that goes stale the moment a board changes network, and
     # moondeck.json is the one that exists. A run needing particular hardware says so
@@ -218,7 +218,7 @@ def device_for(requirement: str) -> str | None:
 
 
 def _find_by_mac(macs: set) -> str | None:
-    """Sweep the local subnet for a projectMM device with one of these MACs."""
+    """Sweep the local subnet for a MoonLight device with one of these MACs."""
     import concurrent.futures as cf
     import socket
 
@@ -1435,7 +1435,7 @@ ACTIONS: dict[str, str] = {
     "drag_slider":    "drag_slider",
     "choose":         "choose",
     "click_control":  "click_control",
-    # Selector actions: another projectMM surface, with no module contract of its own.
+    # Selector actions: another MoonLight surface, with no module contract of its own.
     "click":          "click",
     "follow_link":    "follow_link",
     "start_process":  "start_process",

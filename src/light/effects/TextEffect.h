@@ -23,7 +23,7 @@ public:
     Dim dimensions() const override { return Dim::D2; }
 
     /// The string to show, where the text area preserves its newlines.
-    char    text_[128] = "projectMM";
+    char    text_[128] = "MoonLight";
     /// March the block leftward as a marquee rather than holding it still.
     bool    scroll = false;
     /// Which bitmap font renders it.

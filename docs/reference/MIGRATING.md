@@ -2,7 +2,7 @@
 
 The log of **breaking changes**, what changed between versions, and the action to take.
 
-projectMM ships **no migration code**: the persistence layer is robust by default (an absent key keeps the control's default, a stale value clamps to the new bounds, an unknown key is ignored), which absorbs almost all schema drift with zero migration-specific code. The rare change that a robust reader *cannot* absorb is **documented here instead of migrated**. A patching framework is deferred rather than rejected: it becomes the right tool if breaking format changes get frequent enough that ad-hoc losses pile up (a rough bar: more than five across a few releases) and users hold persisted state too valuable to re-derive. At that point build the recognizable version-stamp plus ordered-patch-chain pattern, not a bespoke one and its rationale.
+MoonLight ships **no migration code**: the persistence layer is robust by default (an absent key keeps the control's default, a stale value clamps to the new bounds, an unknown key is ignored), which absorbs almost all schema drift with zero migration-specific code. The rare change that a robust reader *cannot* absorb is **documented here instead of migrated**. A patching framework is deferred rather than rejected: it becomes the right tool if breaking format changes get frequent enough that ad-hoc losses pile up (a rough bar: more than five across a few releases) and users hold persisted state too valuable to re-derive. At that point build the recognizable version-stamp plus ordered-patch-chain pattern, not a bespoke one and its rationale.
 
 **The File Manager's Backup (⤓) / Restore (⟲) carries config across these breaks.** [src/ui/migrate.js](https://github.com/MoonModules/projectMM/blob/main/src/ui/migrate.js) is the **authoritative, dated log of every machine-mappable break** (file, type, control, and value renames): Restore applies it in the browser and reports what did not carry over, so entries below describe only what a map cannot express, behavior changes, semantics to re-check, and erase-flash moves. It works even on a freshly erased device: join its `MM-XXXX` SoftAP, open `http://4.3.2.1`, restore there, and take the offered restart; the bundle carries the WiFi credentials, so the device comes back on your network. For a device still on old firmware (no Backup button yet), the [installer page](https://moonmodules.org/projectMM/install/) offers the same backup as a bookmarklet.
 
@@ -113,9 +113,9 @@ Routing brightness to the dimmer channel rather than holding it open is the bett
 
 ### WLED apps find a device only when you ask them to
 
-Device discovery now announces on the multicast group `239.255.77.77` and, by default, **not** on the broadcast address WLED apps and devices browse. A projectMM device therefore stops showing up in them until you turn on `wledCompatible` in the Devices module.
+Device discovery now announces on the multicast group `239.255.77.77` and, by default, **not** on the broadcast address WLED apps and devices browse. A MoonLight device therefore stops showing up in them until you turn on `wledCompatible` in the Devices module.
 
-projectMM devices still find each other either way: presence always goes to the group and every device always joins it, so a fleet can mix the setting freely.
+MoonLight devices still find each other either way: presence always goes to the group and every device always joins it, so a fleet can mix the setting freely.
 
 The reason for the default: a broadcast at discovery cadence makes every phone, printer and laptop on the LAN take an interrupt and parse a packet none of them want. Multicast reaches only the devices that joined the group. See [multicast and IGMP snooping](../explanation/architecture/moonlight.md#multicast-and-igmp-snooping) for when that saving is real (a switch that snoops) and when it is not.
 
@@ -150,7 +150,7 @@ Nothing is deleted if you skip this: the old directories stay where they are, an
 
 The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.
 
-Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout stays in the tree**, under `build/fs` since the entry above moved it there, so its settings are at `build/fs/.config` and every gate script behaves as before.
+Settings now live with the user: `%LOCALAPPDATA%\MoonLight` on Windows, `~/Library/Application Support/MoonLight` on macOS, and `$XDG_DATA_HOME/MoonLight` on Linux, falling back to `~/.local/share/MoonLight` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout stays in the tree**, under `build/fs` since the entry above moved it there, so its settings are at `build/fs/.config` and every gate script behaves as before.
 
 **Action: *nothing*, unless your settings persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
 
