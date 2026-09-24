@@ -321,7 +321,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
 
     uint32_t lights = layouts->totalLightCount();
     uint32_t bufBytes = lights * 3;
-    std::printf("projectMM running — grid %dx%d, %lu lights, buffer %lu bytes\n",
+    std::printf("MoonLight running — grid %dx%d, %lu lights, buffer %lu bytes\n",
                 grid->width, grid->height,
                 static_cast<unsigned long>(lights),
                 static_cast<unsigned long>(bufBytes));

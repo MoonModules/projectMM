@@ -1,4 +1,4 @@
-// projectMM install picker — shared by the on-device UI (OTA flash) and the
+// MoonLight install picker — shared by the on-device UI (OTA flash) and the
 // GitHub Pages installer (first flash via Web Serial). Renders Release +
 // Board + Firmware dropdowns and an Install button; the caller wires the
 // onInstall callback to the right install transport.
@@ -41,16 +41,16 @@
 // ---------------------------------------------------------------------------
 
 const API_URL = "https://api.github.com/repos/MoonModules/projectMM/releases?per_page=10";
-const CACHE_KEY = "projectMM.releases.v1";
+const CACHE_KEY = "MoonLight.releases.v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;  // 5 min — short enough to surface new RCs, long enough to avoid rate-limit thrash
 
 // Persisted user selection — survives page reloads and full browser restarts,
 // so a returning user doesn't have to re-pick their firmware every time. Keyed
 // separately from the API cache (which is sessionStorage with a TTL); these
 // are intent, not data, and never expire on their own.
-const PREF_RELEASE_KEY  = "projectMM.picker.releaseTag";
-const PREF_FIRMWARE_KEY = "projectMM.picker.firmware";
-const PREF_BOARD_KEY    = "projectMM.picker.board";
+const PREF_RELEASE_KEY  = "MoonLight.picker.releaseTag";
+const PREF_FIRMWARE_KEY = "MoonLight.picker.firmware";
+const PREF_BOARD_KEY    = "MoonLight.picker.board";
 
 // A link may name what to preselect: `?release=v5.0.0&firmware=esp32s3-n16r8&board=...`.
 // It outranks the saved preference, since a link is the sender's intent and the preference
@@ -290,7 +290,7 @@ function mergeFirmwares(published, extras) {
 // 4. Compatibility filter (OTA only)
 // ---------------------------------------------------------------------------
 
-// Bespoke rule for projectMM's firmware keys: strip the `-eth*` suffix from
+// Bespoke rule for MoonLight's firmware keys: strip the `-eth*` suffix from
 // both sides; equal identities are mutually OTA-compatible. So `esp32` and
 // `esp32-eth` can flash each other (same physical ESP32 silicon; the variant
 // decides which radios are compiled in) — as can the legacy `esp32-eth-wifi`

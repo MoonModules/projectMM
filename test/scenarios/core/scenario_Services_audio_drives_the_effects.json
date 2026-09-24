@@ -66,5 +66,15 @@
       "key": "mode",
       "value": 0
     }
+  ],
+  "reset": [
+    {
+      "name": "reset-audio-mode",
+      "description": "Put the source back to simulate, so the default assertion below reads a known state rather than whatever ran before.",
+      "op": "set_control",
+      "id": "Audio",
+      "key": "mode",
+      "value": 0
+    }
   ]
 }

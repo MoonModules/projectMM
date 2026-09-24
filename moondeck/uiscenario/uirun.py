@@ -945,6 +945,9 @@ class Driver:
         becoming a second copy of the scenario, and the two would then drift.
         The process is left running; `wait_process` collects it.
         """
+        # `{host}` is the device this run is recording, so a command drives the same device the
+        # camera is pointed at rather than whatever it would default to.
+        command = command.replace("{host}", self.host)
         try:
             # Discarded rather than piped: nothing here reads it, and a full pipe buffer blocks the
             # child forever. A live scenario run is exactly the chatty case that would hit it.
@@ -953,7 +956,15 @@ class Driver:
         except Exception as e:
             self.failures.append(f"start_process: {command!r} did not start ({e})")
             return False
-        self._processes[name or command] = proc
+        # One key for both actions, so a command started without a name is still findable.
+        key = name or command
+        running = self._processes.get(key)
+        if running is not None and running.poll() is None:
+            # Overwriting would orphan the live one, and wait_process could never account for it.
+            proc.kill()
+            self.failures.append(f"start_process: {key!r} is already running")
+            return False
+        self._processes[key] = proc
         return True
 
     def wait_process(self, name: str = "", timeout: float = 600.0) -> bool:
@@ -969,6 +980,10 @@ class Driver:
         end = self._now() + timeout
         while proc.poll() is None and self._now() < end:
             self._settle(1.0)        # paced, so the wait is the shot rather than dead air
+            if not self.paced:
+                # _settle returns at once when nothing is recording, so without this the loop spins
+                # at full speed and the timeout is the only thing that ever ends it.
+                time.sleep(1.0)
         if proc.poll() is None:
             proc.kill()
             self.failures.append(f"wait_process: {name!r} ran past {timeout}s")

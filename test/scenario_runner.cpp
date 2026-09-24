@@ -61,7 +61,7 @@
 /// A mutate scenario assumes a wired pipeline. In-process replays the embedded `fixture` array first, an array of add_module steps in the same shape as `steps`, then the steps. Live runs the steps directly against whatever is wired.
 /// A mutate scenario without a fixture can still run live, the device being its own fixture, but cannot run in-process.
 /// The default is construct, for back-compatibility with the scenarios that pre-date the field and build their pipelines explicitly.
-/// Bespoke convention: the construct and mutate split, plus fixture and reset, is projectMM-specific rather than borrowed from an off-the-shelf BDD framework.
+/// Bespoke convention: the construct and mutate split, plus fixture and reset, is MoonLight-specific rather than borrowed from an off-the-shelf BDD framework.
 /// It exists because the same JSON serves an in-process runner that owns the scheduler and a live runner that does not, main.cpp doing that there.
 /// xUnit fixtures are the closest analog for `fixture`, and SQL BEGIN/ROLLBACK for `reset`.
 ///
@@ -155,6 +155,14 @@
 /// Directory iteration can throw `filesystem_error`, a scenarios/ directory deleted mid-run being the case.
 /// Letting it escape main is the correct outcome for a CLI test runner. It terminates with a diagnostic and a non-zero status, which is exactly what a harness needs to see.
 /// Discovery is recursive so the core/ and light/ split picks up every JSON without each subfolder needing its own loop.
+///
+/// ## What a green run is allowed to mean
+///
+/// A scenario that did not run returns `kSkipped` rather than 0, because a skip counted as a pass is how a suite that stopped testing reads as green.
+/// Ten of eleven scenarios once skipped for a missing fixture while the summary said `11 passed`, hiding three assertion bugs for a commit.
+/// The same reason makes a scenario that runs to the end with zero checks a failure: it is indistinguishable from one whose every step silently did nothing.
+/// `expect_control` therefore also takes `not_equals`, for a value that moves per release where the only stable claim is a negative one.
+/// An empty string is what a read-only control renders when its source is missing, so `not_equals: ""` asserts that a card reports anything at all.
 ///
 
 #include "module_types.h"
@@ -482,6 +490,9 @@ struct Result {
     }
 };
 
+/// What runScenario returns for a scenario that did not run: @xref{what-a-green-run-is-allowed-to-mean}.
+static constexpr int kSkipped = 2;
+
 static int runScenario(const char* path) {
     // The firmware's own type registry, so a scenario can name any module a device can: src/module_types.cpp. Idempotent, so calling it per scenario is a no-op after the first.
     mm::registerModuleTypes();
@@ -501,8 +512,8 @@ static int runScenario(const char* path) {
     if (scenario.has("skip_on")) {
         for (auto& t : scenario["skip_on"].arr) {
             if (t.str == hostTarget()) {
-                std::printf("  SKIP (skip_on %s)\n---\nPASSED (skipped)\n", hostTarget());
-                return 0;
+                std::printf("  SKIP (skip_on %s)\n---\nSKIPPED\n", hostTarget());
+                return kSkipped;
             }
         }
     }
@@ -514,7 +525,7 @@ static int runScenario(const char* path) {
         // In-process replays the fixture before the scenario's actual steps: @xref{the-construct-and-mutate-modes}.
         if (!scenario.has("fixture") || scenario["fixture"].arr.empty()) {
             std::printf("  SKIP (mutate scenario with no fixture — runs live only)\n");
-            return 0;
+            return kSkipped;
         }
     } else if (mode != "construct") {
         std::printf("  FAIL — unknown mode: %s (expected construct or mutate)\n", mode.c_str());
@@ -524,7 +535,7 @@ static int runScenario(const char* path) {
     // Legacy tier flag: live_only still honoured for any scenario that uses it. Newer scenarios should prefer mode=mutate (with/without fixture) instead.
     if (scenario.has("live_only") && scenario["live_only"].boolean) {
         std::printf("  SKIP (live_only)\n");
-        return 0;
+        return kSkipped;
     }
 
     ScenarioContext ctx;
@@ -667,17 +678,26 @@ static int runScenario(const char* path) {
                 continue;
             }
             const std::string want = exact ? step["equals"].str : step["contains"].str;
-            char buf[1024] = {};
-            const int got = mm::platform::fsRead(filePath, buf, sizeof(buf) - 1);
+            // One byte of headroom over the cap, so a read that fills it proves the file is longer rather than exactly this size.
+            char buf[4096] = {};
+            const int got = mm::platform::fsRead(filePath, buf, sizeof(buf));
             const std::string have(buf, got > 0 ? static_cast<size_t>(got) : 0);
+            // A truncated read cannot answer `equals`, which is about the whole file, so it fails as unevaluable rather than comparing a prefix.
+            if (got >= static_cast<int>(sizeof(buf) - 1) && exact) {
+                std::printf("  EXPECT %s — file exceeds %u bytes, so `equals` cannot be evaluated\n",
+                            filePath, static_cast<unsigned>(sizeof(buf) - 1));
+                result.check(false, name);
+                continue;
+            }
             const bool holds = got >= 0 && (exact ? have == want
                                                   : !want.empty() && have.find(want) != std::string::npos);
             std::printf(holds ? "  EXPECT %s %s \"%s\"\n" : "  EXPECT %s does not %s \"%s\"\n",
                         filePath, exact ? "is" : "hold", want.c_str());
             result.check(holds, name);
         } else if (std::strcmp(op, "expect_control") == 0) {
-            // The only op that fails a scenario on a VALUE rather than a timing contract, compared through writeControlValue so it reads what a client would.
-            if (!step.has("id") || !step.has("key") || !step.has("equals")) {
+            // The only op that fails on a VALUE rather than a timing contract, and `not_equals` is its negation: @xref{what-a-green-run-is-allowed-to-mean}.
+            const bool negated = !step.has("equals") && step.has("not_equals");
+            if (!step.has("id") || !step.has("key") || (!step.has("equals") && !negated)) {
                 std::printf("  EXPECT %s — missing id/key/equals\n", name);
                 result.check(false, name);
                 continue;
@@ -713,12 +733,14 @@ static int runScenario(const char* path) {
                 actual = unquoted.c_str();
             }
             // A JSON number carries no `str`, so an unquoted `equals` would assert against "".
-            const std::string want = asWritten(step["equals"]);
+            const std::string want = asWritten(step[negated ? "not_equals" : "equals"]);
             const bool same = (want == actual);
-            if (same) std::printf("  EXPECT %s (%s.%s == %s)\n", name, targetId, key, actual);
-            else      std::printf("  EXPECT %s — %s.%s is \"%s\", expected \"%s\"\n",
-                                  name, targetId, key, actual, want.c_str());
-            result.check(same, name);
+            const bool holds = negated ? !same : same;
+            if (holds) std::printf("  EXPECT %s (%s.%s %s %s)\n", name, targetId, key,
+                                   negated ? "!=" : "==", negated ? want.c_str() : actual);
+            else       std::printf("  EXPECT %s — %s.%s is \"%s\", expected %s\"%s\"\n",
+                                   name, targetId, key, actual, negated ? "not " : "", want.c_str());
+            result.check(holds, name);
         } else if (std::strcmp(op, "write_file") == 0) {
             // Stage a file the way the UI's editor does, a malformed step being a failed scenario: @xref{why-write-file-exists}.
             if (!step.has("path") || !step.has("value")) {
@@ -995,6 +1017,13 @@ static int runScenario(const char* path) {
 
     ctx.scheduler.release();
 
+    // A scenario that ran to the end and asserted nothing is a failure, since it is indistinguishable from one whose steps all silently did nothing.
+    if (result.checks == 0) {
+        std::printf("---\nFAILED (ran %u step(s) and asserted nothing)\n",
+                    static_cast<unsigned>(allSteps.size()));
+        return 1;
+    }
+
     // Summary
     std::printf("---\n");
     if (result.passed) {
@@ -1010,17 +1039,21 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         // Run all scenarios in the scenarios/ directory tree, recursively: @xref{why-a-filesystem-error-escapes-main}.
         int failed = 0;
+        int skipped = 0;
         int total = 0;
         for (auto& entry : std::filesystem::recursive_directory_iterator("test/scenarios")) {
             if (entry.path().extension() == ".json") {
                 total++;
                 // path::c_str() is wchar_t* on Windows, so round-trip through .string() for a portable narrow-char view.
-                if (runScenario(entry.path().string().c_str()) != 0) failed++;
+                const int rc = runScenario(entry.path().string().c_str());
+                if (rc == kSkipped) skipped++;
+                else if (rc != 0) failed++;
                 std::printf("\n");
             }
         }
-        std::printf("=== %d scenario(s), %d passed, %d failed ===\n",
-                    total, total - failed, failed);
+        // Skipped is reported on its own line: a run that tested nothing must not read as a clean pass.
+        std::printf("=== %d scenario(s), %d passed, %d failed, %d skipped ===\n",
+                    total, total - failed - skipped, failed, skipped);
         return failed > 0 ? 1 : 0;
     }
 

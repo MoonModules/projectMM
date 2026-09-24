@@ -18,7 +18,7 @@
     {
       "action": "start_process",
       "name": "suite",
-      "command": "uv run moondeck/scenario/run_live_scenario.py",
+      "command": "uv run moondeck/scenario/run_live_scenario.py --host {host}",
       "caption": "The suite starts, and runs the cards in the order they are listed here.",
       "hold": 2.0
     },

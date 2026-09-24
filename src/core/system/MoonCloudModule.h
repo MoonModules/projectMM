@@ -13,7 +13,7 @@
 
 namespace mm {
 
-/// The container for everything projectMM does with a server we run.
+/// The container for everything MoonLight does with a server we run.
 ///
 /// It holds no controls and does no work of its own.
 /// Each thing MoonCloud does is a child with its own consent: Stats, Talk, and Sync to come.

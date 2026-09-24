@@ -6,7 +6,7 @@
 
 namespace mm {
 
-// Author: projectMM original, on MoonLight's Scrolling Text, https://github.com/MoonModules/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
+// Author: MoonLight original, on the predecessor's Scrolling Text, https://github.com/ewowi/MoonLight/blob/main/src/MoonLight/Nodes/Effects/E_MoonLight.h
 /// Effect rendering a scrolling multi-line string in a bitmap font.
 /// @card TextEffect.gif
 ///

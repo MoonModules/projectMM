@@ -31,7 +31,7 @@ Verified against the tree on 2026-09-22 rather than read from the plans, because
 
 The sweep script measures **1405 occurrences across 242 tracked files** (dry run, 2026-09-22), against the 542 across 113 recorded when it was written: the documentation sweep and the effect library both grew the prose that names the product. The categories still matter more than the count, and the growth is spread across the tree rather than concentrated, so it is real rather than an exclude-list gap.
 
-[rename_to_moonlight.py](../../../moondeck/repo_rename/rename_to_moonlight.py) handles almost all of it and runs dry by default. It replaces two tokens, `ProjectMM` then `projectMM`, which is correct for every form because `projectMM` is never a substring of another token. Its file list comes from `git ls-files`, so build output is excluded without a blocklist. `MoonLive`, the predecessor's own name, and `namespace mm` are provably never touched.
+[rename_to_moonlight.py](../../../moondeck/repo_rename/rename_to_moonlight.py) handles almost all of it and runs dry by default. It replaces two tokens, `ProjectMM` then `MoonLight`, which is correct for every form because `MoonLight` is never a substring of another token. Its file list comes from `git ls-files`, so build output is excluded without a blocklist. `MoonLive`, the predecessor's own name, and `namespace mm` are provably never touched.
 
 ### The device builds its own OTA URL, and that turns out to be safe
 
@@ -49,7 +49,7 @@ This was worth checking rather than believing: reading the URL construction alon
 
 Two things the sweep changes that a user feels, neither needing code:
 
-- **Peer discovery** compares a literal `"projectMM"` at [DevicesModule.h:109](../../../src/core/system/DevicesModule.h), and [E131Packet.h:55](../../../src/light/util/E131Packet.h) writes a fixed nine-byte source name. A projectMM device and a MoonLight device will not see each other, so a mixed network is a transitional state to move through rather than live in. Accepted rather than bridged: carrying both tokens forever is the debt this project exists to avoid.
+- **The sACN source name** at [E131Packet.h:55](../../../src/light/util/E131Packet.h) is a fixed nine-byte literal a receiving console displays, so it changes with the product rather than staying. Peer discovery does not: it classifies on the numeric marker and already reads `"MoonLight"`, so a mixed network keeps working.
 - **The `MM-` device prefix** in [SystemModule.h:57](../../../src/core/system/SystemModule.h) is every device's mDNS name and Home Assistant entity id. Changing it to `ML-` renames all of that, and unlike the configuration it is not something Restore carries back. Keeping `MM-` costs an odd prefix forever; changing it costs every user their bookmarks and automations once. Product owner's call, in the same sweep commit either way.
 
 ## The cutover
@@ -93,9 +93,11 @@ Both clips were recorded against a real erase-and-flash of the S3, ending on a p
 
 **What this does to the week.** Thursday's run-file work is largely done, so Thursday absorbs what the script asks for rather than starting from nothing. The two recorder fixes make Friday's filming cheaper, since a take no longer fails on a state that went by too quickly. One thing moved the other way: the clips were recorded before the script is final, so they are rehearsal footage by the plan's own rule, and Saturday re-records whatever the script changes. That was always the shape; it just started a day early.
 
-### Sept 24: the sweep is smaller than it was, and four assumptions were wrong
+### Sept 24: the rename starts landing, and a blanket replace proves dangerous
 
-Ninety-nine lines came off cutover day, from 1376 to 1277. More useful than the count is what moving them taught, because every one of these was a thing the rehearsal had reported as safe.
+Cutover day went from 1376 lines to 1206, in two passes. The first moved 99, the second the free renames in `src/` and `test/`, and the second found three breaks the rehearsal had called safe.
+
+More useful than the count is what moving them taught, because every one of these was a thing the rehearsal had reported as safe.
 
 **A hand-counted length survives a rename by luck.** MQTT sized its topic buffer as `9 + 1 + 6 + 1`, counted from `projectMM`. MoonLight is nine characters too, so the sweep would have passed and any other name would have truncated every topic silently. The length now derives from the string with `sizeof`, which is the general form: a literal's length belongs to the literal, never to a comment that counts it.
 
@@ -105,9 +107,29 @@ Ninety-nine lines came off cutover day, from 1376 to 1277. More useful than the 
 
 **A comment saying a line is fixed does not stop a sweep.** The MoonCloud salt carried "changing this re-identifies every installation in the world exactly once, so it is fixed" and would have been rewritten anyway. It now carries a `rename-keep` marker, which the script honours mechanically. A rule worth stating is worth stating where the tool reads it.
 
+**The sweep broke the one supported upgrade path.** Restore compares a bundle's `format` against a literal carrying the product name, so a swept reader rejects every backup a user already saved, with "not a config backup". The reader now accepts both spellings behind a `rename-keep` marker while the writer emits the new one. This is the case the whole migration promise rests on, and a blanket token replace inverted it.
+
+**The sweep orphaned every desktop user's configuration.** The desktop data directory is built from the product name, so a renamed build reads an empty profile and loses presets, layouts and scripts, silently and with no error. Devices have Backup and Restore; the desktop had nothing, and the plan had not noticed because its migration section is written entirely about devices. Now held by a `KEEP_PATH_KEYS` list, control-tested so an ordinary comment still sweeps.
+
+**The sweep blinded the prose checker.** `.vale.ini` names its style and vocabulary by directory, so renaming the references while the directories kept the old name left Vale reading no rules at all and reporting zero findings for every header. The directories moved with the config, and the proof is Vale reporting `.cpp` findings again, which is the control the file's own comment asks for.
+
+**A blanket replace edits quotations.** The product owner's own words inside a block quote were rewritten, turning "projectMM V1, V2 and V3" into a sentence they never wrote. A quote is evidence rather than prose, so the sweep has no business inside one.
+
 **What genuinely cannot move early**, checked rather than assumed: the OTA project guard, where `moonbase/CMakeLists.txt` stamps the image and `FirmwareImage.h` checks that exact string, so moving either early makes every v5 device refuse the new MoonBase image. And the repository URLs, which resolve only once the repo itself is renamed.
 
+Three more joined that list once the free renames were taken. The **CMake project name** stamps the ESP-IDF descriptor `kProjectImageName` is compared against, so the two flip in one commit or every firmware is refused. The **desktop asset filenames** are parsed by firmware already in the field, which makes the packager, the release workflow, the install picker and their test fixtures a single lockstep set. And the **Home Assistant domain** in the installer manifest names an integration that has to exist before it is offered.
+
+The rest is 1206 lines, almost all of it documentation prose and the handful of identities above.
+
 **The method that found all of this** is worth repeating on whatever is left: take the sweep's own file list, read every hit in the top files rather than trusting the count, and ask of each whether anything outside this repository keys on the string. Almost all of them were comments.
+
+### The rename lands in batches, not one sweep
+
+A branch over roughly 100 files loses its external review layer, and the free renames alone reach 200. So the sweep runs in passes, each its own commit with the whole gate set behind it, rather than as one change nobody can read.
+
+The order is by risk, cheapest first. `src/` and `test/` went first, because the compiler and 2000 tests judge them: a mistake there fails rather than ships. Documentation prose is next and carries no executable risk. The identities that outside systems key on go last, on the day, and they are now a short enough list to read in one sitting.
+
+What makes this safe is that the sweep is idempotent and its own report is committed, so a batch can be regenerated at any time and the remaining reach is always visible in [rename_to_moonlight.md](../../../moondeck/repo_rename/rename_to_moonlight.md).
 
 ### The week, day by day
 
@@ -115,7 +137,7 @@ Ninety-nine lines came off cutover day, from 1376 to 1277. More useful than the 
 
 **Every shot is a script, so filming is repeatable.** A run file names the steps and their captions, and `uivideo.py` performs them against a live device. Re-shooting is re-running, which is what makes the schedule below possible: the takes are cheap and the thinking is not. Footage is ready by Sept 30.
 
-Two rules hold all week. **Anything found before Tuesday is fixed under the old name**, since a defect discovered after the rename is a defect in two releases. And **the published cut is filmed after the switch**: the UI carries the product name in its page title and header, so an earlier take says projectMM in the pixels. Earlier takes still earn their place as rehearsal, because re-running is cheap.
+Two rules hold all week. **Anything found before Tuesday is fixed under the old name**, since a defect discovered after the rename is a defect in two releases. And **the published cut is filmed after the switch**: the UI carries the product name in its page title and header, so an earlier take says MoonLight in the pixels. Earlier takes still earn their place as rehearsal, because re-running is cheap.
 
 **Sept 22 and 23: the script.** Thinking, and it decides everything after it.
 
@@ -124,12 +146,12 @@ Two rules hold all week. **Anything found before Tuesday is fixed under the old 
 - Check each beat against what exists today, so the script is shootable now.
 - Done when the scenario below is revised into the one you want.
 
-**Thu 24: the run files that perform it.** Hands on, and lighter than planned since Sept 23 did the install and first-look half.
+**Thu 24: the scenario suite, and the rename brought forward.** Hands on, and it went somewhere the plan had not put it.
 
-- Revise the ten in `test/uiscenarios/clips/` to match the script's beats.
-- Write the ones the script needs and the repo lacks.
-- Re-record the install and first-look pairs if the script moves their beats.
-- Done when every beat has a run file and `test_host --ui` passes over all of them.
+- Rebuilt the scenario suite: 27 archived, 11 written, one per top-level card plus the reboot-persistence one.
+- Closed the hole that made them look green: a skip returned the pass code, so ten of eleven asserted nothing while the gate said `11 passed`. A skip is now counted as a skip, and a scenario that asserts nothing fails.
+- Swept the free renames in `src/` and `test/`, taking cutover day from 1277 lines to 1206. Documentation prose is the next batch and the largest.
+- The fourteen run files in `test/uiscenarios/clips/` are numbered and current; matching them to the script is Friday's work, alongside the first cut.
 
 **Fri 25: the first cut, filmed.** Hands on, and the rehearsal that finds what reads badly.
 
@@ -201,7 +223,7 @@ One repository transfer, one sweep commit, one release. The installer manifest, 
 
 One day, in order, with a stop at each gate:
 
-1. **`uv run moondeck/repo_rename/check_rename_ready.py`**, which dry-runs the sweep and asserts what the rehearsal established: the reach is near 1376, every `rename-keep` line survives, and the OTA still names two different repositories. Exit 0 means proceed. The rehearsal already ran the gate set over a swept tree, so this is a check rather than an investigation, and it is worth running any day before the switch to see the drift early.
+1. **`uv run moondeck/repo_rename/check_rename_ready.py`**, which dry-runs the sweep and asserts what the rehearsal established: the reach is near the last measured pass, every `rename-keep` line survives, and the OTA still names two different repositories. Exit 0 means proceed. The rehearsal already ran the gate set over a swept tree, so this is a check rather than an investigation, and it is worth running any day before the switch to see the drift early.
 2. **Back up a configured v5.0.0 device** and keep the bundle. This is the evidence for the migration claim, and it has to be taken before anything moves.
 3. **Transfer the repository**, which leaves the old URLs redirecting.
 4. **Run `uv run moondeck/repo_rename/rename_to_moonlight.py --apply`** on a branch off the renamed repo, read the diff in full, commit it as one change. Then check the four the rehearsal found: `kFallbackRepo` still names the old repository, the MoonBase image check still reads `projectMM-moonbase`, MIGRATING's v5.0.0 heading still says projectMM, and `TextEffect`'s golden moves with its new default text rather than failing.
@@ -399,7 +421,7 @@ The migration mandate was fidelity, so every deliberate divergence was registere
 | Lissajous | A 1-wide or 1-tall grid mapped every sample to coordinate 1, which clips, so nothing drew | The size-1 axis maps to coordinate 0 | Visible output on thin grids; normal grids unchanged |
 | PaintBrush | Oscillator endpoints truncated into `uint8_t`, so grids past 256 per axis swept only a low corner | Oscillators generate 0..255 then scale to the grid | Strokes span any grid and use the full palette range. Grids up to 256 per axis are pixel-identical |
 | FixedRectangle | On RGBW the W channel was written on every box cell, tinting colored tiles and leaving W stale | W follows the checker, cleared to 0 on colored tiles | Colored tiles render as pure RGB, and the checker actually alternates |
-| GEQ3D sweep | A per-frame counter, so the sweep tracked frame rate and ran faster on a quicker board | A time-based triangle wave | `speed` means the same on every device, which is the projectMM convention |
+| GEQ3D sweep | A per-frame counter, so the sweep tracked frame rate and ran faster on a quicker board | A time-based triangle wave | `speed` means the same on every device, which is the MoonLight convention |
 | GEQ3D bars | Bar width `cols / NUM_BANDS` truncates to 0 when columns are fewer than bands, piling every bar at x=0 | The drawn band count is clamped to the column count | Bars render on narrow grids; a no-op on normal ones |
 | AudioFrame | One level value, where WLED exposes both instant and smoothed | Added `levelSmoothed`, an EMA beside the raw `level` | Effects that should glide no longer jitter per audio block, and beat-reactive ones stay snappy |
 

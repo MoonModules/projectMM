@@ -42,16 +42,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Ordered token replacements. `ProjectMM` (the DevType enum) before `projectMM`
-# so the capitalised form is handled as its own token, not left half-rewritten.
-# Both map to the same product name; the longer forms (MoonModules/projectMM,
-# projectMM.bin, moonmodules.org/projectMM) fall out of replacing the token
-# inside them — no per-form rules needed.
+# One token replacement. The longer forms (MoonModules/projectMM, projectMM.bin,
+# moonmodules.org/projectMM) fall out of replacing the token inside them, so no
+# per-form rules are needed. `ProjectMM` had its own entry for the DevType enum,
+# which was renamed ahead of the sweep, so the capitalised form no longer occurs.
 REPLACEMENTS = [
-    ("ProjectMM", "MoonLight"),   # DevType::ProjectMM enum. Safe: classification keys
-                                  #   on the "modules" marker (DeviceIdentify.h), not this
-                                  #   token — devTypeStr's "projectMM" is only a UI label.
-    ("projectMM", "MoonLight"),   # the product name in every other form
+    # The predecessor moves to ewowi/MoonLight so this project can take the MoonModules/MoonLight name, so its citations point there.
+    # Ordered first: it consumes MoonModules/MoonLight before the product rename can create new ones.
+    ("MoonModules/MoonLight", "ewowi/MoonLight"),
+    ("projectMM", "MoonLight"),   # the product name in every form
 ]
 
 # The file list comes from `git ls-files` (tracked files only), so build output
@@ -136,10 +135,24 @@ KEEP_SUBSTRINGS = [
     "ewowi/MoonLight",
 ]
 
+# Where an existing installation's own data is addressed by a path or key carrying the product name, so a rewrite reads an empty location rather than failing: @see the rename plan's migration section.
+# These are listed here rather than marked in place because each is a path built from segments, where a marker would sit on the wrong line.
+KEEP_PATH_KEYS = [
+    # A desktop user's config, presets and scripts live under a directory named after the product, and nothing carries them across: renaming this boots into an empty profile with no error.
+    'std::filesystem::path(base) / "projectMM"',
+    'Library" / "Application Support" / "projectMM"',
+    'std::filesystem::path(xdg) / "projectMM"',
+    '".local" / "share" / "projectMM"',
+    # The web installer's saved device list, which is the user's own bookmark set.
+    '"projectMM.devices.v1"',
+]
+
 
 def keeps_old_name(line: str) -> bool:
     """True where a line opts out of the sweep, by marker or by known content."""
     if KEEP_MARKER in line:
+        return True
+    if any(k in line for k in KEEP_PATH_KEYS):
         return True
     return any(k in line for k in KEEP_SUBSTRINGS)
 

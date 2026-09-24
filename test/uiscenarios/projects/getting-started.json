@@ -1,7 +1,7 @@
 {
   "name": "getting-started",
-  "title": "projectMM — getting started",
-  "description": "Install it, shape the lights, write an effect. The first ten minutes with projectMM.",
+  "title": "MoonLight — getting started",
+  "description": "Install it, shape the lights, write an effect. The first ten minutes with MoonLight.",
   "audio": "media/audio/Norse Constellations (Original Mix).mp3",
   "bpm": 112.35,
   "first_beat": 8.78,
@@ -10,7 +10,7 @@
   "clips": [
     {
       "clip": "91-show-the-preview",
-      "title": "projectMM",
+      "title": "MoonLight",
       "subtitle": "One board. Thousands of lights.",
       "bars": 6
     },

@@ -86,9 +86,23 @@ A test written to pin a fix is shaped by that fix, so it agrees with the fix whe
 
 **The check is mechanical: after a test passes, break the thing it tests and confirm it fails.** Not for every test, but for any test written to pin a fix.
 
+### A suite that stopped testing looks exactly like one that works
+
+Both scenario runners report a scenario that did not run and one that ran clean, and for a while they reported them the same way.
+A skip returned the pass code, so ten of eleven scenarios skipped for a missing fixture while the summary read `11 passed`.
+The three assertion bugs they would have caught stayed in for a commit.
+
+Two rules close that, and they are properties of the runner rather than of any scenario:
+
+- **A skip is counted as a skip.** The summary reads `N scenario(s), P passed, F failed, S skipped`, so a suite that stopped covering something says so.
+- **A scenario that asserts nothing fails.** Zero checks is indistinguishable from every step silently doing nothing, so the runner fails it and names the step count.
+
 ### A test that does not reproduce the user's conditions proves nothing
 
-A green result means something only if the test could have gone red, and an agent's shell is a bad witness: it routinely runs with policies, permissions and paths no user has. A PowerShell script tested fine and would have shipped broken, because the agent's own shell had set `Process: Bypass` over the `RemoteSigned` a user actually has. A Defender false positive was declared cleared because a download succeeded, using a different client than the one still being blocked.
+A green result means something only if the test could have gone red.
+An agent's shell is a bad witness: it routinely runs with policies, permissions and paths no user has.
+A PowerShell script tested fine and would have shipped broken, because the agent's own shell had set `Process: Bypass` over the `RemoteSigned` a user has.
+A Defender false positive was declared cleared because a download succeeded, using a different client than the one still being blocked.
 
 **Name what would have to be true for the test to fail, and confirm that condition is present.** Print the setting the test depends on rather than inferring it from the outcome.
 
@@ -212,7 +226,21 @@ Two ops exist for the things a measurement cannot see.
 
 It exists for a string some other system keys on, where a change breaks a contract no compiler and no timing measurement can see.
 
-Both tiers compare against the value as the API renders it, so `"equals": 180`, `"180"` and `true` all read the way a client would see them. They reach it differently, which is worth knowing before asserting an unusual type: in-process the runner calls `writeControlValue`, the serialiser the HTTP layer uses, while the live runner reads the parsed JSON back from `/api/modules/<id>`. The two agree on every scalar a control actually holds. A `List` or a long `TextArea` is where they would part company, since the in-process render goes through a fixed buffer, so assert those through a scalar the list drives rather than the list itself.
+`not_equals` is the same assertion negated, for a value that moves every release where the only stable claim is a negative one:
+
+```json
+{ "name": "a-version-is-reported", "op": "expect_control", "id": "Firmware", "key": "version", "not_equals": "" }
+```
+
+An empty string is what a read-only control renders when its source is missing.
+So `not_equals: ""` asserts that a card reports anything at all, and it holds on every target and every release.
+
+Both tiers compare against the value as the API renders it, so `"equals": 180`, `"180"` and `true` all read the way a client would see them.
+They reach it differently, which is worth knowing before asserting an unusual type.
+In-process the runner calls `writeControlValue`, the serializer the HTTP layer uses; the live runner reads the parsed JSON back from `/api/modules/<id>`.
+The two agree on every scalar a control holds.
+A `List` or a long `TextArea` is where they would part company, since the in-process render goes through a fixed buffer.
+Assert those through a scalar the list drives rather than through the list itself.
 
 **`reboot`** restarts the device and waits for it to answer, so a later `expect_control` proves what survived rather than what is merely still in memory:
 
@@ -228,7 +256,9 @@ On a board that is the reboot the endpoint performs. On a desktop the endpoint e
 Every scenario carries a top-level `mode` field that says what shape the scenario expects the world to be in. Two values:
 
 - **`"mode": "construct"`**: the scenario builds the pipeline from an empty scheduler. Lots of `add_module` steps; the first `measure` happens after everything is wired. **Runs in-process only.** The live device's top-level shape is policy-fixed in `main.cpp` (see [src/core/HttpServerModule.cpp:639](../src/core/HttpServerModule.cpp#L639), `/api/modules` rejects top-level adds), so "build from scratch" can't happen on a live device without re-flashing. The live runner skips construct scenarios with a clear note.
-- **`"mode": "mutate"`**: the scenario assumes a wired pipeline and tweaks it (`set_control` heavy). Runs in both tiers. The in-process runner replays an embedded **`fixture`** array (same shape as `steps`, but all `add_module`) that builds the same pipeline `main.cpp` does, then runs the actual steps. The live runner skips the fixture (device is its own fixture) and pre-flights that every id the steps touch is actually present on the device, a missing id is a hard fail, not a silent skip.
+- **`"mode": "mutate"`**: the scenario assumes a wired pipeline and tweaks it (`set_control` heavy), and runs in both tiers.
+  The in-process runner replays an embedded **`fixture`** array (same shape as `steps`, but all `add_module`) that builds the same pipeline `main.cpp` does, then runs the steps.
+  The live runner skips the fixture (device is its own fixture) and pre-flights every id the steps touch: a missing id is a hard fail, not a silent skip.
 
 Picking the right mode:
 - If your scenario starts with empty Layouts/Layer/Drivers wiring, it's **construct**. It will not run live.
@@ -236,7 +266,10 @@ Picking the right mode:
 
 A `mutate` scenario that needs platform-bound modules (Network mDNS, WiFi, OTA) the in-process runner can't honestly stand up should add `"live_only": true`.
 
-**Bespoke convention.** The `mode` + `fixture` + `reset` trinity is projectMM-specific: no off-the-shelf BDD or scenario framework was borrowed wholesale. It exists because the same JSON has to serve both an in-process runner that owns the scheduler and a live runner that does not (main.cpp does). The closest analogs from widely recognized testing patterns: `fixture` ≈ xUnit fixtures (setup-once, replayed per scenario); `reset` ≈ SQL `BEGIN`/`ROLLBACK` (idempotent state restoration); `mode` ≈ pytest's parameterized execution modes (one test runs in different worlds). A future contributor who finds an off-the-shelf framework capturing this construct/mutate asymmetry is worth migrating to.
+**Bespoke convention.** The `mode` + `fixture` + `reset` trinity is MoonLight-specific: no off-the-shelf BDD or scenario framework was borrowed wholesale.
+It exists because the same JSON has to serve both an in-process runner that owns the scheduler and a live runner that does not (main.cpp does).
+The closest analogs from widely recognized testing patterns: `fixture` ≈ xUnit fixtures (setup-once, replayed per scenario); `reset` ≈ SQL `BEGIN`/`ROLLBACK` (idempotent state restoration); `mode` ≈ pytest's parameterized execution modes.
+A future contributor who finds an off-the-shelf framework capturing this construct/mutate asymmetry is worth migrating to.
 
 ### Reset block: idempotent scenarios
 
@@ -255,7 +288,8 @@ Convention: reset every control your scenario writes, plus any production-defaul
 
 ### Performance contracts (`contract[<target>]`)
 
-Every measurable step carries a per-target `contract` block, the **performance contract** projectMM commits to delivering on that platform. The runner compares each measurement to the contract and fails if the device misses it.
+Every measurable step carries a per-target `contract` block, the **performance contract** MoonLight commits to on that platform.
+The runner compares each measurement to the contract and fails if the device misses it.
 
 ```json
 "contract": {

@@ -31,10 +31,11 @@ SWEEP = ROOT / "moondeck" / "repo_rename" / "rename_to_moonlight.py"
 # Committed beside the scripts, so the drift between two runs is a diff rather than a memory.
 REPORT = ROOT / "moondeck" / "repo_rename" / "check_rename_ready.md"
 
-# What the rehearsal measured, and how far the count may drift before it is worth a look.
+# What the last measured pass reached, and how far the count may drift before it is worth a look.
 # The band is wide on purpose: prose grows, and a hundred more hits in documentation says
 # nothing. A jump past it says something landed that the markers may not cover.
-REHEARSED_HITS = 1376
+# Re-baselined as each batch of free renames lands, since the reach falls with every one.
+REHEARSED_HITS = 1206
 DRIFT_ALLOWED = 400
 
 # Lines that must survive the sweep, as (file, the text that must still be there).
@@ -99,7 +100,7 @@ def write_report(hits: int, drift: int, failures: list[str], report: str) -> Non
     for area, n in per_area(report)[:20]:
         out.append(f"| {n} | `{area}` |")
     if failures:
-        out += ["", "## Not ready", ""] + [f"- {f}" for f in failures]
+        out += ["", "## What blocks the switch", ""] + [f"- {f}" for f in failures]
     else:
         out += ["", "Every check passes: the tree is ready for the sweep.", ""]
     REPORT.write_text("\n".join(out) + "\n")

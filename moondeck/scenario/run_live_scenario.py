@@ -173,6 +173,28 @@ def _detect_target(state: dict) -> str:
     return osmap.get(platform.system(), "desktop-unknown")
 
 
+def _uptime_seconds(client):
+    """The System card's uptime as seconds, or None when it cannot be read.
+
+    The value is `H:MM:SS`, and its only use here is comparing two readings across a restart.
+    """
+    try:
+        mod = client.get(_mod_path("System"))
+    except Exception:
+        return None
+    for c in (mod.get("controls") or []):
+        if c.get("name") == "uptime":
+            parts = str(c.get("value") or "").split(":")
+            if len(parts) != 3:
+                return None
+            try:
+                h, m, sec = (int(x) for x in parts)
+            except ValueError:
+                return None
+            return h * 3600 + m * 60 + sec
+    return None
+
+
 def _reboot_and_wait(client, target: str, timeout_s: float = 60.0) -> str:
     """Restart the device and wait for it to answer again, so a scenario can prove what survives.
 
@@ -183,8 +205,17 @@ def _reboot_and_wait(client, target: str, timeout_s: float = 60.0) -> str:
     """
     data_dir = os.environ.get("MM_DATA_DIR")
     is_desktop = target.startswith("desktop-")
+
+    # Uptime before the restart, so the recovered instance can be told from the one still running.
+    # Without it the first answering /api/state is accepted, which on a board is routinely the OLD
+    # instance replying before it goes down: every persistence assertion after that proves nothing.
+    before = _uptime_seconds(client)
+
     try:
         client.post("/api/reboot", {})
+    except urllib.error.HTTPError as re_:
+        # A refused reboot is a failed step: the device is up, so the poll below would pass at once.
+        return f"/api/reboot returned HTTP {re_.code}"
     except Exception:
         pass                  # the device goes away mid-response, which is the expected shape
 
@@ -204,13 +235,26 @@ def _reboot_and_wait(client, target: str, timeout_s: float = 60.0) -> str:
         subprocess.Popen([str(binary)], cwd=str(ROOT), env=env,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    # Evidence of a restart, not merely of an answer: either the device went away and came back, or
+    # it answers with an uptime lower than before. One of the two must hold before this reports success.
     deadline = time.time() + timeout_s
+    went_away = False
     while time.time() < deadline:
         try:
             client.get("/api/state")
-            return ""
         except Exception:
+            went_away = True          # the old instance is gone, so the next answer is the new one
             time.sleep(1.0)
+            continue
+        if went_away:
+            return ""
+        now = _uptime_seconds(client)
+        if before is not None and now is not None and now < before:
+            return ""                 # the clock restarted, which only a reboot does
+        time.sleep(1.0)
+    if not went_away:
+        return (f"still answering after {timeout_s:.0f}s with no uptime reset: "
+                "the reboot did not take effect")
     return f"did not answer within {timeout_s:.0f}s"
 
 
@@ -641,7 +685,15 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                 # with the other about the same scenario.
                 def _as_written(v):
                     return {True: "true", False: "false"}.get(v, str(v)) if isinstance(v, bool) else str(v)
-                want = _as_written(step["equals"])
+                # `not_equals` pins a value that moves per release, where the only stable claim is
+                # that it is not the empty string a missing source would render. Both tiers agree.
+                negated = "equals" not in step and "not_equals" in step
+                if "equals" not in step and not negated:
+                    step_result["status"] = "error"
+                    print(f"  EXPECT {mod_id}.{key} — needs `equals` or `not_equals`")
+                    results["passed"] = False
+                    continue
+                want = _as_written(step["not_equals" if negated else "equals"])
                 try:
                     mod = client.get(_mod_path(mod_id))
                     got = next((c.get("value") for c in (mod.get("controls") or [])
@@ -655,12 +707,13 @@ def run_scenario(client: Client, scenario_path: Path, settle_s: float = 1.5,
                     step_result["status"] = "error"
                     print(f"  EXPECT {mod_id}.{key} — no such control")
                     results["passed"] = False
-                elif _as_written(got) == want:
+                elif (_as_written(got) != want) if negated else (_as_written(got) == want):
                     step_result["status"] = "ok"
-                    print(f"  EXPECT {mod_id}.{key} == {want}")
+                    print(f"  EXPECT {mod_id}.{key} {'!=' if negated else '=='} {want}")
                 else:
                     step_result["status"] = "error"
-                    print(f'  EXPECT {mod_id}.{key} is "{_as_written(got)}", expected "{want}"')
+                    print(f'  EXPECT {mod_id}.{key} is "{_as_written(got)}", '
+                          f'expected {"not " if negated else ""}"{want}"')
                     results["passed"] = False
 
             elif op == "set_control":

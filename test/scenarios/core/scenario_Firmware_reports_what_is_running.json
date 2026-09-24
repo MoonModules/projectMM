@@ -35,6 +35,14 @@
       }
     },
     {
+      "name": "a-version-is-reported",
+      "description": "An empty version is what a card reports when its source is missing, and it is the one value the update check must never compare against a release.",
+      "op": "expect_control",
+      "id": "Firmware",
+      "key": "version",
+      "not_equals": ""
+    },
+    {
       "name": "restart",
       "description": "Restart: the version must come from the image rather than from anything persisted.",
       "op": "reboot",
@@ -58,6 +66,14 @@
           "last_updated": "2026-09-24"
         }
       }
+    },
+    {
+      "name": "it-still-reports-one",
+      "description": "The same holds after the restart, since the version comes from the image rather than from anything persisted.",
+      "op": "expect_control",
+      "id": "Firmware",
+      "key": "version",
+      "not_equals": ""
     }
   ]
 }

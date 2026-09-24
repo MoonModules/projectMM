@@ -99,16 +99,25 @@
       "observed": {
         "desktop-macos": {
           "tick_us": {
-            "p50": 25,
-            "p95": 81,
+            "p50": 1,
+            "p95": 78,
             "min": 1,
             "max": 81,
-            "n": 11,
-            "samples": [35, 25, 40, 18, 53, 78, 14, 81, 1, 2, 1]
+            "n": 24,
+            "samples": [35, 25, 40, 18, 53, 78, 14, 81, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
           },
           "last_updated": "2026-09-24"
         }
       }
+    }
+  ],
+  "reset": [
+    {
+      "name": "restore-the-effect",
+      "description": "Swap the slot back, so a live device is left with the effect it started with rather than this scenario's replacement. replace_module keeps the scenario id, so the slot is still Pulse.",
+      "op": "replace_module",
+      "id": "Pulse",
+      "type": "PulseEffect"
     }
   ]
 }

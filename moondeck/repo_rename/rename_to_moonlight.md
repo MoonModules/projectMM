@@ -6,91 +6,77 @@ Everywhere the product name still appears as the CURRENT name, which is what the
 
 Committed so the reach is reviewable before the day. A file appearing here that should keep the old name needs a `rename-keep` marker, and the readiness check asserts the ones already found.
 
-**1273 hits across 226 files.**
+**1206 hits across 186 files.**
 
 ## By area
 
 | Hits | Area |
 |---:|---|
-| 247 | `docs/work/future` |
+| 251 | `docs/work/future` |
 | 146 | `docs/how-to` |
-| 92 | `docs/work/past/plans` |
+| 107 | `docs/moonmodules/light` |
+| 99 | `docs/work/past/plans` |
 | 81 | `moondeck/ci` |
-| 66 | `.` |
-| 53 | `docs/moonmodules/light` |
-| 38 | `src/ui` |
+| 45 | `.` |
 | 37 | `docs/friend-repos` |
 | 37 | `docs/moonmodules/core` |
 | 35 | `moondeck` |
 | 34 | `moondeck/run` |
 | 28 | `moondeck/docs` |
-| 28 | `mooninstaller` |
 | 26 | `docs` |
+| 25 | `src/light/effects` |
 | 24 | `docs/work/past` |
-| 23 | `docs/work/present` |
-| 22 | `src/light/effects` |
-| 20 | `moondeck/check` |
+| 22 | `mooninstaller` |
+| 19 | `moondeck/check` |
+| 19 | `src/light/layouts` |
 | 18 | `.github/workflows` |
 | 18 | `moondeck/build` |
-| 16 | `docs/reference` |
-| 16 | `src/core/system` |
-| 15 | `src/light/layouts` |
-| 15 | `src/platform/desktop` |
+| 17 | `docs/work/present` |
+| 17 | `src/ui` |
 | 14 | `docs/legal` |
+| 14 | `docs/reference` |
 | 14 | `docs/tutorials` |
 | 13 | `docs/reference/hardware` |
-| 13 | `test/python` |
-| 11 | `test/unit/core` |
 | 10 | `moondeck/uiscenario` |
-| 9 | `test/unit/light` |
 | 7 | `docs/explanation/architecture` |
 | 4 | `docs/explanation` |
 | 4 | `moonbase/main` |
 | 4 | `moondeck/qemu` |
-| 4 | `src/platform/esp32` |
 | 3 | `mooncloud` |
-| 3 | `src/light/drivers` |
-| 3 | `test/uiscenarios/projects` |
-| 2 | `.claude/workflows` |
+| 3 | `src/light/modifiers` |
 | 2 | `moondeck/moondeck_ui` |
-| 2 | `moondeck/scenario` |
-| 2 | `src/light/util` |
-| 2 | `test/uiscenarios` |
 | 1 | `.github` |
 | 1 | `docs/contributing` |
 | 1 | `esp32` |
-| 1 | `esp32/partitions` |
 | 1 | `moonbase` |
 | 1 | `moondeck/report` |
 | 1 | `moondeck/test` |
-| 1 | `src/core/util` |
+| 1 | `src/core/system` |
 | 1 | `src/light/layers` |
-| 1 | `src/light/modifiers` |
-| 1 | `src` |
-| 1 | `test` |
+| 1 | `test/python` |
 
 ## The twenty widest files
 
 | Hits | File |
 |---:|---|
 | 81 | `moondeck/ci/package_desktop.py` |
+| 68 | `docs/moonmodules/light/effects.md` |
+| 47 | `docs/work/past/plans/rename-to-moonlight (superseded).md` |
 | 43 | `docs/work/future/livescripts-analysis-top-down.md` |
-| 42 | `docs/work/past/plans/rename-to-moonlight (superseded).md` |
 | 41 | `docs/how-to/installing-to-desktop.md` |
-| 38 | `docs/moonmodules/light/effects.md` |
 | 31 | `docs/how-to/panel-cards.md` |
 | 30 | `docs/work/future/livescripts-analysis-bottom-up.md` |
 | 26 | `moondeck/MoonDeck.md` |
 | 25 | `docs/moonmodules/core/system.md` |
 | 25 | `docs/work/future/backlog-core.md` |
-| 25 | `src/ui/app.js` |
 | 23 | `docs/work/future/leddriver-analysis-bottom-up.md` |
 | 23 | `docs/work/future/nrf-zephyr-target-analysis.md` |
-| 21 | `.vale.ini` |
 | 21 | `docs/how-to/home-automation.md` |
 | 20 | `moondeck/docs/screenshot_modules.py` |
 | 19 | `README.md` |
 | 19 | `docs/gettingstarted.md` |
 | 19 | `docs/work/past/index.md` |
 | 18 | `docs/work/future/backlog-light.md` |
+| 18 | `docs/work/future/leddriver-analysis-top-down.md` |
+| 18 | `docs/work/future/pins-analysis-bottom-up.md` |
 
