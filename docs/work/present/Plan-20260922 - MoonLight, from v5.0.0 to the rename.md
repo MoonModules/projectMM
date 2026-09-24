@@ -2,13 +2,17 @@
 
 projectMM becomes MoonLight. **v5.0.0 is the last release under the old name and v6.0.0 is the first under the new one.** This file is the whole record: what ships before the switch, what happens at it, what follows, and the decisions already taken along the way. It replaces the five files that held pieces of it.
 
-## The two decisions that shape everything
+## The three decisions that shape everything
 
 **Migration from the predecessor is finished.** No further effects, layouts or modifiers are ported from the old MoonLight. What exists today is what ships, and the gap tables in the old plans are closed rather than outstanding. New effects are written on merit from here, not to match a list.
 
 **A user's configuration survives both releases.** v5.0.0 upgrades in place, subject only to the breaks [MIGRATING](../../reference/MIGRATING.md) already records. v6.0.0 carries configuration across too, by Backup on v5 and Restore on v6, because **nothing persisted carries the product name**: config files are named after module types (`Effects.json`, `Drivers.json`) and the sweep leaves every type and `namespace mm::` untouched. The migration engine in [migrate.js](../../../src/ui/migrate.js) therefore has no rename to apply for the rename itself, which is the easiest case it can be handed.
 
-What does break at v6.0.0 is **live interoperation**: a projectMM device and a MoonLight device on one network stop recognising each other, because discovery compares a literal name. That is a same-day nuisance rather than lost work, and the fix is to update both.
+**No compatibility code ships with MoonLight**, which is [the standing rule](../../../CLAUDE.md#principles) applied to the rename: nothing translates a projectMM identity into a MoonLight one, no alias for a renamed key, no shim reading a predecessor's file, no branch asking which name a device was flashed under.
+
+**Backup on v5, Restore on v6 is the one supported path**, and every upgrade question is answered with it. Where something does not carry, the answer is to erase the flash and install clean. A Home Assistant entity re-appearing under a new identity is the same trade: the alternative is a permanent pin to the old name, and a new product does not inherit one.
+
+**Live interoperation survives**, which the rehearsal got wrong: a peer is classified by the numeric marker `0x014d4d00` rather than by any name, so a projectMM device and a MoonLight device still see each other. What goes stale is a saved device list, whose rows re-type themselves on the next discovery sweep.
 
 ## Where we stand
 
@@ -83,11 +87,27 @@ Thursday's work happened on Wednesday, and it changed what the first minute of t
 
 **Two recorder defects, each a silently wrong take rather than an error.** `wait_for` read only the present, so a state shorter than the gap between two steps was missed: the S3's erase lasts about twelve seconds and the step waiting for it starts later than that, which failed a run that had in fact gone perfectly. It now records what a watched element showed and counts a state that already passed. And `type_into` typed on top of a field rather than into it, so the installer's prefilled SSID provisioned a device for `MoonModulesMoonModules`, which joins nothing. Both are pinned by tests, and the second is a defect for anyone re-installing rather than only for the camera.
 
-**The clips are numbered in the order the work happens**, `01-install` through `10-react-to-sound`, so the directory reads as the path a newcomer takes. Both the install and the tour exist twice, once per platform, and each pair shares its number because it is one beat on two machines. Installing splits because the routes share no step, one flashing a chip and the other downloading an app. The tour splits because the trees differ: a board drives LED pins and hears a real microphone, where a computer previews and sends over the network. Each tour opens every module and every tab inside it. `02-first-look-desktop` is embedded where Chapter 2 of [getting started](../../gettingstarted.md) begins.
+**The clips are numbered in the order the work happens**, `01-install` through `98-react-to-sound`, so the directory reads as the path a newcomer takes. Both the install and the tour exist twice, once per platform, and each pair shares its number because it is one beat on two machines. Installing splits because the routes share no step, one flashing a chip and the other downloading an app. The tour splits because the trees differ: a board drives LED pins and hears a real microphone, where a computer previews and sends over the network. Each tour opens every module and every tab inside it. `02-first-look-esp32` is embedded where Chapter 2 of [getting started](../../gettingstarted.md) begins, since Chapter 1 flashed a board and the tour should be of that board. It is the recording from v5.0.0 for now, and re-records against the current firmware in the next pass.
 
 Both clips were recorded against a real erase-and-flash of the S3, ending on a provisioned device at `192.168.1.158` with its microphone tracking music in the room.
 
 **What this does to the week.** Thursday's run-file work is largely done, so Thursday absorbs what the script asks for rather than starting from nothing. The two recorder fixes make Friday's filming cheaper, since a take no longer fails on a state that went by too quickly. One thing moved the other way: the clips were recorded before the script is final, so they are rehearsal footage by the plan's own rule, and Saturday re-records whatever the script changes. That was always the shape; it just started a day early.
+
+### Sept 24: the sweep is smaller than it was, and four assumptions were wrong
+
+Ninety-nine lines came off cutover day, from 1376 to 1277. More useful than the count is what moving them taught, because every one of these was a thing the rehearsal had reported as safe.
+
+**A hand-counted length survives a rename by luck.** MQTT sized its topic buffer as `9 + 1 + 6 + 1`, counted from `projectMM`. MoonLight is nine characters too, so the sweep would have passed and any other name would have truncated every topic silently. The length now derives from the string with `sizeof`, which is the general form: a literal's length belongs to the literal, never to a comment that counts it.
+
+**A round trip has as many ends as it has, and the tests know.** The device-type label looked like a pair, one plugin writing it and one comparison reading it. It was three: `devTypeStr` emits the string that gets persisted. Renaming two of the three broke four tests, which is the guardrail working exactly as intended. Assume a third end exists until the suite says otherwise.
+
+**Discovery was already rename-proof, and the plan said otherwise.** A peer is classified by the numeric marker `0x014d4d00`, not by any name, so a renamed device and an old one still recognise each other on the wire. The paragraph claiming live interoperation breaks at v6.0.0 was wrong about the mechanism. What actually goes stale is a persisted device list, which self-heals on the next discovery sweep.
+
+**A comment saying a line is fixed does not stop a sweep.** The MoonCloud salt carried "changing this re-identifies every installation in the world exactly once, so it is fixed" and would have been rewritten anyway. It now carries a `rename-keep` marker, which the script honours mechanically. A rule worth stating is worth stating where the tool reads it.
+
+**What genuinely cannot move early**, checked rather than assumed: the OTA project guard, where `moonbase/CMakeLists.txt` stamps the image and `FirmwareImage.h` checks that exact string, so moving either early makes every v5 device refuse the new MoonBase image. And the repository URLs, which resolve only once the repo itself is renamed.
+
+**The method that found all of this** is worth repeating on whatever is left: take the sweep's own file list, read every hit in the top files rather than trusting the count, and ask of each whether anything outside this repository keys on the string. Almost all of them were comments.
 
 ### The week, day by day
 
@@ -186,7 +206,8 @@ One day, in order, with a stop at each gate:
 3. **Transfer the repository**, which leaves the old URLs redirecting.
 4. **Run `uv run moondeck/repo_rename/rename_to_moonlight.py --apply`** on a branch off the renamed repo, read the diff in full, commit it as one change. Then check the four the rehearsal found: `kFallbackRepo` still names the old repository, the MoonBase image check still reads `projectMM-moonbase`, MIGRATING's v5.0.0 heading still says projectMM, and `TextEffect`'s golden moves with its new default text rather than failing.
 5. **Flip the identity set in that same commit**: binary name, release asset names, the manifest `name` and `home_assistant_domain`, the docs domain, and the `MM-` prefix if it changes.
-   - The documentation path follows the repository name on its own: GitHub Pages serves a project site under `/<repo>/` even on the custom domain, so `moonmodules.org/projectMM/…` becomes `moonmodules.org/MoonLight/…` at the transfer, and the sweep updates `site_url`, `repo_url` and `site_name` to match. Check the web installer at `/MoonLight/install/` first, since it is the link a newcomer follows and the one every board's QR code carries.
+   - The documentation path follows the repository name on its own: GitHub Pages serves a project site under `/<repo>/` even on the custom domain, so `moonmodules.org/projectMM/…` becomes `moonmodules.org/MoonLight/…` at the transfer, and the sweep updates `site_url`, `repo_url` and `site_name` to match. Check the web installer at `/MoonLight/install/` first, since it is the link a newcomer follows.
+   - **Check the OLD installer path too, and do not assume it redirects.** GitHub's permanent redirect for a transferred repository covers `github.com` URLs, which is what the OTA client follows; a Pages path on a custom domain is a different mechanism and is not covered by that promise. Every board already shipped carries `/projectMM/install/` on its QR code and in its documentation, so a 404 there strands the people most likely to be upgrading. Open it right after the transfer: if it does not land on the installer, publish a redirect from the old path before announcing anything.
 6. **Run the full gate set again** on the swept tree, then tag and release v6.0.0.
 7. **Verify the two claims**: a v5.0.0 device finds and installs v6.0.0 over OTA, and the backup from step 2 restores onto it with layouts, effects and scripts intact.
 8. **Hand-edit `moondeck/moondeck.json`**, which is gitignored and outside the sweep.
@@ -196,6 +217,69 @@ If step 7 fails, the release stays and the fix is a v6.0.1: the repository has a
 ### After: the week following
 
 Watch for what only real users hit: OTA from versions older than v5.0.0, the documentation redirect, and a mixed network where someone has not updated both devices.
+
+## The spoken introduction
+
+What is said to camera before the clips run, in the product owner's own words and voice. The clips that follow are the proof of what it claims, which is why it comes first and why every claim in it is checked against the repository rather than remembered.
+
+> Hi! Welcome to a new MoonModules video. It's been a while. About a year ago I made a number of MoonLight videos. But since then MoonLight has had a complete makeover!
+>
+> You could say "I made a thing", but did I? Because I literally did not write one line of code, or one word of documentation.
+> It is all done by AI agents! From the ground up: code, documentation, test scripts, build scripts, gifs, screenshots and even videos!
+>
+> It's not that I did nothing. I wrote prompts! And lots of them, as AI agents have a mind of their own, drift a lot, and tend to forget things. This resulted in 3 failed attempts before the new MoonLight is something I (think I) have under control:
+> - Building the right guard rails is the key: unit tests, scenario tests, live scenarios
+> - Claude.md containing the principles and processes: pre-commit/merge/release gates
+> - Hook in the human:
+>     - every change checked!!
+>     - Triggering any GitHub action (commit, push, merge)
+> - So I won't call this vibe coding
+>
+> So why did I do this? The old MoonLight was not perfect but it worked and was highly tuned. So why give up on all of this?
+> The reason is simple: because AI agents offer a revolutionary new paradigm and although I have a lot of worries about AI in its current context, it is not going away, so as an IT guy talking about AI already back in the 80s, I cannot pretend it is not there or that it will blow over.
+>
+> I did give up on MoonLight code, but I did not give up on the MoonLight principles! They are a few years old, formulated when I was working on WLED and WLED-MM, first tried in StarLight, then MoonLight, then projectMM V1, V2 and V3 and now the new MoonLight, and the principles were extended over time:
+> - 3D from the ground up
+> - Everything is a module, this was inspired by WLED usermods, now a MoonModule
+> - UI is derived from the MoonModule, not written for each
+> - Layers
+> - Hottest hot path: shortcut the pipeline when possible: one layer, no modifiers, identity grid, default color ordering, full brightness
+> - Fastest pipeline: effects are producers, drivers are consumers, working in parallel, using multiple cores and offloading CPU using DMA where possible
+>     - In optimal cases 2 cores are not even needed as the DMA runs in parallel
+> - Unbreakable
+>     - not enough memory: step down
+>     - Any changes made will be checked
+> - Never reboot: Any change to pins, to LED drivers etc will work immediately
+>
+> And one more "principle" needs special attention: No libraries! When setting up MoonLight it became clear that libraries could not provide the level of test-guarding MoonLight needs to keep agentic coding in control. Also libraries do not "exactly" do what you want: they do more, using more code, and they do less than what you need. So you are depending on their willingness to implement our needs and on their release schedules. Plus it turned out that the principles and architecture we set up make it "damn easy" to write our own code, back to back, fewer lines of code, doing exactly what we need.
+>     - No libraries except Espressif's own. Not just lighting libraries: no async web server either, we wrote that too. The only exceptions are four components from the chip vendor (mDNS, LittleFS, Improv and one Ethernet PHY driver), which is the chip's own plumbing rather than someone else's idea of how anything should work.
+>
+> And this brings me to the final point before I will show some MoonLight: making everything ourselves, do we steal code? This is a big debate, using AI agents especially. I personally worked on and with different systems and libraries which I included in the past (WLED(-MM), FastLED, Asynchronous Web Server, Clockless LED Drivers, Live Scripts, ...) and now don't need any more. MoonLight has a few principles to deal with this:
+> - Use industry standard algorithms, naming, spec sheets etc. Explicitly don't use existing code!
+> - Use attribution where we are inspired by others
+> - Steal ideas, not code: what travels is the approach, the technique someone proved works on real hardware, the mistake worth not repeating
+> - Transform rather than imitate: full testability and live reconfiguration force a different shape, so an imitation could not have satisfied them anyway
+>
+> So this is where we stand. Time to show some MoonLight. The coming clips show MoonLight running.
+> After that I will come back telling how to get started, how to get involved and a glimpse of the future.
+> And yes, I did not make these clips, my team did ;-)
+> Enjoy.
+
+### What the introduction claims, and where it is true
+
+Checked against the tree rather than taken on trust, because a spoken claim is the one nobody can grep.
+
+| Claim | Where it holds |
+|---|---|
+| Unit tests, scenario tests, live scenarios | 207 unit-test files, 11 scenarios plus 27 archived, [run_live_scenario.py](../../../moondeck/scenario/run_live_scenario.py) |
+| Pre-commit, merge and release gates | [CLAUDE.md § The Process](../../../CLAUDE.md), which names all three |
+| 3D from the ground up | 27 effects declare `Dim::D3` |
+| Everything is a MoonModule | [MoonModule.h](../../../src/core/module/MoonModule.h), one lifecycle for every part |
+| UI derived from the module | `writeControlMetadata` builds each control's widget from its declaration |
+| Not enough memory: step down | [Layer.h](../../../src/light/layers/Layer.h) reduces the buffer and says so rather than failing |
+| Never reboot | [live reconfiguration](../../explanation/architecture/moonmodule.md#live-reconfiguration-every-change-applies-on-the-next-frame) |
+| Attribution where inspired | 67 origin lines in the [effects catalog](../../moonmodules/light/effects.md) |
+| No libraries | True of every library but Espressif's own four (mDNS, LittleFS, Improv, one PHY driver). The HTTP server is ours, on our own `TcpConnection`, so the no-async-web-server claim holds too |
 
 ## The introduction: a draft scenario
 
@@ -237,7 +321,7 @@ A second layer blending over the first, then a modifier folding the result. Wher
 
 ### 5. It hears the room
 
-`10-react-to-sound` · 20 seconds
+`98-react-to-sound` · 20 seconds
 
 A microphone on the board, an effect following the music. Audio is the feature people arrive wanting.
 

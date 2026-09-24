@@ -24,12 +24,17 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
+import subprocess
 from urllib.parse import urljoin
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests
+
+# The repo root, so a command a run file starts resolves its paths the way a person would.
+ROOT = Path(__file__).resolve().parents[2]
 
 # The attribute app.js names a module's card AND its nav button by, offered to
 # get_by_test_id as the test-id contract. ONE attribute, not a list: the
@@ -293,6 +298,8 @@ class Driver:
         # real sleep and without patching `time` for everything else in the process.
         self._now = getattr(page, "now", time.time)
         self._watched: set[str] = set()
+        # Commands started by the run, collected by wait_process: @xref{start_process}.
+        self._processes: dict[str, subprocess.Popen] = {}
 
     VIEWPORT = {"width": 1280, "height": 720}
 
@@ -912,9 +919,12 @@ class Driver:
         try:
             # `commit` rather than `domcontentloaded`: a JSON response has no DOM to wait on, and
             # the `{ }` button leads to exactly that. The dwell below is what the viewer sees.
-            self.page.goto(href, wait_until="commit", timeout=20000)
+            resp = self.page.goto(href, wait_until="commit", timeout=20000)
+            # A 404 renders as a page and films as success, so the status is what decides.
+            reached = resp is None or resp.ok
+            if not reached:
+                self.failures.append(f"follow_link: {href} answered {resp.status}")
             self._settle(seconds)
-            reached = True
         except Exception:
             reached = False          # an offline docs host is a bad take, not a crash
         finally:
@@ -926,6 +936,44 @@ class Driver:
             except Exception:
                 reached = False
         return reached
+
+    def start_process(self, command: str, name: str = "") -> bool:
+        """Start a command alongside the run, so the interface can be filmed while it is driven.
+
+        A scenario drives the device over REST while this drives the browser, which is the only way
+        to film what a scenario does: the run file cannot perform those mutations itself without
+        becoming a second copy of the scenario, and the two would then drift.
+        The process is left running; `wait_process` collects it.
+        """
+        try:
+            # Discarded rather than piped: nothing here reads it, and a full pipe buffer blocks the
+            # child forever. A live scenario run is exactly the chatty case that would hit it.
+            proc = subprocess.Popen(shlex.split(command), cwd=str(ROOT),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            self.failures.append(f"start_process: {command!r} did not start ({e})")
+            return False
+        self._processes[name or command] = proc
+        return True
+
+    def wait_process(self, name: str = "", timeout: float = 600.0) -> bool:
+        """Wait for a started command to finish, so a take cannot end mid-scenario.
+
+        A non-zero exit is a failed take rather than an exception: the run reports it the way it
+        reports a step that did not complete, and the recording is refused.
+        """
+        proc = self._processes.get(name)
+        if proc is None:
+            self.failures.append(f"wait_process: nothing named {name!r} was started")
+            return False
+        end = self._now() + timeout
+        while proc.poll() is None and self._now() < end:
+            self._settle(1.0)        # paced, so the wait is the shot rather than dead air
+        if proc.poll() is None:
+            proc.kill()
+            self.failures.append(f"wait_process: {name!r} ran past {timeout}s")
+            return False
+        return proc.returncode == 0
 
     def open_app_wait(self) -> None:
         """Wait for the device UI to be driveable again after a navigation."""
@@ -1169,6 +1217,8 @@ class Driver:
         "click_control":  lambda a: (a["module"], a["control"]),
         "click":          lambda a: (a["selector"],),
         "follow_link":    lambda a: (a["selector"], float(a.get("seconds", 2.5))),
+        "start_process":  lambda a: (a["command"], a.get("name", "")),
+        "wait_process":   lambda a: (a.get("name", ""), float(a.get("timeout", 600.0))),
         "type_into":      lambda a: (a["selector"], a["text"],
                                      int(a.get("delay", 180))),
         "choose_option":  lambda a: (a["selector"], a["value"]),
@@ -1373,6 +1423,8 @@ ACTIONS: dict[str, str] = {
     # Selector actions: another projectMM surface, with no module contract of its own.
     "click":          "click",
     "follow_link":    "follow_link",
+    "start_process":  "start_process",
+    "wait_process":   "wait_process",
     "type_into":      "type_into",
     "choose_option":  "choose_option",
     "goto":           "goto",

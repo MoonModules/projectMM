@@ -63,6 +63,8 @@ Only `action` and that action's own arguments are required.
 | `wait` | `seconds` | dwell, for a caption to be read |
 | `wait_for` | `selector`, `text`, `timeout` | holds until the page shows it, counting a state that already went by |
 | `follow_link` | `selector`, `seconds` | opens where a link leads in this page, dwells, and comes back |
+| `start_process` | `command`, `name` | runs a command alongside the take, so the interface can be filmed while something else drives it |
+| `wait_process` | `name`, `timeout` | holds until that command finishes, and fails the take if it did not succeed |
 | `hero` | `seconds` | hides the chrome and fills the frame with the 3D preview |
 | `pick_file` | `module`, `control`, `value` | a filepath control's picker |
 | `type_script` | `text`, `delay` | types into the MoonLive editor and saves |

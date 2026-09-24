@@ -44,6 +44,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>   // the braced list below; clang pulls it in transitively, GCC does not
 
 using namespace mm;
 

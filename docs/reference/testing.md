@@ -15,6 +15,10 @@ Three test categories, each with a clear purpose:
 - **In-process scenarios** (desktop, `test/scenarios/{core,light}/scenario_*.json`), exercise the system as an integrated pipeline. Each scenario is a declarative JSON file with a sequence of steps (`add_module`, `set_control`, `measure`) and optional performance bounds. The scenario runner (`test/scenario_runner.cpp`) replays the steps in-process and reports tick + heap per `measure` step. Same JSON files run against a live device through the HTTP API, that's the next tier.
 - **Live scenarios**: the same scenarios driven against a running device over REST. See [Live scenarios](#live-scenarios) below.
 
+A live run is worth watching once, because it is the tier that proves the device rather than a model of it. The suite walks the cards in the order the interface lists them, and every step happens through the same API the page uses:
+
+<video src="../assets/uiscenarios/04-scenario-testing.webm" autoplay loop muted playsinline width="720" title="The scenario suite driving a running device, card by card, while the interface shows it happening"></video>
+
 **Picking a tier for a new test.** When the behavior you want to pin only makes sense with modules wired together (e.g. "the pipeline reallocates cleanly when the grid resizes," "Drivers correctly hands the source buffer through after a child swap"), reach for a scenario first: that is what scenarios are *for*. When the behavior lives inside a single module (one function's contract, one edge case, one bug regression on a small surface), a unit test is the cheaper and faster fit. Don't extend the scenario runner with new predicates just to migrate an existing unit test, which is adding abstraction without an active need. Add predicates when a *new* scenario you're writing needs them.
 
 **Regression rule:** when a bug is found, the fix includes a new unit test or scenario that reproduces the bug. A comment in the test references the root cause so the connection stays traceable.
@@ -196,6 +200,29 @@ Per-`TEST_CASE` description rules:
 - **One physical line above the `TEST_CASE`**, no hard-wrapping; the generator and MoonDeck handle layout. A second line is allowed only when the case does something genuinely non-obvious.
 - **Missing description** → the generator italicises the raw `TEST_CASE("…")` name in its place.
 
+### Asserting a value, and what survives a restart
+
+Two ops exist for the things a measurement cannot see.
+
+**`expect_control`** asserts a control reads what the scenario says it must, and is the only op that fails a scenario on a value rather than on a timing contract:
+
+```json
+{ "name": "the-prefix-is-what-ships", "op": "expect_control", "id": "Mqtt", "key": "topicPrefix", "equals": "MoonLight/563cfe" }
+```
+
+It exists for a string some other system keys on, where a change breaks a contract no compiler and no timing measurement can see.
+
+Both tiers compare against the value as the API renders it, so `"equals": 180`, `"180"` and `true` all read the way a client would see them. They reach it differently, which is worth knowing before asserting an unusual type: in-process the runner calls `writeControlValue`, the serialiser the HTTP layer uses, while the live runner reads the parsed JSON back from `/api/modules/<id>`. The two agree on every scalar a control actually holds. A `List` or a long `TextArea` is where they would part company, since the in-process render goes through a fixed buffer, so assert those through a scalar the list drives rather than the list itself.
+
+**`reboot`** restarts the device and waits for it to answer, so a later `expect_control` proves what survived rather than what is merely still in memory:
+
+```json
+{ "name": "restart", "op": "reboot", "timeout": 60 },
+{ "name": "it-survived", "op": "expect_control", "id": "System", "key": "deviceName", "equals": "MM-Bench" }
+```
+
+On a board that is the reboot the endpoint performs. On a desktop the endpoint exits the process and nothing restarts it, so the live runner relaunches the binary with the data directory the exiting instance was using: a restart that came back on different files would prove nothing. In-process the op skips, because the scheduler is the process and exiting it would end the run.
+
 ### Scenario modes (construct vs mutate)
 
 Every scenario carries a top-level `mode` field that says what shape the scenario expects the world to be in. Two values:
@@ -323,7 +350,7 @@ Every `scenario_*.json` carries top-level metadata plus a `description` per step
   "fixture": [
     { "name": "fix-layouts", "op": "add_module", "id": "Layouts", "type": "Layouts" },
     { "name": "fix-grid", "op": "add_module", "id": "Grid", "type": "GridLayout", "parent_id": "Layouts", "props": {"width": 16, "height": 16} },
-    { "name": "fix-layer", "op": "add_module", "id": "Layer", "type": "Layer", "props": {"layouts": "Layouts", "channelsPerLight": 3} },
+    { "name": "fix-layer", "op": "add_module", "id": "Layer", "type": "Layer" },
     { "name": "fix-noise", "op": "add_module", "id": "Noise", "type": "NoiseEffect", "parent_id": "Layer" },
     { "name": "fix-mirror", "op": "add_module", "id": "Multiply", "type": "MultiplyModifier", "parent_id": "Layer" },
     { "name": "fix-drivers", "op": "add_module", "id": "Drivers", "type": "Drivers", "props": {"layer": "Layer"} },

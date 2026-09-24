@@ -6,7 +6,7 @@ Everywhere the product name still appears as the CURRENT name, which is what the
 
 Committed so the reach is reviewable before the day. A file appearing here that should keep the old name needs a `rename-keep` marker, and the readiness check asserts the ones already found.
 
-**1368 hits across 240 files.**
+**1273 hits across 226 files.**
 
 ## By area
 
@@ -16,9 +16,7 @@ Committed so the reach is reviewable before the day. A file appearing here that 
 | 146 | `docs/how-to` |
 | 92 | `docs/work/past/plans` |
 | 81 | `moondeck/ci` |
-| 67 | `src/core/system` |
 | 66 | `.` |
-| 58 | `test/unit/core` |
 | 53 | `docs/moonmodules/light` |
 | 38 | `src/ui` |
 | 37 | `docs/friend-repos` |
@@ -29,18 +27,20 @@ Committed so the reach is reviewable before the day. A file appearing here that 
 | 28 | `mooninstaller` |
 | 26 | `docs` |
 | 24 | `docs/work/past` |
+| 23 | `docs/work/present` |
 | 22 | `src/light/effects` |
 | 20 | `moondeck/check` |
-| 19 | `docs/work/present` |
 | 18 | `.github/workflows` |
 | 18 | `moondeck/build` |
 | 16 | `docs/reference` |
-| 16 | `src/light/layouts` |
+| 16 | `src/core/system` |
+| 15 | `src/light/layouts` |
 | 15 | `src/platform/desktop` |
 | 14 | `docs/legal` |
 | 14 | `docs/tutorials` |
 | 13 | `docs/reference/hardware` |
 | 13 | `test/python` |
+| 11 | `test/unit/core` |
 | 10 | `moondeck/uiscenario` |
 | 9 | `test/unit/light` |
 | 7 | `docs/explanation/architecture` |
