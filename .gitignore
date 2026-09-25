@@ -158,3 +158,4 @@ __pycache__/
 # listed media types one by one, to protect run files that used to live here; they no
 # longer do, so the rule can say what it means.
 /media/
+.playwright-profile/
