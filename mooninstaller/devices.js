@@ -13,7 +13,7 @@
 // app.js) does the same job from the right side of the security boundary.
 //
 // State shape: `[{ name, url, lastSeen, deviceModel? }]` keyed under
-// `MoonLight.devices.v1` in localStorage. `deviceModel` is a bookmark label only —
+// `projectMM.devices.v1` in localStorage. `deviceModel` is a bookmark label only —
 // the model's defaults are applied to the device during the install over serial
 // ("Improv = REST over serial"), not from this list. It's optional; the render path
 // treats an absent value as no model line. Entries saved before the board→deviceModel

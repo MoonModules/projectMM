@@ -24,6 +24,16 @@ MoonLight ships **no migration code**: the persistence layer is robust by defaul
 
 ## Unreleased
 
+### MQTT topics and the Home Assistant entity carry the product's new name
+
+**Action: *update an automation*, on a device you drive over MQTT or through Home Assistant.**
+
+The topic root is now `MoonLight/<last6-of-MAC>` where it was `projectMM/<last6-of-MAC>`, and the Home Assistant discovery object, its unique id and the client id follow the same root.
+A broker subscription or an automation written against the old root stops matching, and Home Assistant keeps the old retained config, so the previous entity goes unavailable while a new one appears alongside it.
+
+Delete the stale entity in Home Assistant and repoint any automation or dashboard at the new one, then rewrite subscriptions and publishes to the new root.
+Nothing on the device needs changing: the root is derived from a single constant, so every topic moves together.
+
 ### Audio arrives on every device, and its modes are reordered
 
 **Action: *re-set a control*, on a device whose Audio you had configured.** Restore maps the value for you, so this asks something only of a device upgraded in place.
@@ -150,7 +160,7 @@ Nothing is deleted if you skip this: the old directories stay where they are, an
 
 The desktop build wrote its configuration to `build/.config`, resolved against whatever directory the process happened to start in. That is a source-checkout layout, and it shipped: a downloaded binary either could not write there at all, failing every save and logging one line per save, or it wrote settings that belonged to that *folder* rather than to the user, so moving the executable lost them.
 
-Settings now live with the user: `%LOCALAPPDATA%\MoonLight` on Windows, `~/Library/Application Support/MoonLight` on macOS, and `$XDG_DATA_HOME/MoonLight` on Linux, falling back to `~/.local/share/MoonLight` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout stays in the tree**, under `build/fs` since the entry above moved it there, so its settings are at `build/fs/.config` and every gate script behaves as before.
+Settings now live with the user: `%LOCALAPPDATA%\projectMM` on Windows, `~/Library/Application Support/projectMM` on macOS, and `$XDG_DATA_HOME/projectMM` on Linux, falling back to `~/.local/share/projectMM` when that is unset. `MM_DATA_DIR` overrides it. **A source checkout stays in the tree**, under `build/fs` since the entry above moved it there, so its settings are at `build/fs/.config` and every gate script behaves as before.
 
 **Action: *nothing*, unless your settings persisted before.** The old behavior had two modes, and only one of them leaves anything to move:
 

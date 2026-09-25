@@ -45,9 +45,9 @@ A **source checkout writes to `build/fs/`** (its config under `build/fs/.config/
 
 | Platform | Directory |
 |---|---|
-| Windows | `%LOCALAPPDATA%\MoonLight` |
-| macOS | `~/Library/Application Support/MoonLight` |
-| Linux | `$XDG_DATA_HOME/MoonLight`, else `~/.local/share/MoonLight` |
+| Windows | `%LOCALAPPDATA%\projectMM` |
+| macOS | `~/Library/Application Support/projectMM` |
+| Linux | `$XDG_DATA_HOME/projectMM`, else `~/.local/share/projectMM` |
 
 `MM_DATA_DIR` overrides both, which is how the test suite pins its root into the build tree rather than touching a developer's real settings.
 
@@ -87,7 +87,7 @@ Every host needs [uv](https://docs.astral.sh/uv/), CMake 3.20+, and a C++20 comp
   winget install Microsoft.VisualStudio.2022.BuildTools --override "--passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
   ```
 
-  Build and test from a **Developer PowerShell for VS 2022** (Start Menu → "x64 Native Tools…") so `cl.exe` and the SDK paths are on `PATH`. The default CMake generator on Windows is Visual Studio multi-config, so `MoonLight.exe` lands at `build/windows/Release/MoonLight.exe` and `mm_scenarios.exe` at `build/windows/test/Release/`. `build_desktop.py` and `run_scenario.py` look in both the `Release/` subdir and the build root, so Ninja (single-config) also works if preferred.
+  Build and test from a **Developer PowerShell for VS 2022** (Start Menu → "x64 Native Tools…") so `cl.exe` and the SDK paths are on `PATH`. The default CMake generator on Windows is Visual Studio multi-config, so `projectMM.exe` lands at `build/windows/Release/projectMM.exe` and `mm_scenarios.exe` at `build/windows/test/Release/`. `build_desktop.py` and `run_scenario.py` look in both the `Release/` subdir and the build root, so Ninja (single-config) also works if preferred.
 
 ### Docker
 
@@ -302,7 +302,7 @@ builds MoonBase alongside), it is two requests:
 curl -X POST http://<device>/api/firmware/moonbase
 
 # 2. MoonBase writes the app slot and reboots into it
-curl --http1.1 -H "Expect:" --data-binary @build/esp32-<firmware>/MoonLight.bin \
+curl --http1.1 -H "Expect:" --data-binary @build/esp32-<firmware>/projectMM.bin \
      http://<device>/api/firmware/upload
 ```
 

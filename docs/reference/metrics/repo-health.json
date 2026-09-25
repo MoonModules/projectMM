@@ -1,5 +1,5 @@
 {
-  "commit": "e22d56ba",
+  "commit": "ccfe4ec1",
   "flash": {
     "esp32s3-n16r8": 2142976,
     "desktop": 1992392,
@@ -32,7 +32,21 @@
   "perf": {
     "desktop": {
       "tick_us": 1,
-      "fps": 1000000
+      "fps": 1000000,
+      "scenario_p50": {
+        "Effects_pipeline_builds_and_renders": {
+          "p50": 8,
+          "p95": 19,
+          "n": 25,
+          "last": "2026-09-25"
+        },
+        "Layouts_resize_reallocates_live": {
+          "p50": 66,
+          "p95": 94,
+          "n": 8,
+          "last": "2026-09-24"
+        }
+      }
     },
     "esp32": {
       "tick_us": 8354,
@@ -59,8 +73,8 @@
         "desktop-macos": {
           "p50": 8,
           "p95": 19,
-          "n": 24,
-          "last": "2026-09-24"
+          "n": 25,
+          "last": "2026-09-25"
         }
       },
       "Effects_swap_while_running": {
@@ -87,7 +101,7 @@
     "platform": 16776,
     "ui": 11360,
     "test": 57352,
-    "moondeck": 27949
+    "moondeck": 27952
   },
   "comments": {
     "core": {
@@ -111,7 +125,7 @@
       "ratio": 0.135
     },
     "moondeck": {
-      "lines": 4670,
+      "lines": 4673,
       "ratio": 0.19
     }
   },

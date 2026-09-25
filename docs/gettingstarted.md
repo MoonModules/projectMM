@@ -192,7 +192,7 @@ address others reach it at. The **Devices** section underneath finds other MoonL
 
 The device's own web UI works on a phone, but for quick on/off and brightness from your pocket there's a nicer option: **WLED Native**, the open-source mobile app for the WLED ecosystem. MoonLight speaks the WLED JSON API and announces itself over the network the same way a WLED device does, so the app finds your MoonLight controllers automatically, no setup, no pairing. Each one shows up as a card with a power toggle and a brightness slider, so a roomful of controllers is a scroll and a tap away.
 
-![MoonLight devices discovered in WLED Native](assets/core/WLED%20Native%20discovers%20MoonLight.jpeg){ width="300" }
+![MoonLight devices discovered in WLED Native](assets/core/WLED%20Native%20discovers%20projectMM.jpeg){ width="300" }
 
 Get it free for your phone:
 

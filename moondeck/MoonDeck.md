@@ -87,7 +87,7 @@ Launch the desktop executable as a detached background process and exit. The app
 uv run moondeck/run/run_desktop.py
 ```
 
-Re-running is idempotent: any existing `MoonLight` instance is stopped first, then a fresh one is launched. Output goes to `build/<host>/MoonLight.log`. Build first.
+Re-running is idempotent: any existing `projectMM` instance is stopped first, then a fresh one is launched. Output goes to `build/<host>/projectMM.log`. Build first.
 
 While the app is running, MoonDeck shows the button as **Stop** (a 5-second poll on `/api/running` detects the live process via `process_name`). Pressing Stop terminates the app; pressing Run again restarts it. From the CLI: `pkill -f build/<host>/MoonLight` (or `pkill MoonLight` if you don't have multiple host builds active).
 
@@ -1243,7 +1243,7 @@ Print the most recent MoonLight crash report and run log.
 uv run moondeck/run/show_crash_log.py
 ```
 
-On macOS, finds the newest `MoonLight-*.ips` in `~/Library/Logs/DiagnosticReports/`, parses the JSON crash report, and prints the exception type, signal, faulting thread, and top 20 stack frames. If no crash report exists it falls back to the last 40 lines of `build/<host>/MoonLight.log` so the run log is always reachable from one place.
+On macOS, finds the newest `projectMM-*.ips` in `~/Library/Logs/DiagnosticReports/`, parses the JSON crash report, and prints the exception type, signal, faulting thread, and top 20 stack frames. If no crash report exists it falls back to the last 40 lines of `build/<host>/projectMM.log` so the run log is always reachable from one place.
 
 Typical output (crash present):
 
@@ -1265,6 +1265,6 @@ Typical output (no crash, log tail):
 ```text
 No MoonLight crash reports found in DiagnosticReports.
 
-=== Last 40 lines of MoonLight.log ===
+=== Last 40 lines of projectMM.log ===
 tick: 1234us (FPS: 800)  free: 0  ...
 ```

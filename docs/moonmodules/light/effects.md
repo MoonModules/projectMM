@@ -4,7 +4,7 @@ Every effect, one block each: its preview, what it does, and what each control m
 
 Effects are built from the shared [power functions](power-functions.md): the drawing, field and motion routines every effect composes; that page lists each one with its callers.
 
-**Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [MoonLight-native](#projectmm-native-effects)
+**Jump to:** [MoonLight](#moonlight-effects) · [MoonModules](#moonmodules-effects) · [WLED](#wled-effects) · [FastLED](#fastled-effects) · [MoonLight-native](#moonlight-native-effects)
 
 > Some WLED-origin effects show a preview gif from [WLED-Utils](https://github.com/scottrbailey/WLED-Utils) by scottrbailey (the canonical WLED effect gif set, cross-linked with credit); these show WLED's rendering. Effects with a local `../../assets/…` gif show our own output.
 

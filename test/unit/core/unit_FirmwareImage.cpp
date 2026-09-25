@@ -63,7 +63,7 @@ std::vector<std::pair<std::filesystem::path, std::string>> builtImages() {
         if (!e.is_directory()) continue;
         for (const auto& [file, project] :
              {std::pair<const char*, const char*>{"projectMM-moonbase.bin", "projectMM-moonbase"},
-              std::pair<const char*, const char*>{"MoonLight.bin", "MoonLight"}}) {
+              std::pair<const char*, const char*>{"projectMM.bin", "projectMM"}}) {
             const auto p = e.path() / file;
             if (std::filesystem::exists(p)) out.emplace_back(p, project);
         }

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Print the most recent MoonLight crash report from the OS diagnostic store.
+"""Print the most recent projectMM crash report from the OS diagnostic store.
 
 macOS writes .ips crash reports to ~/Library/Logs/DiagnosticReports/.
-This script finds the newest MoonLight-*.ips, extracts the key fields
+This script finds the newest projectMM-*.ips, extracts the key fields
 (exception type, faulting thread, call stack), and prints them so they
-appear in MoonDeck's log stream next to MoonLight.log.
+appear in MoonDeck's log stream next to projectMM.log.
 
-If no crash report exists it prints the last 40 lines of MoonLight.log
+If no crash report exists it prints the last 40 lines of projectMM.log
 so the run log is always visible from one place.
 """
 
@@ -33,7 +33,7 @@ def _find_latest_ips() -> Path | None:
     d = _crash_reports_dir()
     if not d.exists():
         return None
-    candidates = sorted(d.glob("MoonLight-*.ips"), key=lambda p: p.stat().st_mtime, reverse=True)
+    candidates = sorted(d.glob("projectMM-*.ips"), key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0] if candidates else None
 
 
@@ -65,12 +65,12 @@ def _print_ips(path: Path) -> None:
 
 
 def _print_run_log() -> None:
-    log = _build_dir() / "MoonLight.log"
+    log = _build_dir() / "projectMM.log"
     if not log.exists():
-        print("No MoonLight.log found.")
+        print("No projectMM.log found.")
         return
     lines = log.read_text(errors="replace").splitlines()
-    print(f"=== Last {min(40, len(lines))} lines of MoonLight.log ===")
+    print(f"=== Last {min(40, len(lines))} lines of projectMM.log ===")
     for line in lines[-40:]:
         print(line)
 
@@ -82,7 +82,7 @@ def main() -> None:
         print()
     else:
         if _crash_reports_dir().exists():
-            print("No MoonLight crash reports found in DiagnosticReports.")
+            print("No projectMM crash reports found in DiagnosticReports.")
         else:
             print("DiagnosticReports directory not found (non-macOS or sandboxed).")
         print()

@@ -21,7 +21,7 @@ Open the [web installer](https://moonmodules.org/projectMM/install/) and set **I
 
 ![The web installer with Windows x64 selected, and the downloaded setup.exe in the browser's Downloads panel carrying a SmartScreen warning](../assets/tutorials/windows-01-download.png)
 
-**Download** gives you `MoonLight-windows-x64-vX.Y.Z-setup.exe`.
+**Download** gives you `projectMM-windows-x64-vX.Y.Z-setup.exe`.
 
 Your browser will most likely flag it straight away: *"isn't commonly downloaded. Make sure you trust … before you open it."* That is step 2, and it is expected.
 
@@ -84,15 +84,15 @@ Two options worth knowing: `--no-browser` stops it opening a browser (for a head
 Everything you change is saved automatically, in a folder that belongs to **your Windows user** rather than to the application:
 
 ```text
-%LOCALAPPDATA%\MoonLight
+%LOCALAPPDATA%\projectMM
 ```
 
 Note that this is *not* where the program went. The program sits under `Programs\MoonLight`; your settings live beside it in a separate folder, and that separation is what makes upgrades safe:
 
 - **Installing a new version keeps your settings.** The installer replaces the program and never touches the settings folder.
-- **Uninstalling keeps them too.** Delete `%LOCALAPPDATA%\MoonLight` by hand if you want a genuinely clean slate.
+- **Uninstalling keeps them too.** Delete `%LOCALAPPDATA%\projectMM` by hand if you want a genuinely clean slate.
 
-Paste `%LOCALAPPDATA%\MoonLight` into the Explorer address bar to open it.
+Paste `%LOCALAPPDATA%\projectMM` into the Explorer address bar to open it.
 
 ## 7. Updating
 
@@ -102,15 +102,15 @@ On a desktop the badge opens the **release page**, not the Firmware card. A devi
 
 The badge only appears when a release actually ships a build for your OS, and it tracks **stable releases**. If you are running a `latest` build, it will point you at the newest stable one rather than at newer `latest` builds.
 
-**Nothing is lost.** Running the new setup replaces the program and leaves `%LOCALAPPDATA%\MoonLight` untouched, so your layouts, effects and drivers come back exactly as you left them.
+**Nothing is lost.** Running the new setup replaces the program and leaves `%LOCALAPPDATA%\projectMM` untouched, so your layouts, effects and drivers come back exactly as you left them.
 
 ## 8. The zip: run it, or install it without the setup
 
-The [releases page](https://github.com/MoonModules/projectMM/releases) also carries `MoonLight-windows-x64-vX.Y.Z.zip`. **Extract it first**, rather than opening the executable from inside the zip, because Windows unpacks a zip-launched program into a temporary folder it may clear at any time.
+The [releases page](https://github.com/MoonModules/projectMM/releases) also carries `projectMM-windows-x64-vX.Y.Z.zip`. **Extract it first**, rather than opening the executable from inside the zip, because Windows unpacks a zip-launched program into a temporary folder it may clear at any time.
 
 It holds the same application plus three files, so it serves two purposes:
 
-**Run it in place.** Double-click `MoonLight.exe` wherever you extracted it. No Start-menu entry, no uninstaller, nothing written outside your settings folder. This is the one to take on a USB stick.
+**Run it in place.** Double-click `projectMM.exe` wherever you extracted it. No Start-menu entry, no uninstaller, nothing written outside your settings folder. This is the one to take on a USB stick.
 
 **Or install it properly.** Double-click **`Install-MoonLight.cmd`**. It does exactly what the setup does: copies the program to `%LOCALAPPDATA%\Programs\MoonLight`, adds the Start-menu entry with its icon, registers an uninstaller in Add/Remove Programs, and stops a running copy first so it can replace a locked executable. No administrator rights, because everything stays under your own user profile.
 
