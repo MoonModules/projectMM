@@ -1,9 +1,9 @@
 {
-  "commit": "ccfe4ec1",
+  "commit": "7072824b",
   "flash": {
     "esp32s3-n16r8": 2142976,
-    "desktop": 1992392,
-    "esp32": 2091120,
+    "desktop": 1993480,
+    "esp32": 2091488,
     "esp32p4rev1-eth": 2045840,
     "esp32p4rev1-eth-wifi": 2331904,
     "esp32s3-n8r8": 2087168,
@@ -37,7 +37,7 @@
         "Effects_pipeline_builds_and_renders": {
           "p50": 8,
           "p95": 19,
-          "n": 25,
+          "n": 27,
           "last": "2026-09-25"
         },
         "Layouts_resize_reallocates_live": {
@@ -73,7 +73,7 @@
         "desktop-macos": {
           "p50": 8,
           "p95": 19,
-          "n": 25,
+          "n": 27,
           "last": "2026-09-25"
         }
       },
@@ -135,14 +135,14 @@
   },
   "docs": {
     "md_files": 134,
-    "md_lines": 28056,
+    "md_lines": 28075,
     "plans_files": 37,
     "backlog_lines": 3110,
     "lessons_lines": 526,
     "claude_md_lines": 281
   },
   "complexity": {
-    "functions": 3702,
+    "functions": 3703,
     "over_threshold": 277,
     "worst_ccn": 128
   }

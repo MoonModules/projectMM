@@ -144,7 +144,19 @@
 #include "platform/platform.h"
 
 #include <cstdio>
+#include <cstdlib>
 
+
+/// Create a boot module or stop, since every type here is registered and a null means the build is wrong rather than the device.
+template <typename T>
+static T* createOrDie(const char* typeName) {
+    auto* mod = static_cast<T*>(mm::ModuleFactory::create(typeName));
+    if (!mod) {
+        std::printf("FATAL: module type %s is not registered\n", typeName);
+        std::abort();
+    }
+    return mod;
+}
 
 static void printModuleMetrics(mm::MoonModule* mod, int depth) {
     if (!mod) return;
@@ -168,70 +180,65 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // Every module below is created via the factory, named by it, and its result deliberately unchecked: @xref{how-the-boot-tree-is-created}.
 
     // Filesystem (first, wires the load hook into the scheduler so persisted values overlay into other modules' bound variables before their setup() runs)
-    auto* filesystemModule = static_cast<mm::FilesystemModule*>(mm::ModuleFactory::create("FilesystemModule"));
+    auto* filesystemModule = createOrDie<mm::FilesystemModule>("FilesystemModule");
     filesystemModule->setScheduler(&scheduler);
 
     // File Manager, a boot-wired device-wide tool for browsing the filesystem, distinct from FilesystemModule which is the persistence engine: @xref{why-the-device-wide-tools-are-boot-wired}.
-    auto* fileManagerModule = static_cast<mm::FileManagerModule*>(mm::ModuleFactory::create("FileManagerModule"));
+    auto* fileManagerModule = createOrDie<mm::FileManagerModule>("FileManagerModule");
     fileManagerModule->setName("File Manager");
 
     // System (deviceName needed by other modules)
-    auto* systemModule = static_cast<mm::SystemModule*>(mm::ModuleFactory::create("SystemModule"));
+    auto* systemModule = createOrDie<mm::SystemModule>("SystemModule");
     systemModule->setScheduler(&scheduler);
 
     // The device's inspection toolkit, wired by code as System children rather than user-added. Always present, exempt from the persistence trim, and accepted by no container as an editable child, so no card offers a delete.
-    auto* tasksModule = static_cast<mm::TasksModule*>(mm::ModuleFactory::create("TasksModule"));
+    auto* tasksModule = createOrDie<mm::TasksModule>("TasksModule");
     tasksModule->markWiredByCode();
     systemModule->addChild(tasksModule);
-    auto* i2cScanModule = static_cast<mm::I2cScanModule*>(mm::ModuleFactory::create("I2cScanModule"));
+    auto* i2cScanModule = createOrDie<mm::I2cScanModule>("I2cScanModule");
     i2cScanModule->markWiredByCode();
     systemModule->addChild(i2cScanModule);
-    auto* pinsModule = static_cast<mm::PinsModule*>(mm::ModuleFactory::create("PinsModule"));
+    auto* pinsModule = createOrDie<mm::PinsModule>("PinsModule");
     pinsModule->markWiredByCode();
     systemModule->addChild(pinsModule);
 
     // Services, the core-domain twin of Effects/Drivers: a grouping node, added as a root below, whose children the user adds and removes at runtime.
-    auto* servicesModule = static_cast<mm::Services*>(mm::ModuleFactory::create("Services"));
+    auto* servicesModule = createOrDie<mm::Services>("Services");
 
     // Boot-wired rather than user-added, because the default effect reacts to sound and a device without this module shows none of it: @xref{why-the-audio-service-is-boot-wired}.
-    auto* audioService = static_cast<mm::AudioService*>(mm::ModuleFactory::create("AudioService"));
+    auto* audioService = createOrDie<mm::AudioService>("AudioService");
     audioService->markWiredByCode();   // simulate is the member's own default, so nothing to set
     servicesModule->addChild(audioService);
 
     // ControlModule puts the device into a named state, top-level because a preset reaches ACROSS Layouts, Effects, Drivers and Services: @xref{why-the-device-wide-tools-are-boot-wired}.
-    auto* controlModule = static_cast<mm::ControlModule*>(mm::ModuleFactory::create("ControlModule"));
+    auto* controlModule = createOrDie<mm::ControlModule>("ControlModule");
 
     // The device identity is SystemModule's own pair of controls rather than a separate module. Tooling injects the model like any catalog default, over HTTP or serial, both routed through the apply core and the control's validator.
 
     // Surfaces the install's status as read-only controls, polling the shared globals so the push picks up progress while HTTP drives the flash itself. Renamed because the card hosts the install picker.
-    auto* firmwareUpdateModule = static_cast<mm::FirmwareUpdateModule*>(
-        mm::ModuleFactory::create("FirmwareUpdateModule"));
+    auto* firmwareUpdateModule = createOrDie<mm::FirmwareUpdateModule>("FirmwareUpdateModule");
     firmwareUpdateModule->setName("Firmware");
 
     // The container for everything talking to a server we run, each child carrying its own consent: @xref{why-mooncloud-is-not-a-firmware-child}.
-    auto* moonCloudModule = static_cast<mm::MoonCloudModule*>(
-        mm::ModuleFactory::create("MoonCloudModule"));
+    auto* moonCloudModule = createOrDie<mm::MoonCloudModule>("MoonCloudModule");
     moonCloudModule->setName("MoonCloud");
 
-    auto* moonStatsModule = static_cast<mm::MoonStatsModule*>(
-        mm::ModuleFactory::create("MoonStatsModule"));
+    auto* moonStatsModule = createOrDie<mm::MoonStatsModule>("MoonStatsModule");
     moonStatsModule->setName("Stats");
 
     // MoonTalk, the public message board and a SECOND MoonCloud child with its own consent: @xref{why-mooncloud-is-not-a-firmware-child}.
-    auto* moonTalkModule = static_cast<mm::MoonTalkModule*>(
-        mm::ModuleFactory::create("MoonTalkModule"));
+    auto* moonTalkModule = createOrDie<mm::MoonTalkModule>("MoonTalkModule");
     moonTalkModule->setName("Talk");
 
     // Network (platform stubs return false on desktop, module is a no-op)
-    auto* networkModule = static_cast<mm::NetworkModule*>(mm::ModuleFactory::create("NetworkModule"));
+    auto* networkModule = createOrDie<mm::NetworkModule>("NetworkModule");
     networkModule->setScheduler(&scheduler);
     networkModule->setSystemModule(systemModule);
 
     // Listens on the serial port for pushed WiFi credentials, compile-time gated: @xref{why-improv-is-compile-time-gated}.
     mm::ImprovProvisioningModule* improvModule = nullptr;
     if constexpr (mm::platform::hasImprov) {
-        improvModule = static_cast<mm::ImprovProvisioningModule*>(
-            mm::ModuleFactory::create("ImprovProvisioningModule"));
+        improvModule = createOrDie<mm::ImprovProvisioningModule>("ImprovProvisioningModule");
         improvModule->setSystemModule(systemModule);
         improvModule->setNetworkModule(networkModule);
         // Marked wired-by-code so the trim loop preserves it on a device whose saved tree predates this child: @xref{why-markwiredbycode-matters}.
@@ -241,47 +248,47 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     // MQTT service, a code-wired child of Network bridging the light controls to a broker: @xref{why-mqtt-is-built-on-every-networked-target}.
     mm::MqttModule* mqttModule = nullptr;
     if constexpr (mm::platform::hasNetwork) {
-        mqttModule = static_cast<mm::MqttModule*>(mm::ModuleFactory::create("MqttModule"));
+        mqttModule = createOrDie<mm::MqttModule>("MqttModule");
         mqttModule->setSystemModule(systemModule);
         mqttModule->setControlModule(controlModule);   // look-only presets as the HA effect list
         mqttModule->markWiredByCode();
     }
 
     // Layouts, the top-level container for one or more layouts, today one GridLayout that self-initializes to defaultGridSize with no boot-time dimensions threaded in.
-    auto* layouts = static_cast<mm::Layouts*>(mm::ModuleFactory::create("Layouts"));
-    auto* grid = static_cast<mm::GridLayout*>(mm::ModuleFactory::create("GridLayout"));
+    auto* layouts = createOrDie<mm::Layouts>("Layouts");
+    auto* grid = createOrDie<mm::GridLayout>("GridLayout");
     layouts->addChild(grid);
 
     // Effects: top-level container; one or more layers, each rendering into its own buffer. Today one Layer with one effect + one modifier.
-    auto* effectsContainer = static_cast<mm::Effects*>(mm::ModuleFactory::create("Effects"));
-    auto* layer = static_cast<mm::Layer*>(mm::ModuleFactory::create("Layer"));
+    auto* effectsContainer = createOrDie<mm::Effects>("Effects");
+    auto* layer = createOrDie<mm::Layer>("Layer");
     layer->setChannelsPerLight(3);
     effectsContainer->addChild(layer);
     // setLayouts wires the shared Layouts to the container AND propagates to every child Layer.
     effectsContainer->setLayouts(layouts);
 
     // One default effect so a bare device still shows lights out of the box, but NO default modifier: @xref{why-the-boot-layer-is-one-pulse-effect}.
-    auto* pulse = mm::ModuleFactory::create("PulseEffect");
+    auto* pulse = createOrDie<mm::MoonModule>("PulseEffect");
     layer->addChild(pulse);
 
     // Bound to the effects container rather than to a single layer. A layer rebuilt through the API self-heals without re-running this wiring, and one driver can read across several layer buffers from one place.
-    auto* drivers = static_cast<mm::Drivers*>(mm::ModuleFactory::create("Drivers"));
+    auto* drivers = createOrDie<mm::Drivers>("Drivers");
     drivers->setEffects(effectsContainer);
 
     // Output drivers are added per board through the catalog rather than boot-wired, the preview being the one exception: @xref{why-output-drivers-are-not-boot-wired}.
 
     // The preset library, a boot-wired singleton owning the named channel-role wirings every driver references by id, resolved through its own seat since exactly one exists.
     auto* lightPresets =
-        static_cast<mm::LightPresetsModule*>(mm::ModuleFactory::create("LightPresetsModule"));
+        createOrDie<mm::LightPresetsModule>("LightPresetsModule");
     drivers->addChild(lightPresets);
     lightPresets->markWiredByCode();
 
-    auto* preview = static_cast<mm::PreviewDriver*>(mm::ModuleFactory::create("PreviewDriver"));
+    auto* preview = createOrDie<mm::PreviewDriver>("PreviewDriver");
     drivers->addChild(preview);
     // Marked wired-by-code, the same protection ImprovProvisioning uses: @xref{why-markwiredbycode-matters}.
     preview->markWiredByCode();
 
-    auto* httpServer = static_cast<mm::HttpServerModule*>(mm::ModuleFactory::create("HttpServerModule"));
+    auto* httpServer = createOrDie<mm::HttpServerModule>("HttpServerModule");
     httpServer->port = httpPort;
     httpServer->setScheduler(&scheduler);
     // PreviewDriver pushes the coordinate table and per-frame RGB to the HTTP server's WS broadcaster: @xref{why-output-drivers-are-not-boot-wired}.
@@ -302,8 +309,7 @@ void mm_main(volatile bool& keepRunning, uint16_t httpPort) {
     if (improvModule) networkModule->addChild(improvModule);
     if (mqttModule) networkModule->addChild(mqttModule);
     // Devices discovers other devices on the LAN, a Network child since discovery depends on the network being up, and wired-by-code (see DevicesModule.md).
-    auto* devicesModule = static_cast<mm::DevicesModule*>(
-        mm::ModuleFactory::create("DevicesModule"));
+    auto* devicesModule = createOrDie<mm::DevicesModule>("DevicesModule");
     devicesModule->markWiredByCode();
     // Wire our own name so the self row in the device list matches the device's identity elsewhere. deviceName has static lifetime as SystemModule's member, so the module borrows the pointer.
     devicesModule->setSelfName(systemModule->deviceName());
