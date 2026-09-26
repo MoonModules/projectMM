@@ -10,7 +10,7 @@ caller adds a camera. Playwright's own Screencast API draws the cursor, highligh
 what each action touches and renders the captions as overlays, so there is no second
 pass burning text into frames and no hand-drawn pointer to keep in sync.
 
-    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
+    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/06-layers.json
 
 Prerequisites:
     1. A running MoonLight:   uv run moondeck/run/run_desktop.py
@@ -102,13 +102,13 @@ def main() -> int:
 
     run = uirun.load_run(Path(args.run))
     # A run needing particular hardware resolves its address from the bench registry,
-    # so the run file states the need and moondeck.json states where that board is.
+    # so the run file states the need and moondeck.json states where that device is.
     explicit_host = args.host != ap.get_default("host")
     if run.requires and not explicit_host:
         found = uirun.device_for(run.requires)
         if not found:
             print(f"This run needs a device with {run.requires!r}, and none is "
-                  f"answering. Check moondeck.json and the board.", file=sys.stderr)
+                  f"answering. Check moondeck.json and the device.", file=sys.stderr)
             return 1
         host = found
 
@@ -140,9 +140,15 @@ def main() -> int:
     # than in each run file means no clip can forget it, and no clip spends screen time tidying.
     if not run.host:
         from reset_device import apply_setup, reset
-        reset(args.host)
+        # `host`, not args.host: discovery above may have resolved another device, and the
+        # scheme is stripped there. Resetting one device while recording another leaves the
+        # take opening on the previous ending, which is the whole thing this call prevents.
+        if reset(host) != 0:
+            print("The device did not reach its boot state, so the take would open on the "
+                  "previous one's ending. Nothing recorded.", file=sys.stderr)
+            return 1
         # Then whatever THIS clip needs on top of the boot state, also off camera.
-        apply_setup(args.host, run.setup)
+        apply_setup(host, run.setup)
 
     print(f"Recording [{run.name}]: {len(run.steps)} steps")
 

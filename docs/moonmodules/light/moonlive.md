@@ -191,7 +191,7 @@ The core owns the grammar and a generic call mechanism, and nothing else.
 | `fill(r, g, b)` | write every light |
 | `addLight(x, y, z)` | place the next light, for a layout |
 | `line(x1, y1, x2, y2, r, g, b)` | a straight segment, via the shared `draw::line` |
-| `circle(cx, cy, r, thickness, r, g, b)` | a circle outline of a given stroke width, via the shared `draw::ring` |
+| `circle(cx, cy, radius, thickness, r, g, b)` | a circle outline of a given stroke width, via the shared `draw::ring` |
 | `random16(n)` | a value in `[0, n)` |
 | `mod(a, b)` | the wrap a cyclic animation needs |
 | `beat(bpm, t)` | a `0..65535` sawtooth at `bpm` |

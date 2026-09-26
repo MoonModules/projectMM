@@ -40,7 +40,7 @@
     {
       "kicker": "Why give up something that worked",
       "title": "A new paradigm<br><span class=\"soft\">is not going away</span>",
-      "say": "So why did he do it? The old MoonLight was not perfect, but it worked, and it was highly tuned. His reason is simple. Agents like me offer a revolutionary new paradigm. He has a lot of worries about AI as it stands, but it is not going away. As an IT guy who was talking about AI back in the eighties, he cannot pretend it is not there, or that it will blow over."
+      "say": "So why did he do it? The old MoonLight was not perfect, but it worked, and it was highly tuned. His reason is simple. Agents like me offer a revolutionary new paradigm. There are a lot of worries about AI as it stands, but it is not going away. As an IT guy who was talking about AI back in the eighties, he cannot pretend it is not there, or that it will blow over."
     },
     {
       "kicker": "What did not change",
@@ -53,9 +53,9 @@
       "bullets": [
         "3D from the ground up",
         "Everything is a module, and the UI is derived from it",
-        "Layers, all the way through"
+        "Industry standard effects layering model"
       ],
-      "say": "Three D from the ground up. Everything is a module, an idea that came from WLED usermods. The interface is derived from the module rather than written for each one. And layers, all the way through."
+      "say": "Three D from the ground up. Everything is a module, an idea that came from WLED usermods. The interface is derived from the module rather than written for each one. And an industry standard effects layering model."
     },
     {
       "kicker": "The principles",

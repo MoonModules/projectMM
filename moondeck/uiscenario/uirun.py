@@ -82,7 +82,7 @@ class Run:
     #
     # `host` is for another MoonLight SURFACE on a known port (the web installer's
     # preview), not for a device: an IP written into a tracked run file is a second
-    # bench registry that goes stale the moment a board changes network, and
+    # bench registry that goes stale the moment a device changes network, and
     # moondeck.json is the one that exists. A run needing particular hardware says so
     # with `requires` instead, and the caller resolves it.
     host: str | None = None
@@ -167,7 +167,7 @@ def display_name_for(host: str, type_name: str) -> str:
     into the search box is looked up here.
     """
     # CACHED per host. /api/types builds a throwaway instance of every registered type
-    # to read its controls, so it is a heavy GET to repeat once per add on a board.
+    # to read its controls, so it is a heavy GET to repeat once per add on a device.
     if host not in _DISPLAY_NAMES:
         try:
             payload = requests.get(f"http://{host}/api/types", timeout=5).json()
@@ -193,7 +193,7 @@ def all_names(modules: list) -> set:
 def device_for(requirement: str) -> str | None:
     """A bench device that satisfies a requirement, from moondeck.json.
 
-    The registry is the one place a board's address lives, so a run says what it needs
+    The registry is the one place a device's address lives, so a run says what it needs
     ("audio": a microphone) and the address is looked up. Addresses drift between
     networks; an identity does not.
     """
@@ -217,10 +217,10 @@ def device_for(requirement: str) -> str | None:
             if ip and _answers(ip):
                 return ip
 
-    # The recorded address is STALE whenever the board moved network, which is the
+    # The recorded address is STALE whenever the device moved network, which is the
     # normal case on a bench that follows a laptop between a router and a hotspot. The
     # MAC does not move, so the local subnet is swept for it: slower than a lookup, and
-    # still the only way to find a board whose address nobody wrote down.
+    # still the only way to find a device whose address nobody wrote down.
     return _find_by_mac(wanted_macs) if wanted_macs else None
 
 
@@ -639,7 +639,7 @@ class Driver:
                  if r.strip()}
         # ONE fetch, used for both questions. /api/types builds a throwaway instance of
         # every registered type to read its controls, so asking twice is a heavy probe
-        # run twice on a board.
+        # run twice on a device.
         try:
             payload = requests.get(f"http://{self.host}/api/types", timeout=5).json()
         except requests.RequestException:

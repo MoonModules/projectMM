@@ -13,13 +13,13 @@
     {
       "action": "open_card",
       "module": "Drivers",
-      "caption": "A driver carries the finished frame out of the device. Which ones you can add depends on what the hardware can actually do.",
+      "caption": "A driver carries the finished frame out of the device. One frame, and as many drivers as you like carrying it at once.",
       "speech": 7.8
     },
     {
       "action": "open_card",
       "module": "Drivers",
-      "caption": "This is a desktop, and a desktop has no LED pins, so it offers what a computer can drive instead.",
+      "caption": "This is a computer, so the ones worth showing here are the ones that send the frame somewhere rather than clocking it onto a pin.",
       "speech": 7.5
     },
     {
@@ -81,8 +81,20 @@
     {
       "action": "delete_module",
       "module": "{netsend}",
-      "caption": "Removing it again, because the last one is the most domestic of the set.",
+      "caption": "Removing it again, because the next one goes lower than I P.",
       "speech": 5.6
+    },
+    {
+      "action": "add_module",
+      "parent": "Drivers",
+      "type": "PanelCardDriver",
+      "as": "card",
+      "caption": "Panel card talks to the receiving cards a professional rig is built from, over raw Ethernet frames below I P, the way a sender card does."
+    },
+    {
+      "action": "delete_module",
+      "module": "{card}",
+      "caption": "And out, because the last one is the most domestic of the set."
     },
     {
       "action": "add_module",
@@ -101,7 +113,7 @@
     {
       "action": "open_card",
       "module": "Drivers",
-      "caption": "One frame, and any of these carries it. A board adds its LED pins to the same list, and nothing else changes.",
+      "caption": "One frame, and any of these carries it. The pin drivers are in this same list, and they come into their own on a device that has pins to clock.",
       "speech": 9.0
     }
   ]

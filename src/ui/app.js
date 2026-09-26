@@ -2207,7 +2207,7 @@ function createCard(mod, depth) {
             // Device already knows its deviceModel (SystemModule): picker is for releases +
             // firmware compatibility only. A board picker here would invite the user to
             // mis-narrow the firmware list.
-            enableBoardPicker: false,
+            enableDevicePicker: false,
             installRowExtras: extras,
             // After the Install button, not before: these are other ways to install, so putting
             // them above would separate that button from the two dropdowns it acts on.

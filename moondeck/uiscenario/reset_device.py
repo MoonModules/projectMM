@@ -15,6 +15,7 @@ Usage: uv run moondeck/uiscenario/reset_device.py [--host localhost:8080]
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import sys
 import time
@@ -38,18 +39,52 @@ BOOT_CHILDREN = {
 DEFAULT_GRID = 16
 
 
+# A device serves from a small embedded stack, and it closes a kept-alive socket whenever it needs
+# the memory. That arrives here as a dropped connection rather than a status, and it says nothing
+# about whether the device is healthy: the retry below costs a second and turns a failed recording
+# session into a completed one.
+_TRANSIENT = (urllib.error.URLError, ConnectionError, OSError, http.client.HTTPException)
+
+
+def _attempt(what: str, send, tries: int = 4):
+    """Run one request, retrying a dropped connection but never a refusal.
+
+    An HTTPError is the device ANSWERING with a no, so it is returned rather than retried; only a
+    connection that died before an answer is worth sending again.
+    """
+    for n in range(1, tries + 1):
+        try:
+            return send()
+        except urllib.error.HTTPError:
+            raise
+        except _TRANSIENT as e:
+            if n == tries:
+                print(f"  ! {what}: {type(e).__name__} after {tries} attempts")
+                return None
+            time.sleep(0.5 * n)
+    return None
+
+
 def _get(host: str, path: str):
-    with urllib.request.urlopen(f"http://{host}{path}", timeout=10) as r:
-        return json.loads(r.read().decode())
+    def send():
+        with urllib.request.urlopen(f"http://{host}{path}", timeout=10) as r:
+            return json.loads(r.read().decode())
+    out = _attempt(f"GET {path}", send)
+    if out is None:
+        raise RuntimeError(f"GET {path} never answered")
+    return out
 
 
 def _post(host: str, path: str, payload: dict) -> bool:
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(f"http://{host}{path}", data=body,
-                                 headers={"Content-Type": "application/json"})
-    try:
+
+    def send():
+        req = urllib.request.Request(f"http://{host}{path}", data=body,
+                                     headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
+    try:
+        return bool(_attempt(f"POST {path}", send))
     except urllib.error.HTTPError as e:
         print(f"  ! POST {path} -> HTTP {e.code}")
         return False
@@ -57,11 +92,13 @@ def _post(host: str, path: str, payload: dict) -> bool:
 
 def _delete(host: str, name: str) -> bool:
     """A module is deleted by PATH, which is the contract handleDeleteModule reads."""
-    req = urllib.request.Request(f"http://{host}/api/modules/{urllib.parse.quote(name)}",
-                                 method="DELETE")
-    try:
+    def send():
+        req = urllib.request.Request(f"http://{host}/api/modules/{urllib.parse.quote(name)}",
+                                     method="DELETE")
         with urllib.request.urlopen(req, timeout=10) as r:
             return 200 <= r.status < 300
+    try:
+        return bool(_attempt(f"DELETE {name}", send))
     except urllib.error.HTTPError as e:
         print(f"  ! DELETE {name} -> HTTP {e.code}")
         return False
@@ -88,12 +125,22 @@ def apply_setup(host: str, setup: list[dict]) -> int:
                                         "value": item["value"]}):
             applied += 1
             print(f"  = {item['module']}.{item['control']} -> {item['value']}")
+        else:
+            # SAID rather than counted: a clip whose premise never applied still records, and
+            # the grid it was supposed to demonstrate is silently the default one.
+            print(f"  ! {item['module']}.{item['control']} refused")
     if applied:
         time.sleep(0.6)       # let the tree settle before the run starts driving it
     return applied
 
 
 def reset(host: str) -> int:
+    """Zero when the device reached its boot state, non-zero when any write was refused.
+
+    A refused write is REPORTED rather than absorbed: the caller records a clip against this
+    state, and a half-reset device looks exactly like a correct one until the take is watched.
+    """
+    failed = 0
     state = _get(host, "/api/state")
     mods = state.get("modules", [])
 
@@ -115,6 +162,8 @@ def reset(host: str) -> int:
             if _delete(host, n):
                 removed += 1
                 print(f"  - {container}/{n} ({t})")
+            else:
+                failed += 1
 
     # ADD BACK what boot wires and the take removed.
     added = 0
@@ -132,6 +181,8 @@ def reset(host: str) -> int:
             if _post(host, "/api/modules", {"type": t, "parent_id": node.get("name")}):
                 added += 1
                 print(f"  + {container}/{t}")
+            else:
+                failed += 1
 
     # The grid's size is a control rather than a module, so it is set rather than recreated.
     state = _get(host, "/api/state")
@@ -142,14 +193,17 @@ def reset(host: str) -> int:
             cur = next((c.get("value") for c in (grid.get("controls") or [])
                         if c.get("name") == key), None)
             if cur != DEFAULT_GRID:
-                _post(host, "/api/control",
-                      {"module": grid.get("name"), "control": key, "value": DEFAULT_GRID})
-                print(f"  = Grid.{key} -> {DEFAULT_GRID}")
+                if _post(host, "/api/control",
+                         {"module": grid.get("name"), "control": key, "value": DEFAULT_GRID}):
+                    print(f"  = Grid.{key} -> {DEFAULT_GRID}")
+                else:
+                    failed += 1
 
     if removed or added:
         time.sleep(1.0)       # let the tree settle before a run starts driving it
-    print(f"reset: {removed} removed, {added} added")
-    return 0
+    print(f"reset: {removed} removed, {added} added"
+          + (f", {failed} FAILED" if failed else ""))
+    return 1 if failed else 0
 
 
 def main() -> int:

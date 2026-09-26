@@ -53,7 +53,7 @@ def clean_pipeline():
     def check(target: str):
         """Compare the device the run actually drove, not the session's default.
 
-        A run naming `requires` resolves to whichever board carries that capability,
+        A run naming `requires` resolves to whichever device carries that capability,
         which is not the host this lane was pointed at: snapshotting the default meant
         the check read a machine the run never touched.
         """

@@ -3,16 +3,16 @@
 # requires-python = ">=3.11"
 # dependencies = ["playwright", "piper-tts"]
 # ///
-"""Render a narrated slide video from a script: slides as HTML, narration from macOS `say`.
+"""Render a narrated slide video from a script: slides as HTML, narration from Piper.
 
 The spoken introduction is the product owner's own words, and the clips that follow are its proof.
 Until it is recorded to camera, this stands in for it: each beat becomes a slide, the slide is
-screenshotted through the same browser the UI clips use, `say` narrates the beat, and the slide is
+screenshotted through the same browser the UI clips use, Piper narrates the beat, and the slide is
 held for exactly as long as its narration takes. Nothing guesses the timing, because the audio's own
 duration decides it.
 
-macOS only, deliberately: `say` ships with the system, so the intro needs no install and no service.
-That also means it is built on a workstation rather than in CI, like the UI clips it sits beside.
+Piper is a neural synthesiser that runs offline, on a model fetched once into `media/voices/`. It is
+built on a workstation rather than in CI, like the UI clips it sits beside.
 
 Usage:
   uv run moondeck/uiscenario/uinarrate.py --script <slides.json> [--voice Daniel] [--out media/video]
@@ -153,7 +153,16 @@ def voice_model(name: str) -> Path:
     base = f"{PIPER_BASE}/{path}"
     print(f"  fetching the {name} voice, once")
     for url, dest in ((f"{base}.onnx", model), (f"{base}.onnx.json", model.with_suffix(".onnx.json"))):
-        subprocess.run(["curl", "-sL", "-o", str(dest), url], check=True)
+        # `--fail` and a temporary file, together: curl exits 0 on a 404 and writes the error page,
+        # which would cache an HTML document as a model and fail every render until it is deleted
+        # by hand. Nothing lands at the real path until the download has succeeded.
+        part = dest.with_suffix(dest.suffix + ".part")
+        try:
+            subprocess.run(["curl", "-sSL", "--fail", "-o", str(part), url], check=True)
+        except subprocess.CalledProcessError:
+            part.unlink(missing_ok=True)
+            raise SystemExit(f"could not fetch the {name} voice from {url}")
+        part.replace(dest)
     return model
 
 

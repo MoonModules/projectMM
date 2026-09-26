@@ -161,9 +161,15 @@
 /// A measure step ticks for a span of wall time rather than a fixed frame count, and reports the average tick.
 /// The frame count measured the wrong thing: 200 back-to-back ticks span well under a millisecond.
 /// An effect whose animation arrives on a beat has nothing to do inside a window that short.
-/// Pulse at 120 bpm emits a shell every 500 ms, so every sample after it became the boot default read 1 us.
-/// The effect it replaced had read 35 to 81 on the same step.
-/// A span is the clock the effects read, so 250 ms of window holds 250 ms of animation on any host.
+/// A span is the clock the effects read, so a window of wall time holds that much animation on any host.
+///
+/// The window is sized to the slowest shipped default, which is PulseEffect at its default 40 bpm: it emits every 1500 ms and returns early on every tick in between.
+/// A window shorter than one of those intervals can fall entirely between two emissions and report an idle effect as the effect's cost.
+///
+/// The frame cap is the other half of the same rule, sized ABOVE what the window can reach rather than as a round number.
+/// An early-outing effect on a desktop ticks about three thousand times per millisecond, so a cap of 200k ended the loop after 65 ms of a 1600 ms window.
+/// Every sample then stopped short of the animation it was meant to cover.
+/// So reaching the cap before the clock is reported rather than passed off as a full span.
 ///
 /// ## What a green run is allowed to mean
 ///
@@ -481,11 +487,11 @@ struct ScenarioContext {
 
 static constexpr int WARMUP_FRAMES = 10;
 
-/// How long a measurement runs, in the wall clock the effects read: @xref{what-a-measurement-covers}.
-static constexpr uint32_t MEASURE_WINDOW_MS = 250;
+/// How long a measurement runs, in the wall clock the effects read, long enough to cover one whole interval of the slowest shipped default: @xref{what-a-measurement-covers}.
+static constexpr uint32_t MEASURE_WINDOW_MS = 1600;
 
-/// A ceiling on one window's frames, so a pathologically fast tick cannot spin without bound.
-static constexpr int MEASURE_FRAME_CAP = 200000;
+/// A ceiling on one window's frames, so a pathologically fast tick cannot spin without bound, sized above what the window can reach on the fastest host: @xref{what-a-measurement-covers}.
+static constexpr int MEASURE_FRAME_CAP = 8000000;
 
 struct Result {
     bool passed = true;
@@ -897,6 +903,11 @@ static int runScenario(const char* path) {
                 ctx.scheduler.tick();
                 frames++;
                 elapsedUs = mm::platform::micros() - startUs;
+            }
+            // The cap ends the loop before the clock does, so the sample covers less animation than a window, and that is SAID rather than passed off as a full span.
+            if (frames >= MEASURE_FRAME_CAP && elapsedUs < windowUs) {
+                std::printf("  NOTE  frame cap reached after %ums of a %ums window\n",
+                            elapsedUs / 1000u, MEASURE_WINDOW_MS);
             }
             // Rounded rather than floored: a desktop tick is a fraction of a microsecond, and flooring reported 0 or 1 for everything, which is what made the trend unreadable.
             uint32_t tickTimeUs = frames > 0

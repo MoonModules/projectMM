@@ -908,12 +908,12 @@ For a full description of each scenario, see the [scenario inventory](/api/docs/
 Record one UI clip: perform a run file against the interface while Playwright records, then publish a compressed clip for the docs.
 
 ```bash
-uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
+uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/06-layers.json
 ```
 
-The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [uiscenario.md](uiscenario/uiscenario.md).
+The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against. That is what lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean. A take whose steps failed, or that left modules behind, is refused, so it cannot overwrite a good clip. Format and actions: [uiscenario.md](uiscenario/uiscenario.md).
 
-A run names its own `host` when it drives something other than the desktop UI, so the installer clip records against the installer preview and the audio clip against a board with a microphone. Start what a run needs before recording it.
+A run names its own `host` when it drives something other than the desktop UI. The installer clip records against the installer preview, and the audio clip against a device with a microphone. Start what a run needs before recording it.
 
 ### ui_project
 

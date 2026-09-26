@@ -67,6 +67,7 @@ Only `action` and that action's own arguments are required.
 | `wait_process` | `name`, `timeout` | holds until that command finishes, and fails the take if it did not succeed |
 | `hero` | `seconds` | hides the chrome and fills the frame with the 3D preview |
 | `pick_file` | `module`, `control`, `value` | a filepath control's picker |
+| `new_script` | `module`, `control`, `value` | creates a script through the control's + button, then opens its editor |
 | `type_script` | `text`, `delay` | types into the MoonLive editor and saves |
 
 Another MoonLight surface has no module tree, so a run there names elements directly. These are the exception, not the default. A new surface earns a contract (data- attributes) the way the device UI has one, rather than growing this list.
@@ -140,13 +141,13 @@ They were learned by getting them wrong: a two-and-a-half-minute clip that was t
 
 ## Clips and projects
 
-A **clip** is one topic, standing alone: it opens the card it needs, creates what it uses, and deletes it again. `95-add-a-layer.json` is a clip. Standing alone is what lets it be a test, a doc page's video, and one section of a longer cut without change.
+A **clip** is one topic, standing alone: it opens the card it needs, creates what it uses, and deletes it again. `06-layers.json` is a clip. Standing alone is what lets it be a test, a doc page's video, and one section of a longer cut without change.
 
 A **project** stitches clips into a longer video, a get-started or a feature tour.
 Music alignment belongs there, since a bar line is a property of the cut rather than of any one clip.
 Its own section is [below](#project-files-cutting-clips-together).
 
-    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
+    uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/06-layers.json
 
 Sources live under `test/uiscenarios/`, outputs under `media/`:
 
@@ -173,9 +174,9 @@ A **project** (`test/uiscenarios/projects/<name>.json`) is the edit: which clips
   "audio": "media/audio/Norse Constellations (Original Mix).mp3",
   "bpm": 112.35, "first_beat": 8.78, "audio_gain": 0.5, "width": 1280,
   "clips": [
-    {"clip": "95-add-a-layer", "title": "Stack and blend", "bars": 8},
+    {"clip": "06-layers", "title": "Stack and blend", "bars": 8},
     {"source": "media/footage/wall.mp4",
-     "title": "Twelve thousand lights", "subtitle": "On one board", "bars": 12}
+     "title": "Twelve thousand lights", "subtitle": "On one device", "bars": 12}
   ]
 }
 ```

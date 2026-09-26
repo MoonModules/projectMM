@@ -843,8 +843,9 @@ extern "C" inline uint32_t mm_light_circle(const uintptr_t* args, uint32_t, cons
     const draw::Canvas& cv = drawCanvas();
     if (!cv.data) return 0;
     const auto sub = [](uintptr_t v) { return draw::toSub(static_cast<lengthType>(static_cast<int32_t>(v))); };
-    // A thickness of zero would draw nothing, so it reads as the thinnest line a caller can mean.
-    const draw::pos_t thick = args[3] > 0 ? sub(args[3]) : draw::kSubOne;
+    // Read SIGNED, and zero or less means the thinnest line: through the unsigned ABI word a negative stroke passed `> 0` and became a width of billions.
+    const int32_t width = signedArg(args[3]);
+    const draw::pos_t thick = width > 0 ? sub(args[3]) : draw::kSubOne;
     draw::ring(cv, sub(args[0]), sub(args[1]), sub(args[2]), thick,
                RGB{uint8_t(args[4]), uint8_t(args[5]), uint8_t(args[6])});
     return 0;
