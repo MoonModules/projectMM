@@ -242,6 +242,8 @@ Commit message: title ≤ 72 characters, imperative. Then a 1 to 3 sentence end-
 
 The product owner pushes; external review runs on the PR; findings are processed on the branch. The same once-per-request rule applies.
 
+**Write the gate list out before running any of it, judgment gates included, and report every line.** A scripted check announces itself by producing output; a judgment gate produces nothing until someone asks, which is why the ones below get skipped. The PR title and description are judged against `git log main..HEAD` rather than the first commit, since a PR opened early keeps a title that then misdescribes every later commit.
+
 ```mermaid
 flowchart LR
     pm{"<b>🧑 run pre-merge</b><br/><i>PO says the words</i>"}

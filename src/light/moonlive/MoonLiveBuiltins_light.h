@@ -838,6 +838,18 @@ extern "C" inline uint32_t mm_light_line(const uintptr_t* args, uint32_t, const 
     return 0;
 }
 
+/// Draw a circle outline of a given stroke width, through `draw::ring`, converting the script's whole lights to the drawing layer's sub-pixels.
+extern "C" inline uint32_t mm_light_circle(const uintptr_t* args, uint32_t, const uint8_t*) {
+    const draw::Canvas& cv = drawCanvas();
+    if (!cv.data) return 0;
+    const auto sub = [](uintptr_t v) { return draw::toSub(static_cast<lengthType>(static_cast<int32_t>(v))); };
+    // A thickness of zero would draw nothing, so it reads as the thinnest line a caller can mean.
+    const draw::pos_t thick = args[3] > 0 ? sub(args[3]) : draw::kSubOne;
+    draw::ring(cv, sub(args[0]), sub(args[1]), sub(args[2]), thick,
+               RGB{uint8_t(args[4]), uint8_t(args[5]), uint8_t(args[6])});
+    return 0;
+}
+
 // Arena slots the binding writes each frame, at fixed offsets a binding caches, so they never move.
 enum : uint8_t {
     kSysWidth  = kCtrlBytes + 0 * kSysVarBytes,
@@ -968,6 +980,8 @@ inline const BuiltinTable& lightBuiltins() {
     t.add({"addLight", 3, /*returns*/ false, BuiltinKind::Call, &mm_light_addLight, {}});
     // line draws a segment on the canvas through the shared draw::line.
     t.add({"line", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_line, {}});
+    // circle draws an outline of a given stroke width, the shape a script cannot build from line alone. Named for draw::circle, and NOT `ring`, which a shipped layout already defines as its own function.
+    t.add({"circle", 7, /*returns*/ false, BuiltinKind::Call, &mm_light_circle, {}});
     // Bit 1 of byRef marks the member, so the compiler passes its offset and type, not its value.
     t.add({"addControl", 4, /*returns*/ false, BuiltinKind::Call, &mm_light_addControl, {},
            /*byRef*/ 0x2, /*byStr*/ 0x1});

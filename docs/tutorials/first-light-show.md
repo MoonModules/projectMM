@@ -49,6 +49,10 @@ The effect did not change. The modifier sits between the effect and the lights a
 
 That separation is why a modifier is worth having at all. Mirror, rotate and multiply are things you want on *any* effect, and writing them into each effect would be the same code many times over.
 
+Both together, on one wall: an effect, a modifier reshaping it, then a second layer doing the same and blending over the first.
+
+<video src="../assets/uiscenarios/06-layers.webm" controls playsinline width="720" title="An effect, a modifier, and a second layer blended over the first."></video>
+
 ## 4. Send it somewhere real
 
 Open **Drivers**. Set **brightness** first, and set it low: 20 is plenty on a bench, and a full-brightness panel at arm's length is genuinely unpleasant.

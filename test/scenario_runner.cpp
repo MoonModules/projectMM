@@ -156,6 +156,15 @@
 /// Letting it escape main is the correct outcome for a CLI test runner. It terminates with a diagnostic and a non-zero status, which is exactly what a harness needs to see.
 /// Discovery is recursive so the core/ and light/ split picks up every JSON without each subfolder needing its own loop.
 ///
+/// ## What a measurement covers
+///
+/// A measure step ticks for a span of wall time rather than a fixed frame count, and reports the average tick.
+/// The frame count measured the wrong thing: 200 back-to-back ticks span well under a millisecond.
+/// An effect whose animation arrives on a beat has nothing to do inside a window that short.
+/// Pulse at 120 bpm emits a shell every 500 ms, so every sample after it became the boot default read 1 us.
+/// The effect it replaced had read 35 to 81 on the same step.
+/// A span is the clock the effects read, so 250 ms of window holds 250 ms of animation on any host.
+///
 /// ## What a green run is allowed to mean
 ///
 /// A scenario that did not run returns `kSkipped` rather than 0, because a skip counted as a pass is how a suite that stopped testing reads as green.
@@ -471,7 +480,12 @@ struct ScenarioContext {
 };
 
 static constexpr int WARMUP_FRAMES = 10;
-static constexpr int MEASURE_FRAMES = 200;
+
+/// How long a measurement runs, in the wall clock the effects read: @xref{what-a-measurement-covers}.
+static constexpr uint32_t MEASURE_WINDOW_MS = 250;
+
+/// A ceiling on one window's frames, so a pathologically fast tick cannot spin without bound.
+static constexpr int MEASURE_FRAME_CAP = 200000;
 
 struct Result {
     bool passed = true;
@@ -875,10 +889,24 @@ static int runScenario(const char* path) {
             for (int i = 0; i < WARMUP_FRAMES; i++) ctx.scheduler.tick();
             size_t heapBeforeMeasure = mm::platform::freeHeap();
             uint32_t startUs = mm::platform::micros();
-            for (int i = 0; i < MEASURE_FRAMES; i++) ctx.scheduler.tick();
-            uint32_t elapsedUs = mm::platform::micros() - startUs;
-            uint32_t tickTimeUs = MEASURE_FRAMES > 0 ? elapsedUs / MEASURE_FRAMES : 0;
-            uint32_t fps = tickTimeUs > 0 ? 1000000 / tickTimeUs : 0;
+            // Ticking for a SPAN rather than a count, so the window covers real animation: @xref{what-a-measurement-covers}.
+            const uint32_t windowUs = MEASURE_WINDOW_MS * 1000u;
+            int frames = 0;
+            uint32_t elapsedUs = 0;
+            while (elapsedUs < windowUs && frames < MEASURE_FRAME_CAP) {
+                ctx.scheduler.tick();
+                frames++;
+                elapsedUs = mm::platform::micros() - startUs;
+            }
+            // Rounded rather than floored: a desktop tick is a fraction of a microsecond, and flooring reported 0 or 1 for everything, which is what made the trend unreadable.
+            uint32_t tickTimeUs = frames > 0
+                ? (elapsedUs + static_cast<uint32_t>(frames) / 2) / static_cast<uint32_t>(frames)
+                : 0;
+            // FPS from the undivided numbers, so it keeps its precision where the rounded tick has lost it.
+            const uint32_t fpsFromSpan = elapsedUs > 0
+                ? static_cast<uint32_t>((static_cast<uint64_t>(frames) * 1000000u) / elapsedUs)
+                : 0;
+            uint32_t fps = fpsFromSpan;
             size_t heapAfterMeasure = mm::platform::freeHeap();
             // Largest contiguous block in INTERNAL RAM, which diagnoses internal-heap fragmentation: @xref{why-the-block-size-is-internal-ram-only}.
             size_t maxBlock = mm::platform::maxInternalAllocBlock();

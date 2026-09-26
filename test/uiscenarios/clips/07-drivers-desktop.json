@@ -1,0 +1,108 @@
+{
+  "name": "07-drivers-desktop",
+  "description": "What carries the frame out of the device, on a desktop: a preview, the video senders, and the network protocols a fixture listens on.",
+  "speed": 1.8,
+  "steps": [
+    {
+      "action": "chapter",
+      "title": "Drivers",
+      "description": "Getting the frame out, on a desktop",
+      "seconds": 4.7,
+      "caption": "Drivers. Getting the finished frame out of the device."
+    },
+    {
+      "action": "open_card",
+      "module": "Drivers",
+      "caption": "A driver carries the finished frame out of the device. Which ones you can add depends on what the hardware can actually do.",
+      "speech": 7.8
+    },
+    {
+      "action": "open_card",
+      "module": "Drivers",
+      "caption": "This is a desktop, and a desktop has no LED pins, so it offers what a computer can drive instead.",
+      "speech": 7.5
+    },
+    {
+      "action": "open_card",
+      "module": "Preview",
+      "caption": "Preview draws the frame in your browser, which is what you have been watching in every one of these clips.",
+      "speech": 6.7
+    },
+    {
+      "action": "add_module",
+      "parent": "Drivers",
+      "type": "NdiDriver",
+      "as": "ndi",
+      "caption": "N D I sends the frame onto the network as video, so O B S or Resolume can pick it up as a source like any camera.",
+      "speech": 8.1
+    },
+    {
+      "action": "delete_module",
+      "module": "{ndi}",
+      "caption": "Taking it out again. A driver is a module like any other, so adding and removing one is the same gesture throughout.",
+      "speech": 8.7
+    },
+    {
+      "action": "add_module",
+      "parent": "Drivers",
+      "type": "RtspDriver",
+      "as": "rtsp",
+      "caption": "R T S P serves the same frame as a stream, which a player opens by U R L over the network.",
+      "speech": 7.8
+    },
+    {
+      "action": "delete_module",
+      "module": "{rtsp}",
+      "caption": "Out it goes. Several of these can run at once, each driving its own slice of the same buffer.",
+      "speech": 7.8
+    },
+    {
+      "action": "add_module",
+      "parent": "Drivers",
+      "type": "HlsDriver",
+      "as": "hls",
+      "caption": "H L S writes the frame out as segments any player opens, V L C on a laptop or on the television.",
+      "speech": 9.5
+    },
+    {
+      "action": "delete_module",
+      "module": "{hls}",
+      "caption": "And away. Notice the lights never stop while I do this: a driver comes and goes on the next frame.",
+      "speech": 7.7
+    },
+    {
+      "action": "add_module",
+      "parent": "Drivers",
+      "type": "NetworkSendDriver",
+      "as": "netsend",
+      "caption": "Network send speaks Art Net, s A C N and D D P, so real fixtures on a real rig listen to this one.",
+      "speech": 9.1
+    },
+    {
+      "action": "delete_module",
+      "module": "{netsend}",
+      "caption": "Removing it again, because the last one is the most domestic of the set.",
+      "speech": 5.6
+    },
+    {
+      "action": "add_module",
+      "parent": "Drivers",
+      "type": "HueDriver",
+      "as": "hue",
+      "caption": "Hue drives the bulbs in the room through their own bridge, so the same effect lands on the lamps you already own.",
+      "speech": 7.6
+    },
+    {
+      "action": "delete_module",
+      "module": "{hue}",
+      "caption": "And that one goes too, leaving the device the way we found it.",
+      "speech": 4.7
+    },
+    {
+      "action": "open_card",
+      "module": "Drivers",
+      "caption": "One frame, and any of these carries it. A board adds its LED pins to the same list, and nothing else changes.",
+      "speech": 9.0
+    }
+  ]
+}

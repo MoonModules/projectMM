@@ -73,7 +73,7 @@ JS reports SKIP rather than failing when node is absent, since a Python-only ben
 
 `--ui` is the odd one and is OPT-IN, which is why a bare run leaves it out. It drives a real browser
 against a running MoonLight with [pytest-playwright](https://playwright.dev/python/docs/test-runners),
-performing a [run file](uiscenario/RUNS.md) from `test/uiscenarios/clips/` through the interface and checking each step against the
+performing a [run file](uiscenario/uiscenario.md) from `test/uiscenarios/clips/` through the interface and checking each step against the
 device over REST. The run files are the same ones `moondeck/uiscenario/uivideo.py` records the videos from, so a
 failure means the UI no longer does what the video shows. It skips rather than fails when nothing
 answers on `localhost:8080` (override with `PROJECTMM_HOST`), for the same reason the JS lane skips
@@ -911,7 +911,7 @@ Record one UI clip: perform a run file against the interface while Playwright re
 uv run moondeck/uiscenario/uivideo.py --run test/uiscenarios/clips/95-add-a-layer.json
 ```
 
-The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [RUNS.md](uiscenario/RUNS.md).
+The dropdown lists every run under `test/uiscenarios/clips/`. A run drives the interface and nothing else: the `+` tab, the type picker, the card's own buttons, the real inputs. REST is read-only, and is what each step's `expect` block checks against, which lets the same file be a UI test (`test_host.py --ui`) as well as a video source. The raw take lands in `media/video/` (ignored). The published clip lands in `docs/assets/uiscenarios/` (tracked, embed this one) only when the run was clean: a take whose steps failed, or that left modules behind, is refused so it cannot overwrite a good clip. Format and actions: [uiscenario.md](uiscenario/uiscenario.md).
 
 A run names its own `host` when it drives something other than the desktop UI, so the installer clip records against the installer preview and the audio clip against a board with a microphone. Start what a run needs before recording it.
 

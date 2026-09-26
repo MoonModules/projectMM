@@ -120,12 +120,12 @@ def test_project_clips_exist(project_path):
 
 
 def test_every_action_is_documented():
-    """RUNS.md's tables name every action the engine defines.
+    """uiscenario.md's tables name every action the engine defines.
 
     The format's documentation is what a run file is written from, so an action missing
     from it is invisible: that is how eight of them went undocumented while the engine
     grew. Checked rather than remembered.
     """
-    doc = (ROOT / "moondeck" / "uiscenario" / "RUNS.md").read_text()
+    doc = (ROOT / "moondeck" / "uiscenario" / "uiscenario.md").read_text()
     undocumented = sorted(a for a in uirun.ACTIONS if f"`{a}`" not in doc)
-    assert not undocumented, f"actions missing from RUNS.md: {undocumented}"
+    assert not undocumented, f"actions missing from uiscenario.md: {undocumented}"
