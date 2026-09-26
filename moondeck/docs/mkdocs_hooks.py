@@ -559,7 +559,7 @@ def on_post_build(config):
     shutil.copytree(src, dst, dirs_exist_ok=True)
     # The picker's JS halves live in src/ui/ (embedded in firmware too); CI stages
     # them beside the installer. library.json feeds the installer its version.
-    for extra in ("src/ui/install-picker.js", "src/ui/install-picker-boards.js", "library.json"):
+    for extra in ("src/ui/install-picker.js", "src/ui/install-picker-devices.js", "library.json"):
         p = ROOT / extra
         if p.is_file():
             shutil.copy(p, dst / p.name)

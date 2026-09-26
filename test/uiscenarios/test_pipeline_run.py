@@ -53,7 +53,7 @@ def clean_pipeline():
     def check(target: str):
         """Compare the device the run actually drove, not the session's default.
 
-        A run naming `requires` resolves to whichever board carries that capability,
+        A run naming `requires` resolves to whichever device carries that capability,
         which is not the host this lane was pointed at: snapshotting the default meant
         the check read a machine the run never touched.
         """
@@ -120,12 +120,12 @@ def test_project_clips_exist(project_path):
 
 
 def test_every_action_is_documented():
-    """RUNS.md's tables name every action the engine defines.
+    """uiscenario.md's tables name every action the engine defines.
 
     The format's documentation is what a run file is written from, so an action missing
     from it is invisible: that is how eight of them went undocumented while the engine
     grew. Checked rather than remembered.
     """
-    doc = (ROOT / "moondeck" / "uiscenario" / "RUNS.md").read_text()
+    doc = (ROOT / "moondeck" / "uiscenario" / "uiscenario.md").read_text()
     undocumented = sorted(a for a in uirun.ACTIONS if f"`{a}`" not in doc)
-    assert not undocumented, f"actions missing from RUNS.md: {undocumented}"
+    assert not undocumented, f"actions missing from uiscenario.md: {undocumented}"

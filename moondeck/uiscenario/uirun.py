@@ -17,7 +17,7 @@ drift without breaking the app. set_test_id_attribute points get_by_test_id at t
 which puts every lookup in the sanctioned test-id tier instead of raw CSS. Roles are
 not usable here: the buttons carry `title`, which contributes no accessible name.
 
-The mechanism lives here; the content lives in a run file. See moondeck/uiscenario/RUNS.md.
+The mechanism lives here; the content lives in a run file. See moondeck/uiscenario/uiscenario.md.
 """
 
 from __future__ import annotations
@@ -58,6 +58,7 @@ class Step:
     args: dict = field(default_factory=dict)
     caption: str | None = None       # video: burned in over the step
     hold: float = 0.0                # video: extra dwell after the action
+    speech: float = 0.0              # video: how long the caption takes to say, measured not guessed
     expect: dict | None = None       # test: read back over REST
     bind: str | None = None          # name the created module for later steps
 
@@ -67,6 +68,10 @@ class Run:
     name: str
     description: str = ""
     steps: list[Step] = field(default_factory=list)
+    # Controls to set over REST before the camera rolls, as {"module": ..., "control": ..., "value": ...}.
+    # A clip that needs a particular grid, brightness or mode says so here rather than spending its
+    # opening shots typing it in: the subject is what the clip is about, not the preparation for it.
+    setup: list[dict] = field(default_factory=list)
     # How the published clip is encoded. Per-run because pace is editorial: a dense
     # sequence reads fine at 2x while a clip whose POINT is live responsiveness has to
     # run at 1x. Tunable after the fact without re-recording, since publishing is a
@@ -77,7 +82,7 @@ class Run:
     #
     # `host` is for another MoonLight SURFACE on a known port (the web installer's
     # preview), not for a device: an IP written into a tracked run file is a second
-    # bench registry that goes stale the moment a board changes network, and
+    # bench registry that goes stale the moment a device changes network, and
     # moondeck.json is the one that exists. A run needing particular hardware says so
     # with `requires` instead, and the caller resolves it.
     host: str | None = None
@@ -93,6 +98,7 @@ def load_run(path: Path) -> Run:
             action=s.pop("action"),
             caption=s.pop("caption", None),
             hold=float(s.pop("hold", 0.0)),
+            speech=float(s.pop("speech", 0.0)),
             expect=s.pop("expect", None),
             bind=s.pop("as", None),
             args=s,                 # whatever the action itself takes
@@ -101,6 +107,7 @@ def load_run(path: Path) -> Run:
         name=raw.get("name", Path(path).stem),
         description=raw.get("description", ""),
         steps=steps,
+        setup=raw.get("setup", []),
         speed=float(raw.get("speed", 2.0)),
         width=int(raw.get("width", 960)),
         host=raw.get("host"),
@@ -160,7 +167,7 @@ def display_name_for(host: str, type_name: str) -> str:
     into the search box is looked up here.
     """
     # CACHED per host. /api/types builds a throwaway instance of every registered type
-    # to read its controls, so it is a heavy GET to repeat once per add on a board.
+    # to read its controls, so it is a heavy GET to repeat once per add on a device.
     if host not in _DISPLAY_NAMES:
         try:
             payload = requests.get(f"http://{host}/api/types", timeout=5).json()
@@ -186,7 +193,7 @@ def all_names(modules: list) -> set:
 def device_for(requirement: str) -> str | None:
     """A bench device that satisfies a requirement, from moondeck.json.
 
-    The registry is the one place a board's address lives, so a run says what it needs
+    The registry is the one place a device's address lives, so a run says what it needs
     ("audio": a microphone) and the address is looked up. Addresses drift between
     networks; an identity does not.
     """
@@ -210,10 +217,10 @@ def device_for(requirement: str) -> str | None:
             if ip and _answers(ip):
                 return ip
 
-    # The recorded address is STALE whenever the board moved network, which is the
+    # The recorded address is STALE whenever the device moved network, which is the
     # normal case on a bench that follows a laptop between a router and a hotspot. The
     # MAC does not move, so the local subnet is swept for it: slower than a lookup, and
-    # still the only way to find a board whose address nobody wrote down.
+    # still the only way to find a device whose address nobody wrote down.
     return _find_by_mac(wanted_macs) if wanted_macs else None
 
 
@@ -289,6 +296,9 @@ class Driver:
         # for no benefit. The poll-based waits are NOT gated by this: those are
         # correctness (the device answering), not pace.
         self.paced = screencast is not None
+        # How fast the clip is rendered, which a speech-driven hold has to account for. Set from
+        # the run in `run_all`; 1.0 until then, so a caller that never passes one is unaffected.
+        self.speed = 1.0
         self.bindings: dict[str, str] = {}
         self.failures: list[str] = []
         # Every text a watched element has shown, so a wait arriving after a brief state
@@ -300,6 +310,9 @@ class Driver:
         self._watched: set[str] = set()
         # Commands started by the run, collected by wait_process: @xref{start_process}.
         self._processes: dict[str, subprocess.Popen] = {}
+        # (offset, text) per caption, in seconds from the moment recording began.
+        self.caption_marks: list[tuple[float, str]] = []
+        self._recording_started: float | None = None
 
     VIEWPORT = {"width": 1280, "height": 720}
 
@@ -443,6 +456,11 @@ class Driver:
         """
         if not self.screencast:
             return _NullOverlay()
+        # WHEN this caption reached the screen, against the recording's own clock. A voice track
+        # laid on afterwards needs the real offset: the run file's holds say how long a step is
+        # asked to dwell, not how long the device took to do it, and the two diverge by minutes.
+        if self._recording_started is not None:
+            self.caption_marks.append((self._now() - self._recording_started, text))
         safe = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
         return self.screencast.show_overlay(
             '<div style="position:fixed;left:50%;bottom:44px;transform:translateX(-50%);'
@@ -621,7 +639,7 @@ class Driver:
                  if r.strip()}
         # ONE fetch, used for both questions. /api/types builds a throwaway instance of
         # every registered type to read its controls, so asking twice is a heavy probe
-        # run twice on a board.
+        # run twice on a device.
         try:
             payload = requests.get(f"http://{self.host}/api/types", timeout=5).json()
         except requests.RequestException:
@@ -851,6 +869,47 @@ class Driver:
         if not self.tap(btn):
             return False
         return self._pick(filename)
+
+    def new_script(self, module: str, control: str, filename: str) -> bool:
+        """Create a script by name through the control's + button, the way a person does.
+
+        The button asks for the name with a native `prompt()`, which blocks the page until it is
+        answered, so the handler is armed BEFORE the tap rather than after: a dialog that opens
+        with nobody listening stalls the run at the click that opened it.
+        The page then selects the new file and focuses the editor, so a `type_script` follows.
+        """
+        btn = self.page.locator(
+            f'button.card-btn[data-mid="{self._css(module)}"][data-key="{self._css(control)}"]'
+            '[title="New script"]')
+        if not btn.count():
+            # The + carries no data-mid in every build, so fall back to the one beside this control.
+            btn = self.page.locator('button.card-btn[title="New script"]')
+        try:
+            btn.first.wait_for(state="visible", timeout=6000)
+        except Exception:
+            self.failures.append(f"new_script: no + button for {module}.{control}")
+            return False
+
+        answered = {"done": False}
+
+        def handle(dialog):
+            answered["done"] = True
+            dialog.accept(filename)
+
+        self.page.once("dialog", handle)
+        if not self.tap(btn.first):
+            return False
+        self.page.wait_for_timeout(1200)
+        if not answered["done"]:
+            self.failures.append(f"new_script: the name prompt never opened for {filename!r}")
+            return False
+        # The editor is what the next step types into, so wait for it rather than assuming.
+        try:
+            self.page.locator("textarea.fm-editor-body").first.wait_for(state="visible", timeout=6000)
+        except Exception:
+            self.failures.append(f"new_script: {filename!r} did not open an editor")
+            return False
+        return True
 
     def type_script(self, text: str, delay: int = 45) -> bool:
         """Type into the MoonLive editor, character by character.
@@ -1241,6 +1300,7 @@ class Driver:
         "scroll_to":      lambda a: (a["selector"],),
         "hero":           lambda a: (float(a.get("seconds", 6.0)),),
         "pick_file":      lambda a: (a["module"], a["control"], a["value"]),
+        "new_script":     lambda a: (a["module"], a["control"], a["value"]),
         "type_script":    lambda a: (a["text"], int(a.get("delay", 45))),
     }
     _CREATES = {"add_module", "replace_module"}
@@ -1366,8 +1426,21 @@ class Driver:
         # the words have to still be up during it.
         if step.caption:
             with self.caption(step.caption):
+                started = self._now()
                 ok, created = self._act(a, args)
-                self._settle(step.hold)
+                # THE SPEECH IS THE CLOCK. A step carrying a `speech` duration is held until the
+                # line narrating it has finished, however long its own work took: the caption was
+                # vanishing mid-sentence and the next line starting over the one before it, because
+                # the dwell was a number picked by eye and the voice was laid on afterwards.
+                # Whatever the action already spent counts towards it, so a slow step adds nothing.
+                remaining = step.hold
+                if step.speech:
+                    # `speech` is how long the line takes to SAY, and the clip is rendered at
+                    # `speed`, so the recording has to dwell that much longer for the words to
+                    # still fit once the video is sped up.
+                    spent = self._now() - started
+                    remaining = max(step.hold, step.speech * self.speed - spent)
+                self._settle(remaining)
         else:
             ok, created = self._act(a, args)
             self._settle(step.hold)        # video-only: _settle is a no-op unpaced
@@ -1399,11 +1472,15 @@ class Driver:
     def run_all(self, run: Run) -> list[str]:
         """Perform every step. Returns the failures, empty when the run was clean.
 
+        The run's `speed` is taken first: a step held for its narration needs it, because the words
+        are spoken at natural pace and the picture is sped up afterwards.
+
         STOPS at an unresolved binding. A step naming `{ripples}` when nothing bound it
         means the step that should have created it failed, so everything after is
         chasing a module that does not exist: the run cannot recover, and continuing
         only records minutes of a take nobody can use.
         """
+        self.speed = run.speed
         for step in run.steps:
             before = len(self.failures)
             self.perform(step)
@@ -1418,7 +1495,7 @@ class Driver:
 #
 # Hand-kept lists drifted twice while this was built (the dispatcher and the test's
 # KNOWN_ACTIONS), each time surfacing as a confusing mid-run failure. The dispatcher
-# calls through this, the test derives its vocabulary from it, and RUNS.md's table is
+# calls through this, the test derives its vocabulary from it, and uiscenario.md's table is
 # checked against it. No caption duration here: a caption lives exactly as long as the
 # `with` block around its step, so there is nothing to estimate.
 ACTIONS: dict[str, str] = {
@@ -1447,6 +1524,7 @@ ACTIONS: dict[str, str] = {
     # Shot actions: a framing, and the two halves of the MoonLive editor.
     "hero":           "hero",
     "pick_file":      "pick_file",
+    "new_script":     "new_script",
     "type_script":    "type_script",
 }
 
